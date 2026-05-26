@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>OLED Koi Pond</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000000;
+    }
+    canvas#pond {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="pond"></canvas>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
