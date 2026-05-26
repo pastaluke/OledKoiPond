@@ -25,13 +25,13 @@ function _splinePoints(fish, scale) {
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  const Wx = -cosH * waistDist + cosP * steeringBend * length * 0.12;
-  const Wy = -sinH * waistDist + sinP * steeringBend * length * 0.12;
+  const Wx = -cosH * waistDist - cosP * steeringBend * length * 0.12;
+  const Wy = -sinH * waistDist - sinP * steeringBend * length * 0.12;
   const tailWigPx = length * 0.156;
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigPx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigPx;
-  const BCx = (Wx + Hx) * 0.5 + cosP * steeringBend * length * 0.22;
-  const BCy = (Wy + Hy) * 0.5 + sinP * steeringBend * length * 0.22;
+  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * 0.22;
+  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * 0.22;
 
   // Convert fish-local logical coords → physical canvas pixels
   const p = (lx, ly) => ({ px: (x + lx) * scale, py: (y + ly) * scale });
