@@ -58,15 +58,15 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length) {
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  const Wx = -cosH * waistDist + cosP * steeringBend * length * 0.12;
-  const Wy = -sinH * waistDist + sinP * steeringBend * length * 0.12;
+  const Wx = -cosH * waistDist - cosP * steeringBend * length * 0.12;
+  const Wy = -sinH * waistDist - sinP * steeringBend * length * 0.12;
 
   const tailWigglePx = length * 0.156;   // ≈ 2.5 px at length=16
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
 
-  const BCx = (Wx + Hx) * 0.5 + cosP * steeringBend * length * 0.22;
-  const BCy = (Wy + Hy) * 0.5 + sinP * steeringBend * length * 0.22;
+  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * 0.22;
+  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * 0.22;
 
   const set = new Set();
 
@@ -175,34 +175,44 @@ export class FishBase {
     }
 
     // ── 2. Look-ahead wall avoidance ─────────────────────────────────────────
+    // Instead of blending toward "opposite of wall" (which creates U-turns),
+    // turn perpendicular: pick the open axis and steer along it.
     this._avoidCooldown -= deltaMs;
     const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (speed > 0.0005) {
       const hx = this.vx / speed, hy = this.vy / speed;
-      // Look ahead ~1.5 fish-lengths (minimum 14 px)
       const lookDist = Math.max(this.length * 1.5, 14);
       const margin   = this.half + 3;
 
       const px = this.x + hx * lookDist;
       const py = this.y + hy * lookDist;
 
-      // Accumulate avoidance components for each wall the probe violates
-      let ax = 0, ay = 0;
-      if (px < margin)             ax += 1;
-      if (px > logicalW - margin)  ax -= 1;
-      if (py < margin)             ay += 1;
-      if (py > logicalH - margin)  ay -= 1;
+      let escapeX = 0, escapeY = 0;
 
-      if (ax !== 0 || ay !== 0) {
-        // Blend: 70% avoidance direction + 30% continue forward (smooth arc, not U-turn)
-        const blendX = hx * 0.3 + ax * 0.7;
-        const blendY = hy * 0.3 + ay * 0.7;
-        const blendLen = Math.sqrt(blendX * blendX + blendY * blendY) || 1;
-        const avoidSpeed = speed * 0.85;
-        this._targetVx = (blendX / blendLen) * avoidSpeed;
-        this._targetVy = (blendY / blendLen) * avoidSpeed;
-        // Hold avoidance target for 1.2 s — wander cannot override during this window
-        this._avoidCooldown = 1200;
+      const hitsH = px < margin || px > logicalW - margin;
+      const hitsV = py < margin || py > logicalH - margin;
+
+      if (hitsH && !hitsV) {
+        // Approaching left or right wall — turn north or south
+        // Whichever pole is farther away gets priority
+        escapeY = (this.y > logicalH / 2) ? -1 : 1;
+        escapeX = hx * 0.2;   // slight forward carry so the turn is an arc not 90°
+      } else if (hitsV && !hitsH) {
+        // Approaching top or bottom wall — turn east or west
+        escapeX = (this.x > logicalW / 2) ? -1 : 1;
+        escapeY = hy * 0.2;
+      } else if (hitsH && hitsV) {
+        // Corner: escape toward the center of the pond
+        escapeX = (logicalW / 2 - this.x);
+        escapeY = (logicalH / 2 - this.y);
+      }
+
+      if (escapeX !== 0 || escapeY !== 0) {
+        const eLen = Math.sqrt(escapeX * escapeX + escapeY * escapeY) || 1;
+        const avoidSpeed = Math.max(speed, maxSpeed * 0.5);
+        this._targetVx = (escapeX / eLen) * avoidSpeed;
+        this._targetVy = (escapeY / eLen) * avoidSpeed;
+        this._avoidCooldown = 1500;
       }
     }
 
