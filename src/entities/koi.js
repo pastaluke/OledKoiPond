@@ -10,66 +10,77 @@ import { SpriteAnimator } from '../sprite.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Body (columns 0–12) is identical across all frames.
- * Columns 13–17 show the tail fin wagging.
+ * Top-down aerial view koi (14 wide × 10 tall).
+ * Head is a rounded point on the LEFT (col 0).
+ * Tail fin is a wide fan on the RIGHT, spreading wider than the body.
+ * Pectoral fins are small bumps on TOP and BOTTOM near center-front.
+ * Outline only — no filled interior pixels, no eye dot.
  *
- * Frame 0 – tail swept up/left
- * Frame 1 – tail neutral
- * Frame 2 – tail swept down/right  (mirror of frame 0)
- * Frame 3 – tail neutral  (same as frame 1, gives pause at centre)
+ * Frame 0 – tail WIDE (outer tips spread far)
+ * Frame 1 – tail MEDIUM
+ * Frame 2 – tail NARROW (tips pulled in close)
+ * Frame 3 – tail MEDIUM again (dwell at medium for natural rhythm)
  *
  * loopMode 'pingpong' produces:  0 → 1 → 2 → 1 → 0 → …
  *
  * @type {import('../sprite.js').SpriteSheet}
  */
 export const KOI_SPRITE_SHEET = {
-  frameRate: 6,
+  frameRate: 5,
   loopMode: 'pingpong',
   frames: [
-    // ── Frame 0 : tail swept toward top ──────────────────────────────────
-    // col:  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17
+    // ── Frame 0 : tail WIDE (outer tips spread far) ──────────────────────
+    // col:  0  1  2  3  4  5  6  7  8  9 10 11 12 13
     [
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],  // row 0
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],  // row 1
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0],  // row 2
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],  // row 3
-      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],  // row 4
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0],  // row 5
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],  // row 6
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],  // row 7
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],  // row 0
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0],  // row 1
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],  // row 2
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  // row 3
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  // row 4
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  // row 5
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  // row 6
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],  // row 7
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0],  // row 8
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],  // row 9
     ],
-    // ── Frame 1 : tail centred ────────────────────────────────────────────
+    // ── Frame 1 : tail MEDIUM ─────────────────────────────────────────────
     [
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ],
-    // ── Frame 2 : tail swept toward bottom ───────────────────────────────
+    // ── Frame 2 : tail NARROW (tips pulled in close) ──────────────────────
     [
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ],
-    // ── Frame 3 : tail centred again (dwell at centre for natural rhythm) ─
+    // ── Frame 3 : tail MEDIUM again (dwell at medium for natural rhythm) ───
     [
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-      [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-      [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+      [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ],
   ],
 };
@@ -79,22 +90,22 @@ export const KOI_SPRITE_SHEET = {
 // ---------------------------------------------------------------------------
 
 /** Maximum speed in logical pixels per millisecond. */
-const MAX_SPEED = 0.4;
+const MAX_SPEED = 0.03;
 
 /** Minimum ms between voluntary direction changes. */
-const MIN_WANDER_INTERVAL = 3000;
+const MIN_WANDER_INTERVAL = 4000;
 
 /** Maximum ms between voluntary direction changes. */
-const MAX_WANDER_INTERVAL = 8000;
+const MAX_WANDER_INTERVAL = 12000;
 
 /** How far from the edge (logical px) before edge-avoidance kicks in. */
 const EDGE_MARGIN = 5;
 
 /** Lerp rate toward target velocity (fraction per ms). */
-const LERP_RATE = 0.001;
+const LERP_RATE = 0.0006;
 
 /** Magnitude of the edge-avoidance nudge applied each frame (px/ms per ms). */
-const TURN_FORCE = 0.002;
+const TURN_FORCE = 0.0008;
 
 /**
  * A single koi fish with wandering AI and sprite animation.
@@ -189,9 +200,10 @@ export class Koi {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns a random velocity in [-MAX_SPEED, MAX_SPEED], biased toward slow values. */
+/** Returns a random velocity biased toward slower speeds (30–100% of MAX_SPEED). */
 function _randVelocity() {
-  return (Math.random() * 2 - 1) * MAX_SPEED;
+  const speed = MAX_SPEED * (0.3 + Math.random() * 0.7);
+  return (Math.random() < 0.5 ? 1 : -1) * speed;
 }
 
 /** Returns a random wander interval between MIN and MAX. */
