@@ -122,12 +122,22 @@ export class FishBase {
   static MIN_WANDER_INTERVAL = 4000;    // ms
   static MAX_WANDER_INTERVAL = 12000;
 
+  /** Turn rate bounds (rad/s). Actual rate is linearly interpolated by fish size. */
+  static TURN_RATE_MAX = 1.2;   // fastest turn (smallest fish of this type)
+  static TURN_RATE_MIN = 0.4;   // slowest turn (largest fish of this type)
+
   constructor(grid) {
     const cls = this.constructor;
     const { logicalW, logicalH } = grid;
 
     this.length = _sampleSize(cls.SIZE_MIN, cls.SIZE_MAX, cls.SIZE_CURVE);
     this.half   = this.length / 2;
+
+    // Turn rate inversely scaled by size: small fish turn faster
+    const sizeFrac = Math.max(0, Math.min(1,
+      (this.length - cls.SIZE_MIN) / Math.max(1, cls.SIZE_MAX - cls.SIZE_MIN)
+    ));
+    this._maxTurnRate = cls.TURN_RATE_MAX - sizeFrac * (cls.TURN_RATE_MAX - cls.TURN_RATE_MIN);
 
     // Spawn within safe margins (center-based position)
     this.x = this.half + 5 + Math.random() * (logicalW - this.length - 10);
@@ -175,8 +185,9 @@ export class FishBase {
     }
 
     // ── 2. Look-ahead wall avoidance ─────────────────────────────────────────
-    // Instead of blending toward "opposite of wall" (which creates U-turns),
-    // turn perpendicular: pick the open axis and steer along it.
+    // Project the look-ahead point along the fish's *expected* future heading
+    // (accounting for current rotation via steeringBend), then bias the escape
+    // direction to continue the fish's existing turn rather than forcing a U-turn.
     this._avoidCooldown -= deltaMs;
     const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (speed > 0.0005) {
@@ -184,22 +195,38 @@ export class FishBase {
       const lookDist = Math.max(this.length * 1.5, 14);
       const margin   = this.half + 3;
 
-      const px = this.x + hx * lookDist;
-      const py = this.y + hy * lookDist;
+      // Estimate how much the heading will have rotated by the time the fish
+      // reaches the look-ahead distance.  steeringBend ≈ turnRate(rad/s) * 0.8
+      const estTurnRate = this.steeringBend / 0.8;          // rad/s
+      const lookMs      = lookDist / speed;                  // ms to cover lookDist
+      const projH       = this.heading + (estTurnRate / 1000) * lookMs;
+      const phx = Math.cos(projH), phy = Math.sin(projH);
+
+      const px = this.x + phx * lookDist;
+      const py = this.y + phy * lookDist;
 
       let escapeX = 0, escapeY = 0;
 
       const hitsH = px < margin || px > logicalW - margin;
       const hitsV = py < margin || py > logicalH - margin;
 
+      // Bias toward the fish's current turning direction so it completes the arc
+      // rather than chopping across.  right-perp of (hx,hy) = (-hy, hx).
+      const BIAS_THRESHOLD = 0.12;
+      const hasBias  = Math.abs(this.steeringBend) > BIAS_THRESHOLD;
+      const biasSign = Math.sign(this.steeringBend);
+      const perpX    = -hy * biasSign;   // right-perp X if biasSign=+1, left-perp if -1
+      const perpY    =  hx * biasSign;   // right-perp Y
+
       if (hitsH && !hitsV) {
         // Approaching left or right wall — turn north or south
-        // Whichever pole is farther away gets priority
-        escapeY = (this.y > logicalH / 2) ? -1 : 1;
+        escapeY = (hasBias && Math.abs(perpY) > 0.1) ? perpY
+                  : (this.y > logicalH / 2) ? -1 : 1;
         escapeX = hx * 0.2;   // slight forward carry so the turn is an arc not 90°
       } else if (hitsV && !hitsH) {
         // Approaching top or bottom wall — turn east or west
-        escapeX = (this.x > logicalW / 2) ? -1 : 1;
+        escapeX = (hasBias && Math.abs(perpX) > 0.1) ? perpX
+                  : (this.x > logicalW / 2) ? -1 : 1;
         escapeY = hy * 0.2;
       } else if (hitsH && hitsV) {
         // Corner: escape toward the center of the pond
@@ -237,6 +264,23 @@ export class FishBase {
     if (newSpeed > maxSpeed) {
       this.vx = (this.vx / newSpeed) * maxSpeed;
       this.vy = (this.vy / newSpeed) * maxSpeed;
+    }
+
+    // ── 6b. Max turn rate — larger fish turn more slowly ─────────────────────
+    // Clamp how far the velocity direction can deviate from the current heading
+    // in a single frame, based on _maxTurnRate (rad/s) computed at spawn time.
+    {
+      const s6 = newSpeed > maxSpeed ? maxSpeed : newSpeed;
+      if (s6 > 0.0001) {
+        const prospH   = Math.atan2(this.vy, this.vx);
+        const delta    = _angleDiff(prospH, this.heading);
+        const maxDelta = this._maxTurnRate / 1000 * deltaMs;
+        if (Math.abs(delta) > maxDelta) {
+          const clampedH = this.heading + Math.sign(delta) * maxDelta;
+          this.vx = Math.cos(clampedH) * s6;
+          this.vy = Math.sin(clampedH) * s6;
+        }
+      }
     }
 
     // ── 7. Heading + steering bend ───────────────────────────────────────────
