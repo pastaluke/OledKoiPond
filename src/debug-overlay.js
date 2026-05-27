@@ -2,10 +2,20 @@
 // Debug overlay: draws each fish's raw bezier spline as a smooth canvas line.
 // NOT part of the OLED pixel render — uses the native Canvas 2D API directly.
 // Layers on top of the main canvas via a second absolutely-positioned canvas.
-//
-// Toggle visibility: set DebugOverlay.ENABLED = true/false at any time.
 
 const WAIST_FRAC = 0.28;
+
+// Stat display colours
+const C_MIN   = 'rgba(100,160,255,0.95)';   // blue  — minimum value
+const C_CUR   = 'rgba(80,255,120,0.95)';    // green — current value
+const C_MAX   = 'rgba(255,100,100,0.95)';   // red   — maximum value
+const C_LABEL = 'rgba(200,200,200,0.80)';   // dim white — label text
+
+const STATE_COLOR = {
+  wander: 'rgba(255,210,60,0.95)',   // amber
+  avoid:  'rgba(255,90,90,0.95)',    // red
+  coast:  'rgba(100,210,255,0.95)',  // cyan
+};
 
 // Recompute all spline control points for a fish.
 // Returns { T, TC, W, BC, H } — all in physical canvas pixels.
@@ -53,8 +63,9 @@ export class DebugOverlay {
   constructor(overlayCanvas, grid) {
     this.canvas = overlayCanvas;
     this.ctx    = overlayCanvas.getContext('2d');
-    this.grid    = grid;
-    this.enabled = true;
+    this.grid         = grid;
+    this.splineEnabled = true;
+    this.statsEnabled  = false;
     this.sync();
   }
 
@@ -65,20 +76,20 @@ export class DebugOverlay {
   }
 
   /**
-   * Draw all fish splines. Call each frame after sim.draw().
+   * Draw debug visuals. Call each frame after sim.draw().
    * @param {import('./entities/fish-base.js').FishBase[]} entities
    */
   draw(entities) {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    if (!this.enabled) return;
 
     for (const fish of entities) {
-      this._drawFish(fish);
+      if (this.splineEnabled) this._drawSpline(fish);
+      if (this.statsEnabled)  this._drawFishStats(fish);
     }
   }
 
-  _drawFish(fish) {
+  _drawSpline(fish) {
     const { ctx, grid } = this;
     const pts = _splinePoints(fish, grid.scale);
     const { T, TC, W, BC, H, cosH, sinH, scale } = pts;
@@ -144,5 +155,130 @@ export class DebugOverlay {
       ctx.arc(pt.px, pt.py, 2, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  _drawFishStats(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+
+    const cls        = fish.constructor;
+    const state      = fish._moveState ?? 'coast';
+    const stateColor = STATE_COLOR[state] ?? STATE_COLOR.coast;
+
+    // Speed values in logical-px/s (multiply px/ms by 1000)
+    const spdMin = 0;
+    const spdCur = (fish._speed        ?? 0)            * 1000;
+    const spdMax = (cls.SPEED_MAX      ?? 0)            * 1000;
+
+    // Rotation values in rad/s
+    const rotMax = fish._maxTurnRate   ?? 0;
+    const rotMin = -rotMax;
+    const rotCur = (fish.steeringBend  ?? 0) / 0.8;    // estimate from bend
+
+    // Font size: at least 8px physical, scales with canvas resolution
+    const fontSize = Math.max(8, Math.floor(scale * 2));
+    ctx.font = `${fontSize}px monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'bottom';
+
+    // Three lines of text
+    const line1 = state.toUpperCase();
+    const line2_label = 'spd ';
+    const line2_min   = spdMin.toFixed(1);
+    const line2_sep1  = ' / ';
+    const line2_cur   = spdCur.toFixed(1);
+    const line2_sep2  = ' / ';
+    const line2_max   = spdMax.toFixed(1);
+    const line3_label = 'rot ';
+    const line3_min   = rotMin.toFixed(2);
+    const line3_sep1  = ' / ';
+    const line3_cur   = rotCur.toFixed(2);
+    const line3_sep2  = ' / ';
+    const line3_max   = rotMax.toFixed(2);
+
+    // Measure widths for background box
+    const fullLine2 = line2_label + line2_min + line2_sep1 + line2_cur + line2_sep2 + line2_max;
+    const fullLine3 = line3_label + line3_min + line3_sep1 + line3_cur + line3_sep2 + line3_max;
+    const maxWidth  = Math.max(
+      ctx.measureText(line1).width,
+      ctx.measureText(fullLine2).width,
+      ctx.measureText(fullLine3).width,
+    );
+
+    const lineH   = fontSize + 2;
+    const pad     = 4;
+    const boxW    = maxWidth + pad * 2;
+    const boxH    = lineH * 3 + pad * 2;
+
+    // Position: centered above the fish's topmost extent
+    const topY  = (fish.y - fish.half) * scale;
+    const boxX  = fish.x * scale - boxW / 2;
+    const boxY  = topY - boxH - 6;   // 6px gap above fish
+
+    // ── Background + border ──────────────────────────────────────────────────
+    ctx.save();
+    ctx.fillStyle   = 'rgba(0,0,0,0.65)';
+    ctx.strokeStyle = stateColor;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Line 1: state label ──────────────────────────────────────────────────
+    const cx = fish.x * scale;   // horizontal centre
+    let lineY = boxY + pad + lineH;
+
+    ctx.fillStyle = stateColor;
+    ctx.fillText(line1, cx, lineY);
+    lineY += lineH;
+
+    // ── Line 2: speed (multi-color) ──────────────────────────────────────────
+    _drawColorSegments(ctx, cx, lineY, fontSize, [
+      { text: line2_label, color: C_LABEL },
+      { text: line2_min,   color: C_MIN   },
+      { text: line2_sep1,  color: C_LABEL },
+      { text: line2_cur,   color: C_CUR   },
+      { text: line2_sep2,  color: C_LABEL },
+      { text: line2_max,   color: C_MAX   },
+    ]);
+    lineY += lineH;
+
+    // ── Line 3: rotation (multi-color) ──────────────────────────────────────
+    _drawColorSegments(ctx, cx, lineY, fontSize, [
+      { text: line3_label, color: C_LABEL },
+      { text: line3_min,   color: C_MIN   },
+      { text: line3_sep1,  color: C_LABEL },
+      { text: line3_cur,   color: C_CUR   },
+      { text: line3_sep2,  color: C_LABEL },
+      { text: line3_max,   color: C_MAX   },
+    ]);
+
+    ctx.restore();
+  }
+}
+
+/**
+ * Draw a series of text segments with individual colours, centred on cx.
+ * All segments are measured first to compute total width, then drawn left→right.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} cx   - horizontal centre (physical px)
+ * @param {number} y    - baseline y (physical px)
+ * @param {number} fontSize
+ * @param {{ text: string, color: string }[]} segments
+ */
+function _drawColorSegments(ctx, cx, y, fontSize, segments) {
+  ctx.font = `${fontSize}px monospace`;
+  ctx.textBaseline = 'bottom';
+
+  const totalW = segments.reduce((s, seg) => s + ctx.measureText(seg.text).width, 0);
+  let drawX = cx - totalW / 2;
+
+  for (const { text, color } of segments) {
+    const w = ctx.measureText(text).width;
+    ctx.fillStyle   = color;
+    ctx.textAlign   = 'left';
+    ctx.fillText(text, drawX, y);
+    drawX += w;
   }
 }

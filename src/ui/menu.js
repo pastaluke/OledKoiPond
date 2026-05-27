@@ -23,7 +23,11 @@ export function initMenu({ overlay }) {
       <div class="menu-rows">
         <label class="menu-row">
           <span>Spline</span>
-          <input type="checkbox" id="toggle-spline"${overlay.enabled ? ' checked' : ''}>
+          <input type="checkbox" id="toggle-spline"${overlay.splineEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Entity Stats</span>
+          <input type="checkbox" id="toggle-stats"${overlay.statsEnabled ? ' checked' : ''}>
         </label>
       </div>
     </details>
@@ -47,6 +51,11 @@ export function initMenu({ overlay }) {
 
   // Spline toggle
   panel.querySelector('#toggle-spline').addEventListener('change', (e) => {
-    overlay.enabled = e.target.checked;
+    overlay.splineEnabled = e.target.checked;
+  });
+
+  // Entity Stats toggle
+  panel.querySelector('#toggle-stats').addEventListener('change', (e) => {
+    overlay.statsEnabled = e.target.checked;
   });
 }
