@@ -3,7 +3,7 @@
 // Handles: physics, look-ahead wall avoidance, boids interface (stub), spline rendering.
 
 // ─── Shared physics constants ─────────────────────────────────────────────────
-const LERP_RATE  = 0.0006;   // velocity smoothing factor per ms
+const LERP_RATE  = 0.0006;   // direction smoothing factor per ms (speed is ramped separately)
 const EDGE_FORCE = 0.003;    // emergency wall backstop push (logical px/ms²)
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
@@ -126,6 +126,9 @@ export class FishBase {
   static TURN_RATE_MAX = 2.4;   // fastest turn (smallest fish of this type)
   static TURN_RATE_MIN = 0.8;   // slowest turn (largest fish of this type)
 
+  /** Max speed increase per ms (logical px/ms²). Controls thrust — not braking. */
+  static ACCEL_RATE = 0.00006;
+
   constructor(grid) {
     const cls = this.constructor;
     const { logicalW, logicalH } = grid;
@@ -152,8 +155,11 @@ export class FishBase {
     this.steeringBend = 0;
     this.swimPhase    = Math.random() * Math.PI * 2;   // stagger fish
 
-    this._targetVx       = this.vx;
-    this._targetVy       = this.vy;
+    // Speed and direction are tracked separately so acceleration can be ramped
+    // without coupling to the direction LERP (see step 4 of update()).
+    this._speed        = initSpeed;
+    this._targetSpeed  = initSpeed;
+    this._targetAngle  = initAngle;
     this._wanderCooldown = cls.MIN_WANDER_INTERVAL +
       Math.random() * (cls.MAX_WANDER_INTERVAL - cls.MIN_WANDER_INTERVAL);
     /** When > 0, wall avoidance has set the target and wander must not override it. */
@@ -176,10 +182,8 @@ export class FishBase {
     // ── 1. Wander AI ────────────────────────────────────────────────────────
     this._wanderCooldown -= deltaMs;
     if (this._wanderCooldown <= 0 && this._avoidCooldown <= 0) {
-      const speed = maxSpeed * (0.3 + Math.random() * 0.7);
-      const angle = Math.random() * Math.PI * 2;
-      this._targetVx = Math.cos(angle) * speed;
-      this._targetVy = Math.sin(angle) * speed;
+      this._targetSpeed = maxSpeed * (0.3 + Math.random() * 0.7);
+      this._targetAngle = Math.random() * Math.PI * 2;
       this._wanderCooldown = cls.MIN_WANDER_INTERVAL +
         Math.random() * (cls.MAX_WANDER_INTERVAL - cls.MIN_WANDER_INTERVAL);
     }
@@ -270,9 +274,8 @@ export class FishBase {
           cooldown   = 1500;
         }
 
-        const eLen = Math.sqrt(escapeX * escapeX + escapeY * escapeY) || 1;
-        this._targetVx = (escapeX / eLen) * avoidSpeed;
-        this._targetVy = (escapeY / eLen) * avoidSpeed;
+        this._targetAngle = Math.atan2(escapeY, escapeX);
+        this._targetSpeed = avoidSpeed;
         this._avoidCooldown = cooldown;
       }
     }
@@ -282,9 +285,39 @@ export class FishBase {
       this._applyBoids(deltaMs, neighbors, maxSpeed);
     }
 
-    // ── 4. Velocity lerp toward target ───────────────────────────────────────
-    this.vx += (this._targetVx - this.vx) * LERP_RATE * deltaMs;
-    this.vy += (this._targetVy - this.vy) * LERP_RATE * deltaMs;
+    // ── 4. Speed ramp + direction lerp ───────────────────────────────────────
+    // Sync _speed to actual velocity — captures backstop/cap effects from last frame.
+    this._speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+
+    // Ramp toward target: acceleration is capped, deceleration is free.
+    // This prevents thrust from snapping to a new wander speed in one frame
+    // while still allowing the fish to brake immediately when avoiding walls.
+    const accelCap = cls.ACCEL_RATE * deltaMs;
+    const ds       = this._targetSpeed - this._speed;
+    this._speed   += ds > accelCap ? accelCap : ds;
+
+    // Rescale velocity to the ramped speed, then nudge direction toward target.
+    // Direction and speed are fully independent: speed changes via the ramp above,
+    // direction changes via LERP here + the hard turn-rate clamp in step 6b.
+    if (this._speed > 0.0001) {
+      const curMag = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      const dirX   = curMag > 0.0001 ? this.vx / curMag : Math.cos(this._targetAngle);
+      const dirY   = curMag > 0.0001 ? this.vy / curMag : Math.sin(this._targetAngle);
+      // Lerp the unit direction toward target, then renormalize to avoid magnitude drift
+      const lf   = LERP_RATE * deltaMs;
+      const tdx  = Math.cos(this._targetAngle);
+      const tdy  = Math.sin(this._targetAngle);
+      const bx   = dirX + (tdx - dirX) * lf;
+      const by   = dirY + (tdy - dirY) * lf;
+      const bLen = Math.sqrt(bx * bx + by * by) || 1;
+      this.vx = (bx / bLen) * this._speed;
+      this.vy = (by / bLen) * this._speed;
+    } else {
+      // Nearly stopped — decay any residual velocity
+      const decay = Math.pow(0.9, deltaMs / 16);
+      this.vx    *= decay;
+      this.vy    *= decay;
+    }
 
     // ── 5. Emergency wall backstop (last resort if fish already too close) ───
     const eMargin = this.half + 1;
@@ -343,9 +376,11 @@ export class FishBase {
   /**
    * Boids behavior — to be fully implemented in a later session.
    * Subclasses may override; base implementation is a no-op stub.
-   * @param {number}    _deltaMs
+   * Implementations should write to this._targetSpeed (scalar) and
+   * this._targetAngle (radians) rather than setting vx/vy directly.
+   * @param {number}     _deltaMs
    * @param {FishBase[]} _neighbors
-   * @param {number}    _maxSpeed
+   * @param {number}     _maxSpeed
    */
   _applyBoids(_deltaMs, _neighbors, _maxSpeed) {
     // TODO: separation, alignment, cohesion — weighted by this.constructor.SCHOOL_WEIGHT
