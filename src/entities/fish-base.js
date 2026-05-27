@@ -123,8 +123,8 @@ export class FishBase {
   static MAX_WANDER_INTERVAL = 12000;
 
   /** Turn rate bounds (rad/s). Actual rate is linearly interpolated by fish size. */
-  static TURN_RATE_MAX = 1.2;   // fastest turn (smallest fish of this type)
-  static TURN_RATE_MIN = 0.4;   // slowest turn (largest fish of this type)
+  static TURN_RATE_MAX = 2.4;   // fastest turn (smallest fish of this type)
+  static TURN_RATE_MIN = 0.8;   // slowest turn (largest fish of this type)
 
   constructor(grid) {
     const cls = this.constructor;
@@ -235,11 +235,45 @@ export class FishBase {
       }
 
       if (escapeX !== 0 || escapeY !== 0) {
+        // ── Speed regulation: slow down if turning radius won't fit clearance ──
+        // Turning radius at current speed = speed(px/ms) * 1000 / turnRate(rad/s).
+        // The fish needs that much room to complete a 90° arc without hitting the wall.
+        let clearance = lookDist;   // fallback: well away from wall
+        if (hitsH) {
+          clearance = Math.min(clearance,
+            px < margin ? Math.max(0, this.x - margin)
+                        : Math.max(0, logicalW - margin - this.x)
+          );
+        }
+        if (hitsV) {
+          clearance = Math.min(clearance,
+            py < margin ? Math.max(0, this.y - margin)
+                        : Math.max(0, logicalH - margin - this.y)
+          );
+        }
+        clearance = Math.max(clearance, 0.5);
+
+        const turnRadius = speed * 1000 / this._maxTurnRate;
+        let avoidSpeed;
+        let cooldown;
+        if (turnRadius > clearance) {
+          // Too fast to turn in time — slow to the speed where radius just fits.
+          // 0.75 safety margin; floor at 15% maxSpeed so the fish never stalls.
+          const safeSpeed = Math.max(
+            (clearance * this._maxTurnRate / 1000) * 0.75,
+            maxSpeed * 0.15
+          );
+          avoidSpeed = Math.min(speed, safeSpeed);  // only ever slow, never thrust
+          cooldown   = 2500;                         // hold avoidance longer after braking
+        } else {
+          avoidSpeed = Math.max(speed, maxSpeed * 0.5);
+          cooldown   = 1500;
+        }
+
         const eLen = Math.sqrt(escapeX * escapeX + escapeY * escapeY) || 1;
-        const avoidSpeed = Math.max(speed, maxSpeed * 0.5);
         this._targetVx = (escapeX / eLen) * avoidSpeed;
         this._targetVy = (escapeY / eLen) * avoidSpeed;
-        this._avoidCooldown = 1500;
+        this._avoidCooldown = cooldown;
       }
     }
 
