@@ -69,9 +69,9 @@ export class DebugOverlay {
    * @param {import('./entities/fish-base.js').FishBase[]} entities
    */
   draw(entities) {
-    if (!this.enabled) return;
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.enabled) return;
 
     for (const fish of entities) {
       this._drawFish(fish);
