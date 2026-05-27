@@ -3,7 +3,8 @@
 // Handles: physics, look-ahead wall avoidance, boids interface (stub), spline rendering.
 
 // ─── Shared physics constants ─────────────────────────────────────────────────
-const LERP_RATE  = 0.0006;   // direction smoothing factor per ms (speed is ramped separately)
+const LERP_RATE  = 0.003;    // direction smoothing factor per ms — must stay above step-6b turn
+                             // caps so that the size-scaled clamp is the actual limiter, not this
 const EDGE_FORCE = 0.003;    // emergency wall backstop push (logical px/ms²)
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
@@ -201,8 +202,10 @@ export class FishBase {
 
       // Estimate how much the heading will have rotated by the time the fish
       // reaches the look-ahead distance.  steeringBend ≈ turnRate(rad/s) * 0.8
+      // lookMs is capped so slow-moving fish don't project the heading wildly
+      // (at 0.003 px/ms a 14px look costs 4700ms → 3+ rad of spin at steeringBend=0.5).
       const estTurnRate = this.steeringBend / 0.8;          // rad/s
-      const lookMs      = lookDist / speed;                  // ms to cover lookDist
+      const lookMs      = Math.min(lookDist / speed, 500);  // ms, capped at 500
       const projH       = this.heading + (estTurnRate / 1000) * lookMs;
       const phx = Math.cos(projH), phy = Math.sin(projH);
 
@@ -270,7 +273,7 @@ export class FishBase {
           avoidSpeed = Math.min(speed, safeSpeed);  // only ever slow, never thrust
           cooldown   = 2500;                         // hold avoidance longer after braking
         } else {
-          avoidSpeed = Math.max(speed, maxSpeed * 0.5);
+          avoidSpeed = speed;   // enough clearance — just redirect, don't change speed
           cooldown   = 1500;
         }
 
