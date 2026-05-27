@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>OLED Koi Pond</title>
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
+
     body {
       margin: 0;
       overflow: hidden;
       background: #000000;
     }
+
     canvas#pond {
       display: block;
       width: 100vw;
@@ -20,6 +20,7 @@
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
     }
+
     canvas#debug {
       position: absolute;
       top: 0;
@@ -27,6 +28,124 @@
       width: 100vw;
       height: 100vh;
       pointer-events: none;
+    }
+
+    /* ── Hamburger button ───────────────────────────────────────────────────── */
+    #menu-btn {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 200;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      cursor: pointer;
+      touch-action: manipulation;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    #menu-btn span {
+      display: block;
+      width: 15px;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.75);
+      border-radius: 1px;
+    }
+
+    #menu-btn:hover {
+      background: rgba(30, 30, 30, 0.8);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    /* ── Floating panel ─────────────────────────────────────────────────────── */
+    #menu-panel {
+      position: fixed;
+      top: 48px;
+      right: 8px;
+      z-index: 200;
+      width: 172px;
+      background: rgba(8, 8, 8, 0.93);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+      user-select: none;
+    }
+
+    /* collapsible Debug section */
+    #menu-panel details > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 2px 0 4px;
+      color: rgba(255, 255, 255, 0.38);
+      font-size: 9.5px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    #menu-panel details > summary::-webkit-details-marker { display: none; }
+    #menu-panel details > summary::before {
+      content: '▶ ';
+      font-size: 7px;
+      vertical-align: 1px;
+    }
+    #menu-panel details[open] > summary::before { content: '▼ '; }
+
+    /* rows inside a section */
+    .menu-rows {
+      padding: 2px 0 2px 2px;
+    }
+
+    .menu-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 0;
+      cursor: pointer;
+      gap: 8px;
+    }
+
+    /* pill toggle switch */
+    .menu-row input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      flex-shrink: 0;
+      width: 26px;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 7px;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s;
+    }
+
+    .menu-row input[type="checkbox"]::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.55);
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    .menu-row input[type="checkbox"]:checked {
+      background: rgba(0, 200, 255, 0.35);
+    }
+
+    .menu-row input[type="checkbox"]:checked::after {
+      transform: translateX(12px);
+      background: rgb(0, 210, 255);
     }
   </style>
 </head>

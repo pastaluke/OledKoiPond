@@ -5,9 +5,6 @@
 //
 // Toggle visibility: set DebugOverlay.ENABLED = true/false at any time.
 
-/** Set to false to hide the overlay without removing it from code. */
-const ENABLED = true;
-
 const WAIST_FRAC = 0.28;
 
 // Recompute all spline control points for a fish.
@@ -56,7 +53,8 @@ export class DebugOverlay {
   constructor(overlayCanvas, grid) {
     this.canvas = overlayCanvas;
     this.ctx    = overlayCanvas.getContext('2d');
-    this.grid   = grid;
+    this.grid    = grid;
+    this.enabled = true;
     this.sync();
   }
 
@@ -71,7 +69,7 @@ export class DebugOverlay {
    * @param {import('./entities/fish-base.js').FishBase[]} entities
    */
   draw(entities) {
-    if (!ENABLED) return;
+    if (!this.enabled) return;
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 

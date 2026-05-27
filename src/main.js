@@ -7,6 +7,7 @@ import { Grid         } from './grid.js';
 import { Simulation   } from './simulation.js';
 import { Koi          } from './entities/koi.js';
 import { DebugOverlay } from './debug-overlay.js';
+import { initMenu     } from './ui/menu.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -18,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const grid    = new Grid(canvas);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
+  initMenu({ overlay });
 
   // ── Spawn koi ────────────────────────────────────────────────────────────
   for (let i = 0; i < KOI_COUNT; i++) sim.add(new Koi(grid));
