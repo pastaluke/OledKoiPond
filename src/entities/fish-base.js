@@ -165,6 +165,8 @@ export class FishBase {
       Math.random() * (cls.MAX_WANDER_INTERVAL - cls.MIN_WANDER_INTERVAL);
     /** When > 0, wall avoidance has set the target and wander must not override it. */
     this._avoidCooldown  = 0;
+    /** Current movement state — 'wander' | 'avoid' | 'coast'. Updated each frame. */
+    this._moveState      = 'coast';
 
     this.color = cls.COLORS[Math.floor(Math.random() * cls.COLORS.length)];
   }
@@ -180,6 +182,9 @@ export class FishBase {
     const { logicalW, logicalH } = grid;
     const maxSpeed = cls.SPEED_MAX;
 
+    // ── 0. Derive movement state (wander/avoid steps below may override) ────
+    this._moveState = this._avoidCooldown > 0 ? 'avoid' : 'coast';
+
     // ── 1. Wander AI ────────────────────────────────────────────────────────
     this._wanderCooldown -= deltaMs;
     if (this._wanderCooldown <= 0 && this._avoidCooldown <= 0) {
@@ -187,6 +192,7 @@ export class FishBase {
       this._targetAngle = Math.random() * Math.PI * 2;
       this._wanderCooldown = cls.MIN_WANDER_INTERVAL +
         Math.random() * (cls.MAX_WANDER_INTERVAL - cls.MIN_WANDER_INTERVAL);
+      this._moveState = 'wander';
     }
 
     // ── 2. Look-ahead wall avoidance ─────────────────────────────────────────
@@ -280,6 +286,7 @@ export class FishBase {
         this._targetAngle = Math.atan2(escapeY, escapeX);
         this._targetSpeed = avoidSpeed;
         this._avoidCooldown = cooldown;
+        this._moveState = 'avoid';
       }
     }
 
