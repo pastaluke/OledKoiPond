@@ -361,6 +361,7 @@ ColorConfig {
 - Custom entity authoring tool (in-app pixel editor)
 - Google Play wrapper
 - Steam / Electron wrapper
+- **Fish naming & name-triggered Easter eggs** — Players can name individual fish. Certain names trigger hidden effects or behaviors, like cheat codes in old RTS games. The list of special names and what they do is TBD.
 - **Ripple-driven pixel effects** — Ripple layer values influence the pixels beneath them on the entity render layer. Base effect: a ripple passing over a fish outline brightens that pixel slightly. Extended effect: a special ripple type (trigger TBD) causes fish outline pixels to shift to rainbow colors as the wave passes over them.
 - **Ambient clock** — Optional display of the current time in a thematically consistent style. Slowly drifts around the pond to prevent screen burn-in. Fish occasionally stop and look at it for a moment. When a digit changes, that digit emits a ripple. 
 - **Fish socializing** — A fish can enter a "socialize" state where it picks another fish and swims toward it. The target fish notices and turns to face the approaching fish. Once close, one of several outcomes plays out: fish A follows fish B for a while; fish B follows fish A for a while; the two briefly touch noses ("kiss") then part ways. More outcomes TBD.
