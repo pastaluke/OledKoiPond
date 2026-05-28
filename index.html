@@ -147,6 +147,26 @@
       transform: translateX(12px);
       background: rgb(0, 210, 255);
     }
+
+    /* full-width action button (e.g. Fullscreen) */
+    button.menu-action {
+      width: 100%;
+      padding: 5px 0;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      color: rgba(255, 255, 255, 0.7);
+      font-family: inherit;
+      font-size: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+
+    button.menu-action:active {
+      background: rgba(255, 255, 255, 0.14);
+    }
   </style>
 </head>
 <body>

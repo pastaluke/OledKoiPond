@@ -18,6 +18,9 @@ export function initMenu({ overlay }) {
   panel.setAttribute('aria-label', 'Settings panel');
   panel.hidden = true;
   panel.innerHTML = `
+    <div class="menu-rows">
+      <button class="menu-row menu-action" id="btn-fullscreen">Fullscreen</button>
+    </div>
     <details open>
       <summary>Debug</summary>
       <div class="menu-rows">
@@ -48,6 +51,23 @@ export function initMenu({ overlay }) {
       panel.hidden = true;
     }
   });
+
+  // Fullscreen
+  const fsBtn = panel.querySelector('#btn-fullscreen');
+  const updateFsLabel = () => {
+    fsBtn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Fullscreen';
+  };
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      const el = document.documentElement;
+      (el.requestFullscreen ?? el.webkitRequestFullscreen)?.call(el);
+    }
+    panel.hidden = true;
+  });
+  document.addEventListener('fullscreenchange', updateFsLabel);
+  document.addEventListener('webkitfullscreenchange', updateFsLabel);
 
   // Spline toggle
   panel.querySelector('#toggle-spline').addEventListener('change', (e) => {
