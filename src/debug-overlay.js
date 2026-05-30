@@ -12,9 +12,8 @@ const C_MAX   = 'rgba(255,100,100,0.95)';   // red   — maximum value
 const C_LABEL = 'rgba(200,200,200,0.80)';   // dim white — label text
 
 const STATE_COLOR = {
-  wander: 'rgba(255,210,60,0.95)',   // amber
-  avoid:  'rgba(255,90,90,0.95)',    // red
-  coast:  'rgba(100,210,255,0.95)',  // cyan
+  swim:      'rgba(100,210,255,0.95)',  // cyan  — baseline ambient swimming
+  socialize: 'rgba(255,210,60,0.95)',   // amber — (future triggered state)
 };
 
 // Recompute all spline control points for a fish.
@@ -162,16 +161,17 @@ export class DebugOverlay {
     const scale = grid.scale;
 
     const cls        = fish.constructor;
-    const state      = fish._moveState ?? 'coast';
-    const stateColor = STATE_COLOR[state] ?? STATE_COLOR.coast;
+    const state      = fish.state ?? 'swim';
+    const stateColor = STATE_COLOR[state] ?? STATE_COLOR.swim;
 
     // Speed values in logical-px/s (multiply px/ms by 1000)
     const spdMin = 0;
-    const spdCur = (fish._speed        ?? 0)            * 1000;
-    const spdMax = (cls.SPEED_MAX      ?? 0)            * 1000;
+    const spdCur = Math.hypot(fish.vx ?? 0, fish.vy ?? 0)  * 1000;
+    const spdMax = (fish.maxSpeed ?? cls.SPEED_MAX ?? 0)   * 1000;
 
-    // Rotation values in rad/s
-    const rotMax = fish._maxTurnRate   ?? 0;
+    // Rotation values in rad/s. steeringBend clamps to ±1.2 and ≈ turnRate*0.8,
+    // so the displayed range is ±1.5 rad/s.
+    const rotMax = 1.5;
     const rotMin = -rotMax;
     const rotCur = (fish.steeringBend  ?? 0) / 0.8;    // estimate from bend
 

@@ -11,12 +11,9 @@ export class Koi extends FishBase {
   static SIZE_CURVE = 'normal';   // most koi are mid-sized; very large/small are rare
 
   static SPEED_MAX  = 0.03;       // logical px/ms
-  static SCHOOL_WEIGHT     = 0.4; // loose schooling tendency
+  static SCHOOL_WEIGHT     = 0.4; // loose schooling tendency (scales align + cohesion)
   static PERCEPTION_RADIUS = 24;  // px
   static SEPARATION_DIST   = 10;  // px
-
-  static MIN_WANDER_INTERVAL = 4000;
-  static MAX_WANDER_INTERVAL = 12000;
 
   static COLORS = [
     { r: 255, g: 140, b: 0   },   // orange
