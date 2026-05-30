@@ -2,11 +2,13 @@
 // Hamburger menu UI — small floating panel, not full-screen.
 
 import {
-  MOVEMENT_PARAMS, snapshot, applyValues,
+  MOVEMENT_PARAMS, snapshot, applyValues, defaultRanges,
   loadPersisted, savePersisted, toCodeSnippet,
 } from '../movement/tuning.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
+const LONG_PRESS_MS = 450;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 /**
  * Initialise the hamburger menu and wire up controls.
@@ -17,8 +19,11 @@ const FISH_MIN = 0, FISH_MAX = 40;
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
 export function initMenu({ overlay, sim, grid, FishClass }) {
-  // Capture pristine defaults BEFORE any persisted tuning is applied (for Reset).
+  // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
+  // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
+  const ranges = defaultRanges();
+  const fmt = (v, d) => Number(v).toFixed(d);
 
   // ── Hamburger button ────────────────────────────────────────────────────────
   const btn = document.createElement('button');
@@ -83,87 +88,175 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   }
   function hideInfo() { infoPop.hidden = true; infoAnchor = null; }
 
-  // Wire an (i) icon inside `row` to toggle the popup with `text`.
   function wireInfoIcon(row, text) {
     const icon = row.querySelector('.info-icon');
-    if (!icon) return;
-    icon.addEventListener('click', (e) => { e.stopPropagation(); showInfo(text, icon); });
+    if (icon) icon.addEventListener('click', (e) => { e.stopPropagation(); showInfo(text, icon); });
   }
 
-  // Close the popup on any click that isn't an (i) icon or the popup itself.
   document.addEventListener('click', (e) => {
     if (!infoPop.hidden && !e.target.closest('.info-icon') && !infoPop.contains(e.target)) hideInfo();
   });
 
   // ── Persistence ─────────────────────────────────────────────────────────────
-  const fmt = (v, d) => Number(v).toFixed(d);
-  const save = () => savePersisted({ params: snapshot(FishClass), fishCount: sim.entities.length });
+  const save = () => savePersisted({ params: snapshot(FishClass), ranges, fishCount: sim.entities.length });
 
   function setFishCount(n) {
-    n = Math.max(FISH_MIN, Math.min(FISH_MAX, Math.round(n)));
+    n = clamp(Math.round(n), FISH_MIN, FISH_MAX);
     while (sim.entities.length < n) sim.add(new FishClass(grid));
     while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
   }
 
-  // Restore any previously persisted tuning before building the controls.
+  // Restore persisted tuning (params, ranges, fish count) before building controls.
   const persisted = loadPersisted();
   if (persisted) {
+    if (persisted.ranges) {
+      for (const p of MOVEMENT_PARAMS) {
+        const r = persisted.ranges[p.key];
+        if (r && Number.isFinite(r.min) && Number.isFinite(r.max)) {
+          const min = clamp(r.min, p.floor, p.ceil);
+          const max = clamp(Math.max(r.max, min + p.step), p.floor, p.ceil);
+          ranges[p.key] = { min, max };
+        }
+      }
+    }
     applyValues(FishClass, persisted.params);
+    for (const p of MOVEMENT_PARAMS) {
+      FishClass[p.key] = clamp(FishClass[p.key], ranges[p.key].min, ranges[p.key].max);
+    }
     if (Number.isFinite(persisted.fishCount)) setFishCount(persisted.fishCount);
   }
 
-  // ── Movement sliders (built from descriptors) ────────────────────────────────
-  const sliderHost = panel.querySelector('#movement-sliders');
-  const controls = {};
+  // ── Slider row builder ───────────────────────────────────────────────────────
+  // cfg: { label, infoText, decimals, valueStep, coarse, step, hasBounds,
+  //        getVal, setVal, getMin, getMax, setMin, setMax }
+  function makeRow(cfg) {
+    const { label, infoText, decimals, valueStep, coarse, hasBounds,
+            getVal, setVal, getMin, getMax, setMin, setMax } = cfg;
 
-  for (const p of MOVEMENT_PARAMS) {
     const row = document.createElement('div');
     row.className = 'slider-row';
-    const info = p.desc ? `${p.label}: ${p.desc}` : '';
-    if (info) row.title = info;
+    if (infoText) row.title = infoText;
     row.innerHTML = `
-      <span class="slider-head">
-        <span class="slider-label">${p.label}${p.desc ? `<button type="button" class="info-icon" aria-label="About ${p.label}">i</button>` : ''}</span>
+      ${hasBounds ? `
+      <div class="bound-controls">
+        <div class="btn-group">
+          <button type="button" class="step-btn" data-act="lo-dec" title="Lower the minimum">−</button>
+          <button type="button" class="bound-mid" data-act="lo-cap" title="Lower bound — shift-click or long-press to set it to the knob's value">[</button>
+          <button type="button" class="step-btn" data-act="lo-inc" title="Raise the minimum">+</button>
+        </div>
+        <div class="btn-group">
+          <button type="button" class="step-btn" data-act="hi-dec" title="Lower the maximum">−</button>
+          <button type="button" class="bound-mid" data-act="hi-cap" title="Upper bound — shift-click or long-press to set it to the knob's value">]</button>
+          <button type="button" class="step-btn" data-act="hi-inc" title="Raise the maximum">+</button>
+        </div>
+      </div>` : ''}
+      <div class="value-controls">
+        <span class="slider-label">${label}${infoText ? `<button type="button" class="info-icon" aria-label="About ${label}">i</button>` : ''}</span>
         <span class="slider-val"></span>
-      </span>
-      <input type="range" min="${p.min}" max="${p.max}" step="${p.step}">
+        <div class="btn-group knob-group">
+          <button type="button" class="step-btn" data-act="v-dec" title="Decrease value">−</button>
+          <span class="knob-mid" aria-hidden="true"></span>
+          <button type="button" class="step-btn" data-act="v-inc" title="Increase value">+</button>
+        </div>
+      </div>
+      <div class="slider-track">
+        ${hasBounds ? '<span class="range-end range-min"></span>' : ''}
+        <input type="range">
+        ${hasBounds ? '<span class="range-end range-max"></span>' : ''}
+      </div>
     `;
-    if (info) wireInfoIcon(row, info);
-    const input = row.querySelector('input');
-    const out   = row.querySelector('.slider-val');
-    const sync  = () => { input.value = FishClass[p.key]; out.textContent = fmt(FishClass[p.key], p.decimals); };
-    input.addEventListener('input', () => {
-      FishClass[p.key] = parseFloat(input.value);
-      out.textContent = fmt(FishClass[p.key], p.decimals);
-      save();
+
+    const input  = row.querySelector('input');
+    const valOut = row.querySelector('.slider-val');
+    const minOut = row.querySelector('.range-min');
+    const maxOut = row.querySelector('.range-max');
+
+    function sync() {
+      input.min = getMin();
+      input.max = getMax();
+      input.step = valueStep;
+      input.value = getVal();
+      valOut.textContent = fmt(getVal(), decimals);
+      if (minOut) minOut.textContent = fmt(getMin(), decimals);
+      if (maxOut) maxOut.textContent = fmt(getMax(), decimals);
+    }
+
+    input.addEventListener('input', () => { setVal(parseFloat(input.value)); sync(); save(); });
+    if (infoText) wireInfoIcon(row, infoText);
+
+    const actions = {
+      'v-dec': () => setVal(getVal() - valueStep),
+      'v-inc': () => setVal(getVal() + valueStep),
+      'lo-dec': () => setMin(getMin() - coarse),
+      'lo-inc': () => setMin(getMin() + coarse),
+      'hi-dec': () => setMax(getMax() - coarse),
+      'hi-inc': () => setMax(getMax() + coarse),
+    };
+    row.querySelectorAll('.step-btn').forEach((b) => {
+      b.addEventListener('click', () => { const a = actions[b.dataset.act]; if (a) { a(); sync(); save(); } });
     });
-    controls[p.key] = sync;
+
+    // Capture the knob value as a bound: shift-click OR long-press the [ / ] button.
+    row.querySelectorAll('.bound-mid').forEach((b) => {
+      const capture = () => {
+        if (b.dataset.act === 'lo-cap') setMin(getVal()); else setMax(getVal());
+        sync(); save();
+      };
+      b.addEventListener('click', (e) => { if (e.shiftKey) capture(); });
+      let timer = null;
+      const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+      b.addEventListener('pointerdown', () => { timer = setTimeout(() => { timer = null; capture(); }, LONG_PRESS_MS); });
+      b.addEventListener('pointerup', cancel);
+      b.addEventListener('pointerleave', cancel);
+      b.addEventListener('pointercancel', cancel);
+    });
+
     sync();
+    return { row, sync };
+  }
+
+  // ── Build movement sliders ────────────────────────────────────────────────────
+  const sliderHost = panel.querySelector('#movement-sliders');
+  const rowSyncs = {};
+
+  for (const p of MOVEMENT_PARAMS) {
+    const rng = ranges[p.key];
+    const { row, sync } = makeRow({
+      label: p.label,
+      infoText: `${p.label}: ${p.desc}`,
+      decimals: p.decimals,
+      valueStep: p.step,
+      coarse: p.coarse,
+      hasBounds: true,
+      getVal: () => FishClass[p.key],
+      setVal: (v) => { FishClass[p.key] = clamp(v, rng.min, rng.max); },
+      getMin: () => rng.min,
+      getMax: () => rng.max,
+      setMin: (v) => {
+        rng.min = clamp(v, p.floor, rng.max - p.step);
+        FishClass[p.key] = clamp(FishClass[p.key], rng.min, rng.max);
+      },
+      setMax: (v) => {
+        rng.max = clamp(v, rng.min + p.step, p.ceil);
+        FishClass[p.key] = clamp(FishClass[p.key], rng.min, rng.max);
+      },
+    });
+    rowSyncs[p.key] = sync;
     sliderHost.appendChild(row);
   }
 
-  // ── Fish count slider (operates on the sim, not a class static) ──────────────
-  const countInfo = 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.';
-  const countRow = document.createElement('div');
-  countRow.className = 'slider-row';
-  countRow.title = countInfo;
-  countRow.innerHTML = `
-    <span class="slider-head">
-      <span class="slider-label">Fish count<button type="button" class="info-icon" aria-label="About Fish count">i</button></span>
-      <span class="slider-val"></span>
-    </span>
-    <input type="range" min="${FISH_MIN}" max="${FISH_MAX}" step="1">
-  `;
-  wireInfoIcon(countRow, countInfo);
-  const countInput = countRow.querySelector('input');
-  const countOut   = countRow.querySelector('.slider-val');
-  const syncCount  = () => { countInput.value = sim.entities.length; countOut.textContent = sim.entities.length; };
-  countInput.addEventListener('input', () => {
-    setFishCount(parseFloat(countInput.value));
-    countOut.textContent = sim.entities.length;
-    save();
+  // Fish count — value control only (fixed range, no bound brackets).
+  const { row: countRow } = makeRow({
+    label: 'Fish count',
+    infoText: 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.',
+    decimals: 0,
+    valueStep: 1,
+    hasBounds: false,
+    getVal: () => sim.entities.length,
+    setVal: (v) => setFishCount(v),
+    getMin: () => FISH_MIN,
+    getMax: () => FISH_MAX,
   });
-  syncCount();
   sliderHost.appendChild(countRow);
 
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
@@ -179,7 +272,13 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
 
   panel.querySelector('#btn-reset-tuning').addEventListener('click', () => {
     applyValues(FishClass, defaults);
-    for (const p of MOVEMENT_PARAMS) controls[p.key]();
+    const dr = defaultRanges();
+    for (const p of MOVEMENT_PARAMS) {
+      ranges[p.key].min = dr[p.key].min;
+      ranges[p.key].max = dr[p.key].max;
+      FishClass[p.key] = clamp(FishClass[p.key], ranges[p.key].min, ranges[p.key].max);
+      rowSyncs[p.key]();
+    }
     save();
   });
 
