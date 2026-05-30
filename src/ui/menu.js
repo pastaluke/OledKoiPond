@@ -61,6 +61,30 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
           <span>Entity Stats</span>
           <input type="checkbox" id="toggle-stats"${overlay.statsEnabled ? ' checked' : ''}>
         </label>
+        <label class="menu-row">
+          <span>Perception Radius</span>
+          <input type="checkbox" id="toggle-perception"${overlay.perceptionEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Separation Radius</span>
+          <input type="checkbox" id="toggle-separation"${overlay.separationEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Edge Margin</span>
+          <input type="checkbox" id="toggle-edge"${overlay.edgeEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Neighbor Links</span>
+          <input type="checkbox" id="toggle-neighbors"${overlay.neighborsEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Velocity Vector</span>
+          <input type="checkbox" id="toggle-velocity"${overlay.velocityEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Wander Target</span>
+          <input type="checkbox" id="toggle-wander"${overlay.wanderEnabled ? ' checked' : ''}>
+        </label>
       </div>
     </details>
   `;
@@ -323,5 +347,35 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   // Entity Stats toggle
   panel.querySelector('#toggle-stats').addEventListener('change', (e) => {
     overlay.statsEnabled = e.target.checked;
+  });
+
+  // Perception Radius toggle
+  panel.querySelector('#toggle-perception').addEventListener('change', (e) => {
+    overlay.perceptionEnabled = e.target.checked;
+  });
+
+  // Separation Radius toggle
+  panel.querySelector('#toggle-separation').addEventListener('change', (e) => {
+    overlay.separationEnabled = e.target.checked;
+  });
+
+  // Edge Margin toggle
+  panel.querySelector('#toggle-edge').addEventListener('change', (e) => {
+    overlay.edgeEnabled = e.target.checked;
+  });
+
+  // Neighbor Links toggle
+  panel.querySelector('#toggle-neighbors').addEventListener('change', (e) => {
+    overlay.neighborsEnabled = e.target.checked;
+  });
+
+  // Velocity Vector toggle
+  panel.querySelector('#toggle-velocity').addEventListener('change', (e) => {
+    overlay.velocityEnabled = e.target.checked;
+  });
+
+  // Wander Target toggle
+  panel.querySelector('#toggle-wander').addEventListener('change', (e) => {
+    overlay.wanderEnabled = e.target.checked;
   });
 }

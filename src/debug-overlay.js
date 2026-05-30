@@ -3,7 +3,17 @@
 // NOT part of the OLED pixel render — uses the native Canvas 2D API directly.
 // Layers on top of the main canvas via a second absolutely-positioned canvas.
 
+import { EDGE_MARGIN } from './movement/behaviors.js';
+
 const WAIST_FRAC = 0.28;
+
+// ─── Per-visualization colours (distinct so multiple layers stay separable) ────
+const C_PERCEPTION = 'rgba(120, 200, 255, 0.35)';  // light blue — perception radius
+const C_SEPARATION = 'rgba(255, 90, 90, 0.45)';    // red        — separation radius
+const C_EDGE       = 'rgba(255, 160, 40, 0.55)';   // orange     — edge / wall margin
+const C_NEIGHBOR   = 'rgba(90, 255, 160, 0.45)';   // green      — neighbor links
+const C_VELOCITY   = 'rgba(255, 0, 200, 0.85)';    // magenta    — velocity vector
+const C_WANDER     = 'rgba(200, 120, 255, 0.75)';  // purple     — wander target
 
 // Stat display colours
 const C_MIN   = 'rgba(100,160,255,0.95)';   // blue  — minimum value
@@ -65,6 +75,13 @@ export class DebugOverlay {
     this.grid         = grid;
     this.splineEnabled = true;
     this.statsEnabled  = false;
+    // New per-visualization toggles (all default OFF).
+    this.perceptionEnabled = false;  // PERCEPTION_RADIUS circle
+    this.separationEnabled = false;  // SEPARATION_DIST circle
+    this.edgeEnabled       = false;  // wall-avoidance margin zone
+    this.neighborsEnabled  = false;  // links to perceived neighbors
+    this.velocityEnabled   = false;  // velocity vector arrow
+    this.wanderEnabled     = false;  // projected wander circle + target
     this.sync();
   }
 
@@ -82,10 +99,197 @@ export class DebugOverlay {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+    // Pond-wide wall-avoidance band (drawn once, not per fish).
+    if (this.edgeEnabled) this._drawEdgeZone();
+
+    // Neighbor links drawn first so per-fish circles/arrows sit on top.
+    if (this.neighborsEnabled) this._drawNeighborLinks(entities);
+
     for (const fish of entities) {
-      if (this.splineEnabled) this._drawSpline(fish);
-      if (this.statsEnabled)  this._drawFishStats(fish);
+      if (this.perceptionEnabled) this._drawPerception(fish);
+      if (this.separationEnabled) this._drawSeparation(fish);
+      if (this.edgeEnabled)       this._drawFishMargin(fish);
+      if (this.wanderEnabled)     this._drawWander(fish);
+      if (this.velocityEnabled)   this._drawVelocity(fish);
+      if (this.splineEnabled)     this._drawSpline(fish);
+      if (this.statsEnabled)      this._drawFishStats(fish);
     }
+  }
+
+  // ─── Perception radius — circle within which a fish senses others ────────────
+  _drawPerception(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    const r = (fish.constructor.PERCEPTION_RADIUS ?? 0) * scale;
+    if (r <= 0) return;
+    ctx.save();
+    ctx.strokeStyle = C_PERCEPTION;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(fish.x * scale, fish.y * scale, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ─── Separation radius — smaller circle where fish push apart ────────────────
+  _drawSeparation(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    const r = (fish.constructor.SEPARATION_DIST ?? 0) * scale;
+    if (r <= 0) return;
+    ctx.save();
+    ctx.strokeStyle = C_SEPARATION;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    ctx.arc(fish.x * scale, fish.y * scale, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ─── Edge zone — inset rectangle at the base EDGE_MARGIN from pond walls ──────
+  // Inside this band the `edges` containment force engages. The effective per-fish
+  // margin is max(EDGE_MARGIN, fish.half + 2) — see _drawFishMargin for that ring.
+  _drawEdgeZone() {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    const m = EDGE_MARGIN * scale;
+    const w = grid.logicalW * scale;
+    const h = grid.logicalH * scale;
+    ctx.save();
+    ctx.strokeStyle = C_EDGE;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.strokeRect(m, m, w - 2 * m, h - 2 * m);
+    ctx.restore();
+  }
+
+  // ─── Per-fish effective edge margin — ring at max(EDGE_MARGIN, half+2) ────────
+  // Highlighted brighter when the fish is actually inside the band (force active).
+  _drawFishMargin(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    const m = Math.max(EDGE_MARGIN, fish.half + 2);
+    const inZone =
+      fish.x < m || fish.x > grid.logicalW - m ||
+      fish.y < m || fish.y > grid.logicalH - m;
+    ctx.save();
+    ctx.strokeStyle = C_EDGE;
+    ctx.globalAlpha = inZone ? 1 : 0.5;
+    ctx.lineWidth = inZone ? 1.5 : 0.8;
+    ctx.beginPath();
+    ctx.arc(fish.x * scale, fish.y * scale, m * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ─── Neighbor links — lines to fish within PERCEPTION_RADIUS ─────────────────
+  // Replicates the Simulation's O(n²) query so the links match the real neighbor
+  // set driving alignment/cohesion. Each unordered pair drawn once.
+  _drawNeighborLinks(entities) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    ctx.save();
+    ctx.strokeStyle = C_NEIGHBOR;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (let i = 0; i < entities.length; i++) {
+      const a = entities[i];
+      const rSq = (a.constructor.PERCEPTION_RADIUS ?? 0) ** 2;
+      if (rSq <= 0) continue;
+      for (let j = i + 1; j < entities.length; j++) {
+        const b = entities[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        if (dx * dx + dy * dy <= rSq) {
+          ctx.moveTo(a.x * scale, a.y * scale);
+          ctx.lineTo(b.x * scale, b.y * scale);
+        }
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ─── Velocity vector — arrow along velocity, length scaled to speed ──────────
+  // Length is normalized against the fish's maxSpeed so a full-speed arrow is a
+  // fixed visual length; shorter arrows = slower fish. Shows heading + overshoot.
+  _drawVelocity(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+    const sp = Math.hypot(fish.vx ?? 0, fish.vy ?? 0);
+    if (sp < 1e-6) return;
+    const maxSp = fish.maxSpeed || sp;
+    const frac = Math.min(1, sp / maxSp);
+    const visLen = (fish.length * 1.5) * frac * scale;   // px at full speed ≈ 1.5 body lengths
+    const ux = fish.vx / sp, uy = fish.vy / sp;
+    const x0 = fish.x * scale, y0 = fish.y * scale;
+    const x1 = x0 + ux * visLen, y1 = y0 + uy * visLen;
+
+    ctx.save();
+    ctx.strokeStyle = C_VELOCITY;
+    ctx.fillStyle = C_VELOCITY;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    // Arrowhead
+    const ang = Math.atan2(uy, ux);
+    const ah = Math.max(3, visLen * 0.25);
+    const aw = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - ah * Math.cos(ang - aw), y1 - ah * Math.sin(ang - aw));
+    ctx.lineTo(x1 - ah * Math.cos(ang + aw), y1 - ah * Math.sin(ang + aw));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ─── Wander target — projected circle + current target point ─────────────────
+  // Mirrors BEHAVIORS.wander: circle of radius length*0.6 projected length*1.2
+  // ahead along the current direction of travel; target rides _wanderTheta.
+  _drawWander(fish) {
+    const { ctx, grid } = this;
+    const scale = grid.scale;
+
+    const sp = Math.hypot(fish.vx ?? 0, fish.vy ?? 0);
+    const hx = sp > 1e-6 ? fish.vx / sp : Math.cos(fish.heading);
+    const hy = sp > 1e-6 ? fish.vy / sp : Math.sin(fish.heading);
+
+    const dist   = fish.length * 1.2;
+    const radius = fish.length * 0.6;
+    const cx = fish.x + hx * dist;
+    const cy = fish.y + hy * dist;
+
+    const heading = Math.atan2(hy, hx);
+    const theta = (fish._wanderTheta ?? 0) + heading;
+    const tx = cx + Math.cos(theta) * radius;
+    const ty = cy + Math.sin(theta) * radius;
+
+    const cpx = cx * scale, cpy = cy * scale;
+    const tpx = tx * scale, tpy = ty * scale;
+
+    ctx.save();
+    ctx.strokeStyle = C_WANDER;
+    ctx.lineWidth = 0.8;
+    // Stalk from fish to circle center
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(fish.x * scale, fish.y * scale);
+    ctx.lineTo(cpx, cpy);
+    ctx.stroke();
+    // Wander circle
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(cpx, cpy, radius * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    // Target point
+    ctx.fillStyle = C_WANDER;
+    ctx.beginPath();
+    ctx.arc(tpx, tpy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   _drawSpline(fish) {

@@ -14,7 +14,8 @@
 import { Vec2 } from './vec2.js';
 
 const WANDER_RATE = 0.018;   // rad per ms — how fast the wander angle drifts
-const EDGE_MARGIN = 14;      // logical px from a wall where steer-away kicks in
+// Exported so the debug overlay can draw the wall-avoidance zone accurately.
+export const EDGE_MARGIN = 14;      // logical px from a wall where steer-away kicks in
 
 // ─── Shared steering primitives ───────────────────────────────────────────────
 
