@@ -126,14 +126,14 @@ export class FishBase {
   static SEPARATION_WEIGHT = 1.6;
   static ALIGNMENT_WEIGHT  = 1.0;   // effective weight = this × SCHOOL_WEIGHT
   static COHESION_WEIGHT   = 0.8;   // effective weight = this × SCHOOL_WEIGHT
-  static WANDER_WEIGHT     = 0.5;
-  static EDGE_WEIGHT       = 2.2;
+  static WANDER_WEIGHT     = 0.45;
+  static EDGE_WEIGHT       = 2.6;   // ≥1.5× separation so containment dominates near walls
 
   /** Max steering force (logical px/ms²), interpolated by size: small fish are
    *  nimbler (higher force → tighter turns), large fish turn lazily. Low relative
    *  to SPEED_MAX → smooth, fish-like arcs rather than snappy banking. */
-  static MAX_FORCE_MAX = 0.00028;   // smallest fish of this type
-  static MAX_FORCE_MIN = 0.00012;   // largest fish of this type
+  static MAX_FORCE_MAX = 0.00045;   // smallest fish — nimble; /SPEED_MAX ≈ 0.015 (≈ Shiffman)
+  static MAX_FORCE_MIN = 0.00022;   // largest fish  — lazy but wall-safe; /SPEED_MAX ≈ 0.0073
 
   constructor(grid) {
     const cls = this.constructor;
