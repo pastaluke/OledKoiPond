@@ -128,6 +128,10 @@ export class FishBase {
   static COHESION_WEIGHT   = 0.8;   // effective weight = this × SCHOOL_WEIGHT
   static WANDER_WEIGHT     = 0.45;
   static EDGE_WEIGHT       = 2.6;   // ≥1.5× separation so containment dominates near walls
+  /** Inside the wall-avoidance band, fade wander + alignment + cohesion by up to
+   *  this fraction (0 = no change, 1 = those fully off at the wall) so edge steering
+   *  isn't overpowered by schooling/wander near walls. Ramps with depth into band. */
+  static EDGE_YIELD        = 0.9;
 
   /** Max steering force (logical px/ms²), interpolated by size: small fish are
    *  nimbler (higher force → tighter turns), large fish turn lazily. Low relative
@@ -198,7 +202,7 @@ export class FishBase {
     // ── 1. Compose steering forces from the active state's behaviors ─────────
     const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs };
     this.state = nextState(this, ctx);
-    const weights = STATES[this.state].behaviors(this);
+    const weights = STATES[this.state].behaviors(this, ctx);
     let ax = 0, ay = 0;
     for (const name in weights) {
       const w = weights[name];

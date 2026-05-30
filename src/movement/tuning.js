@@ -20,6 +20,8 @@ export const MOVEMENT_PARAMS = [
     desc: 'Strength of each fish’s idle meandering (random walk). Higher = restless roaming (esp. lone fish); too high = jittery.' },
   { key: 'EDGE_WEIGHT',       label: 'Edges',      min: 0,       max: 6,      floor: 0,       ceil: 12,    step: 0.05,    coarse: 0.25,    decimals: 2,
     desc: 'How hard fish turn away from the pond walls. Higher = they peel off sooner and never hug the edges.' },
+  { key: 'EDGE_YIELD',        label: 'Edge yield', min: 0,       max: 1,      floor: 0,       ceil: 1,     step: 0.05,    coarse: 0.1,     decimals: 2,
+    desc: 'When a fish enters the wall-avoidance band, how much to fade wander + alignment + cohesion so edge steering wins. 0 = no change; 1 = those fully off at the wall.' },
   { key: 'SCHOOL_WEIGHT',     label: 'School',     min: 0,       max: 1,      floor: 0,       ceil: 1,     step: 0.02,    coarse: 0.1,     decimals: 2,
     desc: 'Overall schooling tendency — scales Alignment + Cohesion together. 0 = solitary loners, 1 = strong schoolers.' },
   { key: 'MAX_FORCE_MAX',     label: 'Force (sm)', min: 0.00002, max: 0.0008, floor: 0.00001, ceil: 0.002, step: 0.00001, coarse: 0.00005, decimals: 5,
