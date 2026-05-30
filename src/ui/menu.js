@@ -63,6 +63,38 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   document.body.appendChild(btn);
   document.body.appendChild(panel);
 
+  // ── Info popup (click an (i) icon to toggle its description) ─────────────────
+  const infoPop = document.createElement('div');
+  infoPop.id = 'info-pop';
+  infoPop.hidden = true;
+  panel.appendChild(infoPop);
+  let infoAnchor = null;
+
+  function showInfo(text, anchor) {
+    if (infoAnchor === anchor && !infoPop.hidden) { hideInfo(); return; }   // toggle off
+    infoPop.textContent = text;
+    infoPop.hidden = false;
+    infoAnchor = anchor;
+    const pr = panel.getBoundingClientRect();
+    const ar = anchor.getBoundingClientRect();
+    const left = Math.max(6, Math.min(ar.left - pr.left, panel.clientWidth - infoPop.offsetWidth - 6));
+    infoPop.style.left = `${left}px`;
+    infoPop.style.top  = `${ar.bottom - pr.top + 4}px`;
+  }
+  function hideInfo() { infoPop.hidden = true; infoAnchor = null; }
+
+  // Wire an (i) icon inside `row` to toggle the popup with `text`.
+  function wireInfoIcon(row, text) {
+    const icon = row.querySelector('.info-icon');
+    if (!icon) return;
+    icon.addEventListener('click', (e) => { e.stopPropagation(); showInfo(text, icon); });
+  }
+
+  // Close the popup on any click that isn't an (i) icon or the popup itself.
+  document.addEventListener('click', (e) => {
+    if (!infoPop.hidden && !e.target.closest('.info-icon') && !infoPop.contains(e.target)) hideInfo();
+  });
+
   // ── Persistence ─────────────────────────────────────────────────────────────
   const fmt = (v, d) => Number(v).toFixed(d);
   const save = () => savePersisted({ params: snapshot(FishClass), fishCount: sim.entities.length });
@@ -87,11 +119,16 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   for (const p of MOVEMENT_PARAMS) {
     const row = document.createElement('div');
     row.className = 'slider-row';
-    if (p.desc) row.title = `${p.label}: ${p.desc}`;
+    const info = p.desc ? `${p.label}: ${p.desc}` : '';
+    if (info) row.title = info;
     row.innerHTML = `
-      <span class="slider-head"><span>${p.label}</span><span class="slider-val"></span></span>
+      <span class="slider-head">
+        <span class="slider-label">${p.label}${p.desc ? `<button type="button" class="info-icon" aria-label="About ${p.label}">i</button>` : ''}</span>
+        <span class="slider-val"></span>
+      </span>
       <input type="range" min="${p.min}" max="${p.max}" step="${p.step}">
     `;
+    if (info) wireInfoIcon(row, info);
     const input = row.querySelector('input');
     const out   = row.querySelector('.slider-val');
     const sync  = () => { input.value = FishClass[p.key]; out.textContent = fmt(FishClass[p.key], p.decimals); };
@@ -106,13 +143,18 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   }
 
   // ── Fish count slider (operates on the sim, not a class static) ──────────────
+  const countInfo = 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.';
   const countRow = document.createElement('div');
   countRow.className = 'slider-row';
-  countRow.title = 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.';
+  countRow.title = countInfo;
   countRow.innerHTML = `
-    <span class="slider-head"><span>Fish count</span><span class="slider-val"></span></span>
+    <span class="slider-head">
+      <span class="slider-label">Fish count<button type="button" class="info-icon" aria-label="About Fish count">i</button></span>
+      <span class="slider-val"></span>
+    </span>
     <input type="range" min="${FISH_MIN}" max="${FISH_MAX}" step="1">
   `;
+  wireInfoIcon(countRow, countInfo);
   const countInput = countRow.querySelector('input');
   const countOut   = countRow.querySelector('.slider-val');
   const syncCount  = () => { countInput.value = sim.entities.length; countOut.textContent = sim.entities.length; };
@@ -145,12 +187,14 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     panel.hidden = !panel.hidden;
+    if (panel.hidden) hideInfo();
   });
 
   // Close when tapping outside the panel or button
   document.addEventListener('pointerdown', (e) => {
     if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
       panel.hidden = true;
+      hideInfo();
     }
   });
 
@@ -167,6 +211,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       (el.requestFullscreen ?? el.webkitRequestFullscreen)?.call(el);
     }
     panel.hidden = true;
+    hideInfo();
   });
   document.addEventListener('fullscreenchange', updateFsLabel);
   document.addEventListener('webkitfullscreenchange', updateFsLabel);
