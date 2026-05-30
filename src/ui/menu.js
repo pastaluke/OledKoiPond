@@ -87,6 +87,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   for (const p of MOVEMENT_PARAMS) {
     const row = document.createElement('div');
     row.className = 'slider-row';
+    if (p.desc) row.title = `${p.label}: ${p.desc}`;
     row.innerHTML = `
       <span class="slider-head"><span>${p.label}</span><span class="slider-val"></span></span>
       <input type="range" min="${p.min}" max="${p.max}" step="${p.step}">
@@ -107,6 +108,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   // ── Fish count slider (operates on the sim, not a class static) ──────────────
   const countRow = document.createElement('div');
   countRow.className = 'slider-row';
+  countRow.title = 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.';
   countRow.innerHTML = `
     <span class="slider-head"><span>Fish count</span><span class="slider-val"></span></span>
     <input type="range" min="${FISH_MIN}" max="${FISH_MAX}" step="1">
