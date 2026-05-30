@@ -146,10 +146,12 @@ export class FishBase {
     const sizeFrac = Math.max(0, Math.min(1,
       (this.length - cls.SIZE_MIN) / Math.max(1, cls.SIZE_MAX - cls.SIZE_MIN)
     ));
-    // Per-fish steering caps: small fish turn harder; slight speed variation so the
-    // school never moves as a rigid block.
-    this.maxForce = cls.MAX_FORCE_MAX - sizeFrac * (cls.MAX_FORCE_MAX - cls.MAX_FORCE_MIN);
-    this.maxSpeed = cls.SPEED_MAX * (0.85 + Math.random() * 0.3);
+    // Per-fish steering variation: small fish turn harder; slight speed jitter so the
+    // school never moves as a rigid block. Stored as fractions and combined with the
+    // class statics in the maxForce/maxSpeed getters, so live menu-slider edits to
+    // those statics take effect on existing fish immediately.
+    this._sizeFrac    = sizeFrac;                    // 0 (smallest) → 1 (largest)
+    this._speedJitter = 0.85 + Math.random() * 0.3;  // per-fish speed multiplier
 
     // Spawn within safe margins (center-based position)
     this.x = this.half + 5 + Math.random() * (logicalW - this.length - 10);
@@ -169,6 +171,18 @@ export class FishBase {
     this._wanderTheta = Math.random() * Math.PI * 2;
 
     this.color = cls.COLORS[Math.floor(Math.random() * cls.COLORS.length)];
+  }
+
+  /** Max steering force for this fish (logical px/ms²), interpolated by size from
+   *  the class statics. Computed live so menu-slider edits apply instantly. */
+  get maxForce() {
+    const c = this.constructor;
+    return c.MAX_FORCE_MAX - this._sizeFrac * (c.MAX_FORCE_MAX - c.MAX_FORCE_MIN);
+  }
+
+  /** Max speed for this fish (logical px/ms), class static × per-fish jitter. Live. */
+  get maxSpeed() {
+    return this.constructor.SPEED_MAX * this._speedJitter;
   }
 
   /**

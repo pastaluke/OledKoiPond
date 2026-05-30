@@ -19,10 +19,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const grid    = new Grid(canvas);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
-  initMenu({ overlay });
 
   // ── Spawn koi ────────────────────────────────────────────────────────────
   for (let i = 0; i < KOI_COUNT; i++) sim.add(new Koi(grid));
+
+  // Menu wires up movement-tuning sliders (and may restore persisted fish count).
+  initMenu({ overlay, sim, grid, FishClass: Koi });
 
   // ── Reposition entities proportionally when the grid is resized ──────────
   let prevW = grid.logicalW;
