@@ -36,21 +36,25 @@ function _widthAt(t) {
   return 0.8 - ((t - 0.88) / 0.12) * 0.7;                  // snout
 }
 
-function _outlinePx(set, bx, by, nx, ny, w) {
+// Snaps outline points to the DISPLAY-CELL grid (density cells per world unit). All
+// inputs are world units; the `d` factor converts to cells just before rounding, so the
+// fish keeps its world-unit shape but is rasterized finer as density rises.
+function _outlinePx(set, bx, by, nx, ny, w, d) {
   if (w < 0.35) {
-    set.add(`${Math.round(bx)},${Math.round(by)}`);
+    set.add(`${Math.round(bx * d)},${Math.round(by * d)}`);
   } else {
-    set.add(`${Math.round(bx + nx * w)},${Math.round(by + ny * w)}`);
-    set.add(`${Math.round(bx - nx * w)},${Math.round(by - ny * w)}`);
+    set.add(`${Math.round((bx + nx * w) * d)},${Math.round((by + ny * w) * d)}`);
+    set.add(`${Math.round((bx - nx * w) * d)},${Math.round((by - ny * w) * d)}`);
   }
 }
 
-// Returns [{x,y}] pixel coords relative to fish center (0,0).
+// Returns [{x,y}] DISPLAY-CELL coords relative to fish center (0,0).
 // headAngle : direction the head points (radians; 0=east, π/2=south-screen)
 // steeringBend : body curvature (+= clockwise/right, -= counter-clockwise/left)
 // swimOsc  : swim oscillation in [-1, 1]
-// length   : fish nose-to-tail length in logical pixels
-function _renderSpline(headAngle, steeringBend, swimOsc, length) {
+// length   : fish nose-to-tail length in world units
+// density  : display cells per world unit (render fidelity). 1 = current behavior.
+function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1) {
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
 
@@ -72,7 +76,8 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length) {
 
   const set = new Set();
 
-  const TAIL_STEPS = 18, BODY_STEPS = 42;
+  // Scale sample counts with density so the finer outline stays gap-free.
+  const TAIL_STEPS = 18 * density, BODY_STEPS = 42 * density;
 
   for (let i = 0; i <= TAIL_STEPS; i++) {
     const s = i / TAIL_STEPS, t = s * WAIST_FRAC;
@@ -81,7 +86,7 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length) {
     const dx = 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx);
     const dy = 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy);
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t));
+    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t), density);
   }
 
   for (let i = 0; i <= BODY_STEPS; i++) {
@@ -91,7 +96,7 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length) {
     const dx = 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx);
     const dy = 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy);
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t));
+    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t), density);
   }
 
   return [...set].map(k => { const [x, y] = k.split(',').map(Number); return { x, y }; });
@@ -246,10 +251,12 @@ export class FishBase {
   }
 
   draw(grid) {
+    const D       = grid.density;
     const swimOsc = Math.sin(this.swimPhase);
-    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length);
-    const ox = Math.round(this.x), oy = Math.round(this.y);
+    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D);
+    // Center on the display-cell grid; spline offsets are already in display cells.
+    const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     const { r, g, b } = this.color;
-    for (const { x, y } of pixels) grid.drawPixel(ox + x, oy + y, r, g, b);
+    for (const { x, y } of pixels) grid.drawCell(ocx + x, ocy + y, r, g, b);
   }
 }

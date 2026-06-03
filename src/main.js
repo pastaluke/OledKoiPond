@@ -12,11 +12,14 @@ import { initMenu     } from './ui/menu.js';
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
 
+/** Display cells per world unit — render fidelity. 1 = original chunky grid, 2 = 2× finer. */
+const DISPLAY_DENSITY = 2;
+
 document.addEventListener('DOMContentLoaded', () => {
   const canvas      = /** @type {HTMLCanvasElement} */ (document.getElementById('pond'));
   const debugCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('debug'));
 
-  const grid    = new Grid(canvas);
+  const grid    = new Grid(canvas, { density: DISPLAY_DENSITY });
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
 

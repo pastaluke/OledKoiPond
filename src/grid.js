@@ -1,26 +1,45 @@
 /**
  * @file grid.js
- * Manages the logical pixel grid that maps to the physical canvas.
- * The grid maintains a consistent logical resolution (~120px short edge)
- * regardless of device pixel density or window size.
+ * The display layer. Owns the mapping from the simulation's coordinate space to
+ * the physical canvas, via two independent knobs:
+ *
+ *   world units ──(worldShortEdge)──▶ screen ──(density)──▶ display cells ──▶ physical px
+ *
+ *   • worldShortEdge — how many WORLD UNITS span the shorter screen axis. This is the
+ *     simulation scale / "zoom": the world is a fixed-size space (short edge = this many
+ *     units) that the canvas stretches to fill, so entities stay the same apparent size
+ *     across any window/device. Raising it shows more world (everything appears smaller
+ *     and slower) while leaving every per-entity constant untouched.
+ *   • density — how many DISPLAY CELLS each world unit is rasterized into. This is render
+ *     fidelity: raising it draws the same scene with smaller blocks (sharper art) without
+ *     changing apparent size, spacing, or speed.
+ *
+ * Derived: scale = physical px per world unit; cellScale = physical px per display cell
+ * (= scale / density). On-screen block size is physicalShortEdge / (worldShortEdge × density).
+ *
+ * The simulation reads logicalW/logicalH (world units) and is unaware of density.
  */
 
 export class Grid {
   /**
    * Creates a Grid and begins listening for window resize events.
    * @param {HTMLCanvasElement} canvas
-   * @param {number} [targetShortEdge=120] - Desired logical size of the shorter screen axis.
+   * @param {object} [opts]
+   * @param {number} [opts.worldShortEdge=120] - World units across the shorter screen axis (sim scale / zoom).
+   * @param {number} [opts.density=1] - Display cells per world unit (render fidelity).
    */
-  constructor(canvas, targetShortEdge = 120) {
+  constructor(canvas, { worldShortEdge = 120, density = 1 } = {}) {
     this.canvas = canvas;
-    this.targetShortEdge = targetShortEdge;
+    this.worldShortEdge = worldShortEdge;
+    this.density = density;
 
     /** @type {CanvasRenderingContext2D} */
     this.ctx = canvas.getContext('2d');
 
-    this.logicalW = 0;
-    this.logicalH = 0;
-    this.scale = 1;
+    this.logicalW = 0;     // world units (wide axis)
+    this.logicalH = 0;     // world units (tall axis)
+    this.scale = 1;        // physical px per world unit
+    this.cellScale = 1;    // physical px per display cell (= scale / density)
 
     this.resize();
 
@@ -31,8 +50,8 @@ export class Grid {
   }
 
   /**
-   * Recomputes logical and physical dimensions from the current CSS layout size,
-   * then updates canvas.width/height to match physical pixels.
+   * Recomputes logical (world-unit) and physical dimensions from the current CSS layout
+   * size, then updates canvas.width/height to match physical pixels.
    */
   resize() {
     const cssW = this.canvas.clientWidth;
@@ -41,10 +60,12 @@ export class Grid {
     const shortEdge = Math.min(cssW, cssH);
     const longEdge  = Math.max(cssW, cssH);
 
-    // scale = physical short edge / targetShortEdge
-    this.scale = shortEdge / this.targetShortEdge;
+    // scale = physical short edge / worldShortEdge  (physical px per world unit)
+    this.scale = shortEdge / this.worldShortEdge;
+    // Each world unit is subdivided into `density` display cells.
+    this.cellScale = this.scale / this.density;
 
-    const logicalShort = this.targetShortEdge;
+    const logicalShort = this.worldShortEdge;
     const logicalLong  = Math.round(longEdge / this.scale);
 
     if (cssW <= cssH) {
@@ -71,23 +92,36 @@ export class Grid {
   }
 
   /**
-   * Draws a single logical pixel at (lx, ly) with the given RGB color.
-   * The drawn rectangle is Math.ceil(scale) × Math.ceil(scale) physical pixels.
-   * @param {number} lx - Logical x coordinate.
-   * @param {number} ly - Logical y coordinate.
+   * Draws a single display cell at (cx, cy) with the given RGB color. Display cells are
+   * the finest render grid: there are `density` cells per world unit. The drawn rectangle
+   * is Math.ceil(cellScale) × Math.ceil(cellScale) physical pixels.
+   * @param {number} cx - Display-cell x coordinate.
+   * @param {number} cy - Display-cell y coordinate.
+   * @param {number} r - Red channel (0–255).
+   * @param {number} g - Green channel (0–255).
+   * @param {number} b - Blue channel (0–255).
+   */
+  drawCell(cx, cy, r, g, b) {
+    const size = Math.ceil(this.cellScale);
+    this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+    this.ctx.fillRect(Math.round(cx * this.cellScale), Math.round(cy * this.cellScale), size, size);
+  }
+
+  /**
+   * Draws a single WORLD-UNIT pixel at (lx, ly). Convenience wrapper over drawCell for
+   * callers that think in world units; the cell it lands on depends on density.
+   * @param {number} lx - Logical (world-unit) x coordinate.
+   * @param {number} ly - Logical (world-unit) y coordinate.
    * @param {number} r - Red channel (0–255).
    * @param {number} g - Green channel (0–255).
    * @param {number} b - Blue channel (0–255).
    */
   drawPixel(lx, ly, r, g, b) {
-    const { px, py } = this.toPhysical(lx, ly);
-    const size = Math.ceil(this.scale);
-    this.ctx.fillStyle = `rgb(${r},${g},${b})`;
-    this.ctx.fillRect(Math.round(px), Math.round(py), size, size);
+    this.drawCell(lx * this.density, ly * this.density, r, g, b);
   }
 
   /**
-   * Converts a logical coordinate to physical canvas pixels.
+   * Converts a world-unit coordinate to physical canvas pixels.
    * @param {number} lx
    * @param {number} ly
    * @returns {{ px: number, py: number }}
