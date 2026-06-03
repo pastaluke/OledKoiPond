@@ -315,7 +315,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
 
   const { row: densityRow } = makeRow({
     label: 'Density',
-    infoText: 'Density: display cells per world unit (render fidelity). Higher = smoother, finer pixels — fish size, count, and speed are unchanged.',
+    infoText: 'Density: display cells per world unit (render fidelity). Higher = smoother, finer pixels — fish size, count, and speed are unchanged. Default 2.',
     decimals: 2,
     valueStep: 0.25,
     hasBounds: false,
@@ -328,7 +328,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
 
   const { row: worldRow } = makeRow({
     label: 'World size',
-    infoText: 'World size: world units across the short screen edge (zoom). Higher = more world on screen, so fish look smaller and slower; schooling and edge behavior are unchanged.',
+    infoText: 'World size: world units across the short screen edge (zoom). Higher = more world on screen, so fish look smaller and slower; schooling and edge behavior are unchanged. Default 120.',
     decimals: 0,
     valueStep: 10,
     hasBounds: false,
