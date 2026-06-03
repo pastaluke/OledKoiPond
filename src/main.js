@@ -26,10 +26,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Spawn koi ────────────────────────────────────────────────────────────
   for (let i = 0; i < KOI_COUNT; i++) sim.add(new Koi(grid));
 
-  // Menu wires up movement-tuning sliders (and may restore persisted fish count).
-  initMenu({ overlay, sim, grid, FishClass: Koi });
-
   // ── Reposition entities proportionally when the grid is resized ──────────
+  // Registered BEFORE the menu so menu-driven display-knob changes (world size /
+  // density, which dispatch 'gridresize') reposition fish through the same path.
   let prevW = grid.logicalW;
   let prevH = grid.logicalH;
 
@@ -44,6 +43,9 @@ document.addEventListener('DOMContentLoaded', () => {
     prevW = grid.logicalW;
     prevH = grid.logicalH;
   });
+
+  // Menu wires up movement-tuning + display sliders (and may restore persisted state).
+  initMenu({ overlay, sim, grid, FishClass: Koi });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();

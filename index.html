@@ -70,7 +70,17 @@
       top: 48px;
       right: 8px;
       z-index: 200;
-      width: 210px;
+      /* Width sizes to its content (so rows aren't cut off / no left-right scroll),
+         floored at the old 210px and capped to the viewport. */
+      width: max-content;
+      min-width: 210px;
+      max-width: min(340px, calc(100vw - 16px));
+      /* Cap to the viewport (8px gap top + bottom) and scroll when taller, so a fully
+         expanded menu can always be scrolled to the bottom. */
+      max-height: calc(100vh - 56px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
       background: rgba(8, 8, 8, 0.93);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 6px;

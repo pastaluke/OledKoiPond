@@ -51,6 +51,12 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       </div>
     </details>
     <details>
+      <summary>Display</summary>
+      <div class="menu-rows">
+        <div id="display-sliders"></div>
+      </div>
+    </details>
+    <details>
       <summary>Debug</summary>
       <div class="menu-rows">
         <label class="menu-row">
@@ -106,9 +112,11 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     infoAnchor = anchor;
     const pr = panel.getBoundingClientRect();
     const ar = anchor.getBoundingClientRect();
-    const left = Math.max(6, Math.min(ar.left - pr.left, panel.clientWidth - infoPop.offsetWidth - 6));
+    // Add scroll offsets: the panel is now a scroll container, and an absolutely
+    // positioned child is placed relative to the (scrolled) content origin.
+    const left = Math.max(6, Math.min(ar.left - pr.left + panel.scrollLeft, panel.clientWidth - infoPop.offsetWidth - 6));
     infoPop.style.left = `${left}px`;
-    infoPop.style.top  = `${ar.bottom - pr.top + 4}px`;
+    infoPop.style.top  = `${ar.bottom - pr.top + panel.scrollTop + 4}px`;
   }
   function hideInfo() { infoPop.hidden = true; infoAnchor = null; }
 
@@ -122,7 +130,10 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   });
 
   // ── Persistence ─────────────────────────────────────────────────────────────
-  const save = () => savePersisted({ params: snapshot(FishClass), ranges, fishCount: sim.entities.length });
+  const save = () => savePersisted({
+    params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
+    display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
+  });
 
   function setFishCount(n) {
     n = clamp(Math.round(n), FISH_MIN, FISH_MAX);
@@ -130,7 +141,17 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
   }
 
-  // Restore persisted tuning (params, ranges, fish count) before building controls.
+  // ── Display knobs (owned by the Grid) ─────────────────────────────────────────
+  const DENSITY_RANGE = { min: 1, max: 4 };    // display cells per world unit
+  const WORLD_RANGE   = { min: 60, max: 360 }; // world units across the short edge
+  // Apply a grid-knob change: recompute the projection, then let main.js's
+  // 'gridresize' handler reposition entities proportionally + resync the overlay.
+  const applyGrid = () => {
+    grid.resize();
+    grid.canvas.dispatchEvent(new CustomEvent('gridresize'));
+  };
+
+  // Restore persisted tuning (params, ranges, fish count, display) before building controls.
   const persisted = loadPersisted();
   if (persisted) {
     if (persisted.ranges) {
@@ -148,6 +169,12 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       FishClass[p.key] = clamp(FishClass[p.key], ranges[p.key].min, ranges[p.key].max);
     }
     if (Number.isFinite(persisted.fishCount)) setFishCount(persisted.fishCount);
+    if (persisted.display) {
+      const d = persisted.display;
+      if (Number.isFinite(d.density))        grid.density        = clamp(d.density, DENSITY_RANGE.min, DENSITY_RANGE.max);
+      if (Number.isFinite(d.worldShortEdge)) grid.worldShortEdge = clamp(d.worldShortEdge, WORLD_RANGE.min, WORLD_RANGE.max);
+      applyGrid();
+    }
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -282,6 +309,35 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     getMax: () => FISH_MAX,
   });
   sliderHost.appendChild(countRow);
+
+  // ── Build display sliders (grid knobs) ────────────────────────────────────────
+  const displayHost = panel.querySelector('#display-sliders');
+
+  const { row: densityRow } = makeRow({
+    label: 'Density',
+    infoText: 'Density: display cells per world unit (render fidelity). Higher = smoother, finer pixels — fish size, count, and speed are unchanged.',
+    decimals: 2,
+    valueStep: 0.25,
+    hasBounds: false,
+    getVal: () => grid.density,
+    setVal: (v) => { grid.density = clamp(v, DENSITY_RANGE.min, DENSITY_RANGE.max); applyGrid(); },
+    getMin: () => DENSITY_RANGE.min,
+    getMax: () => DENSITY_RANGE.max,
+  });
+  displayHost.appendChild(densityRow);
+
+  const { row: worldRow } = makeRow({
+    label: 'World size',
+    infoText: 'World size: world units across the short screen edge (zoom). Higher = more world on screen, so fish look smaller and slower; schooling and edge behavior are unchanged.',
+    decimals: 0,
+    valueStep: 10,
+    hasBounds: false,
+    getVal: () => grid.worldShortEdge,
+    setVal: (v) => { grid.worldShortEdge = clamp(v, WORLD_RANGE.min, WORLD_RANGE.max); applyGrid(); },
+    getMin: () => WORLD_RANGE.min,
+    getMax: () => WORLD_RANGE.max,
+  });
+  displayHost.appendChild(worldRow);
 
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
   const copyBtn = panel.querySelector('#btn-copy-tuning');
