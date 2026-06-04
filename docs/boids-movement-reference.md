@@ -162,6 +162,44 @@ low-weight cohesion so isolated fish gently rejoin the group.
 
 ---
 
+## 6a. Burst-and-Coast (cruise throttle)
+
+Real fish rarely propel continuously — they swim in **burst-and-coast** pulses: a few tail
+beats to accelerate, then a passive glide while they slow, repeating with irregular timing.
+Our steering model is otherwise frictionless (only a top-speed clamp), so without this every
+fish cruises at ~`maxSpeed` forever and the pond never breathes.
+
+Implemented as a per-fish **cruise throttle** `T ∈ [~0, 1]` (`fish-base.js`,
+`_updateThrottle` + `get cruiseSpeed`), driving three coupled effects:
+
+1. **Cruise target speed.** The *propulsive* behaviors — `wander`, `alignment`, `cohesion`
+   — aim for `cruiseSpeed = maxSpeed × T` instead of full `maxSpeed` (passed as the
+   `targetSpeed` arg to `steer()`/`seek()`). At glide (`T→0`) `desired − velocity` becomes a
+   *decelerating* force — this is Reynolds **Arrive**. The **safety behaviors `separation`
+   and `edges` keep full `maxSpeed`**, so anti-collision and containment never weaken; this
+   is what keeps schools intact and fish off the walls mid-glide.
+2. **Throttle-dependent drag.** A velocity multiplier ramping from ~none at burst to strong
+   at glide (`pow(lerp(GLIDE_DRAG,1,T), dt/1000)`) bleeds momentum so a coasting fish drifts
+   to a near-stop instead of gliding on. The hard `maxSpeed` clamp stays full so bursts can
+   still reach top speed.
+3. **Tail coupled to speed.** `swimPhase` advances ∝ `speed/maxSpeed` and the tail-wiggle
+   amplitude (`swimAmp`) scales the same way (with a small floor), so a gliding fish's tail
+   slows *and* relaxes toward straight rather than swimming in place.
+
+**Per-fish timing without magic numbers.** Each fish runs an independent alternating
+burst/glide cycle; at the start of each phase it re-samples a fresh target level *and* a
+duration from shared class ranges (`CRUISE_GLIDE_MIN/MAX`, `CRUISE_BURST_MIN`,
+`GLIDE_MS_MIN/MAX`, `BURST_MS_MIN/MAX`) and eases `T` toward it (`THROTTLE_EASE_MS`). Because
+every fish rolls its own dice every cycle, no two breathe in lockstep, and the ranges (not
+fixed per-fish constants) are the tunable surface — exposed as the **Glide depth / Glide
+drag / Glide time / Burst time** sliders.
+
+This lives entirely in `fish-base.js` + the `targetSpeed` plumbing in `behaviors.js`; the
+**state machine is untouched** — burst-and-coast is an always-on cruise modulation, not a
+state.
+
+---
+
 ## 7. Extensible Structure
 
 Use a `Boid`/`Vehicle` base where **every behaviour is a method returning a force

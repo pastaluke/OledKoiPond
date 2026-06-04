@@ -34,6 +34,16 @@ export const MOVEMENT_PARAMS = [
     desc: 'Distance (px) at which fish start pushing apart. Larger = more spacing held between fish.' },
   { key: 'PERCEPTION_RADIUS', label: 'Perception', min: 0,       max: 80,     floor: 0,       ceil: 200,   step: 1,       coarse: 5,       decimals: 0,
     desc: 'How far (px) a fish senses others for alignment/cohesion. Larger = bigger, looser schools that react over distance.' },
+
+  // ── Burst-and-coast (cruise throttle) ────────────────────────────────────────
+  { key: 'CRUISE_GLIDE_MAX',  label: 'Glide depth', min: 0,      max: 0.5,    floor: 0,       ceil: 1,     step: 0.01,    coarse: 0.05,    decimals: 2,
+    desc: 'How fast a fish still tries to swim during a glide, as a fraction of top speed. Lower = deeper coasts toward a full stop; higher = it keeps drifting.' },
+  { key: 'GLIDE_DRAG',        label: 'Glide drag',  min: 0.05,   max: 1,      floor: 0.01,    ceil: 1,     step: 0.01,    coarse: 0.05,    decimals: 2,
+    desc: 'Water resistance during a glide (per-second speed kept). Lower = momentum bleeds off fast → quick stop; 1 = no drag (coasts on forever). Only bites when throttled down.' },
+  { key: 'GLIDE_MS_MAX',      label: 'Glide time',  min: 500,    max: 5000,   floor: 100,     ceil: 12000, step: 100,     coarse: 250,     decimals: 0,
+    desc: 'Longest a coast/glide lasts (ms); each glide is a random draw up to this. Higher = longer, lazier drifts between bursts.' },
+  { key: 'BURST_MS_MAX',      label: 'Burst time',  min: 200,    max: 2000,   floor: 50,      ceil: 4000,  step: 50,      coarse: 100,     decimals: 0,
+    desc: 'Longest a propulsion burst lasts (ms); each burst is a random draw up to this. Higher = stronger, longer accelerations.' },
 ];
 
 /** Fresh { key: {min, max} } map of each param's default (initial) slider range. */

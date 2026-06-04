@@ -23,6 +23,7 @@ function _sampleSize(min, max, curve) {
 
 // ─── Spline renderer ──────────────────────────────────────────────────────────
 const WAIST_FRAC = 0.28;   // tail bezier spans t ∈ [0, WAIST_FRAC]
+const SWIM_AMP_FLOOR = 0.06;   // faint idle tail sway kept when a fish is nearly stopped
 
 // Half-width profile along fish body: t=0 (tail tip) → t=1 (head tip)
 function _widthAt(t) {
@@ -54,7 +55,7 @@ function _outlinePx(set, bx, by, nx, ny, w, d) {
 // swimOsc  : swim oscillation in [-1, 1]
 // length   : fish nose-to-tail length in world units
 // density  : display cells per world unit (render fidelity). 1 = current behavior.
-function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1) {
+function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, swimAmp = 1) {
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
 
@@ -67,7 +68,7 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1) {
   const Wx = -cosH * waistDist - cosP * steeringBend * length * 0.12;
   const Wy = -sinH * waistDist - sinP * steeringBend * length * 0.12;
 
-  const tailWigglePx = length * 0.156;   // ≈ 2.5 px at length=16
+  const tailWigglePx = length * 0.156 * swimAmp;   // ≈ 2.5 px at length=16, scaled by speed
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
 
@@ -144,6 +145,23 @@ export class FishBase {
   static MAX_FORCE_MAX = 0.00045;   // smallest fish — nimble; /SPEED_MAX ≈ 0.015 (≈ Shiffman)
   static MAX_FORCE_MIN = 0.00022;   // largest fish  — lazy but wall-safe; /SPEED_MAX ≈ 0.0073
 
+  // ── Burst-and-coast cruise throttle ─────────────────────────────────────────
+  // Each fish pulses a throttle T∈[~0,1] on its own randomized cadence:
+  //   burst (T→1, propel) → glide (T→0, coast) → near-stop → burst …
+  // T scales cruiseSpeed (the target speed of the propulsive behaviors) and the drag,
+  // so the fish accelerates in bursts then coasts down. See update()/_updateThrottle.
+  // Safety behaviors (separation/edges) ignore T and keep full authority.
+  static CRUISE_GLIDE_MIN = 0.0;    // glide throttle floor (fraction of maxSpeed)
+  static CRUISE_GLIDE_MAX = 0.22;   // glide throttle ceiling — re-sampled per glide
+  static CRUISE_BURST_MIN = 0.85;   // burst throttle ∈ [this, 1.0] — re-sampled per burst
+  static GLIDE_MS_MIN = 700;        // glide (coast) duration range, ms
+  static GLIDE_MS_MAX = 2600;
+  static BURST_MS_MIN = 250;        // burst (propel) duration range, ms
+  static BURST_MS_MAX = 750;
+  static THROTTLE_EASE_MS = 300;    // smoothing time-constant easing T toward its target
+  static GLIDE_DRAG = 0.25;         // per-second velocity multiplier at full glide (T=0)
+  static SWIM_BEAT_RATE = 0.012;    // tail-beat rate (rad/ms) at full speed
+
   constructor(grid) {
     const cls = this.constructor;
     const { logicalW, logicalH } = grid;
@@ -174,6 +192,13 @@ export class FishBase {
     this.heading      = initAngle;
     this.steeringBend = 0;
     this.swimPhase    = Math.random() * Math.PI * 2;   // stagger fish
+    this.swimAmp      = 1;                              // tail amplitude (set by speed each frame)
+
+    // Burst-and-coast throttle state — seeded random so fish breathe out of phase.
+    this._throttle  = 0.3 + Math.random() * 0.7;
+    this._thrTarget = this._throttle;
+    this._phase     = Math.random() < 0.5 ? 'burst' : 'glide';
+    this._thrHold   = Math.random() * cls.GLIDE_MS_MAX;   // random initial offset
 
     // Movement state machine + wander angle (consumed by movement/ behaviors).
     this.state        = 'swim';
@@ -194,6 +219,34 @@ export class FishBase {
     return this.constructor.SPEED_MAX * this._speedJitter;
   }
 
+  /** Throttled cruise speed (logical px/ms) the propulsive behaviors aim for. The
+   *  burst-and-coast throttle pulses this between ~0 (glide) and maxSpeed (burst). */
+  get cruiseSpeed() {
+    return this.maxSpeed * this._throttle;
+  }
+
+  /** Advance the burst/glide cycle: hold the current phase for a randomized duration,
+   *  then flip and re-sample a fresh target level + hold from the class ranges. The live
+   *  throttle eases toward the target (exponential smoothing) for organic motion. Every
+   *  fish rolls its own values each cycle, so no two breathe in lockstep. */
+  _updateThrottle(deltaMs) {
+    const c = this.constructor;
+    this._thrHold -= deltaMs;
+    if (this._thrHold <= 0) {
+      if (this._phase === 'glide') {
+        this._phase     = 'burst';
+        this._thrTarget = c.CRUISE_BURST_MIN + Math.random() * (1 - c.CRUISE_BURST_MIN);
+        this._thrHold   = c.BURST_MS_MIN + Math.random() * (c.BURST_MS_MAX - c.BURST_MS_MIN);
+      } else {
+        this._phase     = 'glide';
+        this._thrTarget = c.CRUISE_GLIDE_MIN + Math.random() * (c.CRUISE_GLIDE_MAX - c.CRUISE_GLIDE_MIN);
+        this._thrHold   = c.GLIDE_MS_MIN + Math.random() * (c.GLIDE_MS_MAX - c.GLIDE_MS_MIN);
+      }
+    }
+    const k = 1 - Math.exp(-deltaMs / Math.max(1, c.THROTTLE_EASE_MS));
+    this._throttle += (this._thrTarget - this._throttle) * k;
+  }
+
   /**
    * Update physics for one frame.
    * @param {number}    deltaMs   - frame time (ms)
@@ -202,7 +255,11 @@ export class FishBase {
    */
   update(deltaMs, grid, neighbors) {
     const { logicalW, logicalH } = grid;
+    const c = this.constructor;
     const maxSpeed = this.maxSpeed;
+
+    // ── 0. Advance the burst/glide cruise throttle (drives cruiseSpeed + drag + tail) ──
+    this._updateThrottle(deltaMs);
 
     // ── 1. Compose steering forces from the active state's behaviors ─────────
     const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs };
@@ -217,9 +274,19 @@ export class FishBase {
       ay += f.y * w;
     }
 
-    // ── 2. Integrate (delta-time scaled) + clamp to max speed ────────────────
+    // ── 2. Integrate (delta-time scaled), apply drag, clamp to max speed ─────
     this.vx += ax * deltaMs;
     this.vy += ay * deltaMs;
+
+    // Burst-and-coast drag: ~none at burst (T=1), strong at glide (T→0). Bleeds
+    // built-up momentum so the fish coasts down to a near-stop instead of gliding
+    // on forever (the integrator is otherwise frictionless).
+    const dragPerSec = c.GLIDE_DRAG + (1 - c.GLIDE_DRAG) * this._throttle;
+    const drag = Math.pow(dragPerSec, deltaMs / 1000);
+    this.vx *= drag;
+    this.vy *= drag;
+
+    // Clamp to full maxSpeed (unthrottled ceiling, so bursts can reach top speed).
     const sp = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (sp > maxSpeed) {
       this.vx = (this.vx / sp) * maxSpeed;
@@ -245,15 +312,18 @@ export class FishBase {
       this.steeringBend *= Math.pow(0.98, deltaMs / 16);
     }
 
-    // ── 5. Swim oscillation ──────────────────────────────────────────────────
-    this.swimPhase += 0.006 * deltaMs;
+    // ── 5. Swim oscillation — cadence + amplitude scale with speed, so a coasting
+    //       fish's tail slows and relaxes toward straight; a bursting fish beats hard.
+    const speedFrac = Math.min(1, curSpeed / Math.max(1e-6, maxSpeed));
+    this.swimPhase += c.SWIM_BEAT_RATE * speedFrac * deltaMs;
     if (this.swimPhase > Math.PI * 2) this.swimPhase -= Math.PI * 2;
+    this.swimAmp = SWIM_AMP_FLOOR + (1 - SWIM_AMP_FLOOR) * speedFrac;
   }
 
   draw(grid) {
     const D       = grid.density;
     const swimOsc = Math.sin(this.swimPhase);
-    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D);
+    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D, this.swimAmp);
     // Center on the display-cell grid; spline offsets are already in display cells.
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     const { r, g, b } = this.color;

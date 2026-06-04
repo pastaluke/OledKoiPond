@@ -19,19 +19,23 @@ export const EDGE_MARGIN = 14;      // logical px from a wall where steer-away k
 
 // ─── Shared steering primitives ───────────────────────────────────────────────
 
-// Steer the fish so its velocity heads in (dirX, dirY): desired = dir*maxSpeed,
+// Steer the fish so its velocity heads in (dirX, dirY): desired = dir*targetSpeed,
 // force = desired - velocity, truncated to maxForce. The basis of every behavior.
-function steer(fish, dirX, dirY) {
+// targetSpeed defaults to full maxSpeed; the propulsive (cruise) behaviors pass the
+// throttled fish.cruiseSpeed instead, so at low throttle `desired - velocity` becomes a
+// decelerating force (Reynolds "Arrive") and the fish coasts down. Safety behaviors
+// (separation/edges) keep the full-maxSpeed default.
+function steer(fish, dirX, dirY, targetSpeed = fish.maxSpeed) {
   const v = new Vec2(dirX, dirY);
   if (v.mag() < 1e-9) return new Vec2(0, 0);
-  v.setMag(fish.maxSpeed);
+  v.setMag(targetSpeed);
   v.x -= fish.vx;
   v.y -= fish.vy;
   return v.limit(fish.maxForce);
 }
 
 // Steer toward a point (Reynolds "seek").
-function seek(fish, tx, ty) { return steer(fish, tx - fish.x, ty - fish.y); }
+function seek(fish, tx, ty, targetSpeed) { return steer(fish, tx - fish.x, ty - fish.y, targetSpeed); }
 
 // ─── The behavior registry ────────────────────────────────────────────────────
 
@@ -60,7 +64,7 @@ export const BEHAVIORS = {
     let vx = 0, vy = 0, count = 0;
     for (const o of ctx.neighbors) { vx += o.vx; vy += o.vy; count++; }
     if (count === 0) return new Vec2(0, 0);
-    return steer(fish, vx, vy);   // steer toward the averaged velocity direction
+    return steer(fish, vx, vy, fish.cruiseSpeed);   // steer toward the averaged velocity direction
   },
 
   // Steer toward the average position (center of mass) of neighbors.
@@ -68,7 +72,7 @@ export const BEHAVIORS = {
     let cx = 0, cy = 0, count = 0;
     for (const o of ctx.neighbors) { cx += o.x; cy += o.y; count++; }
     if (count === 0) return new Vec2(0, 0);
-    return seek(fish, cx / count, cy / count);
+    return seek(fish, cx / count, cy / count, fish.cruiseSpeed);
   },
 
   // Smooth random walk: a target on a circle projected ahead of the fish, whose
@@ -89,7 +93,7 @@ export const BEHAVIORS = {
     const heading = Math.atan2(hy, hx);
     const tx = cx + Math.cos(fish._wanderTheta + heading) * radius;
     const ty = cy + Math.sin(fish._wanderTheta + heading) * radius;
-    return seek(fish, tx, ty);
+    return seek(fish, tx, ty, fish.cruiseSpeed);
   },
 
   // Steer back inward when near a pond wall (Reynolds "containment"). Smooth,
