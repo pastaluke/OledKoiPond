@@ -203,6 +203,7 @@ export class FishBase {
     // Movement state machine + wander angle (consumed by movement/ behaviors).
     this.state        = 'swim';
     this._wanderTheta = Math.random() * Math.PI * 2;
+    this._neighborCount = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
 
     this.color = cls.COLORS[Math.floor(Math.random() * cls.COLORS.length)];
   }
@@ -260,6 +261,10 @@ export class FishBase {
 
     // ── 0. Advance the burst/glide cruise throttle (drives cruiseSpeed + drag + tail) ──
     this._updateThrottle(deltaMs);
+
+    // Fish within PERCEPTION_RADIUS this frame. Retained for later use (social-state
+    // triggers, density-aware behavior, tuning) — not currently displayed.
+    this._neighborCount = neighbors.length;
 
     // ── 1. Compose steering forces from the active state's behaviors ─────────
     const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs };
