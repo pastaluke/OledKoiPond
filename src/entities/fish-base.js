@@ -140,10 +140,17 @@ export class FishBase {
   static EDGE_YIELD        = 0.9;
 
   /** Max steering force (logical px/ms²), interpolated by size: small fish are
-   *  nimbler (higher force → tighter turns), large fish turn lazily. Low relative
+   *  nimbler (higher force → tighter turn arcs), large fish sweep wider. Low relative
    *  to SPEED_MAX → smooth, fish-like arcs rather than snappy banking. */
-  static MAX_FORCE_MAX = 0.00045;   // smallest fish — nimble; /SPEED_MAX ≈ 0.015 (≈ Shiffman)
-  static MAX_FORCE_MIN = 0.00022;   // largest fish  — lazy but wall-safe; /SPEED_MAX ≈ 0.0073
+  static MAX_FORCE_MAX = 0.00045;   // smallest fish — tightest arc
+  static MAX_FORCE_MIN = 0.00022;   // largest fish  — widest arc
+
+  /** Hard per-frame turn-rate cap (rad/s), interpolated by size.
+   *  Prevents the spin cycle at low speed where boids forces dominate a near-zero
+   *  velocity vector and whip the heading every frame. Separate from MAX_FORCE —
+   *  this is a ceiling on how fast the heading can rotate, not how hard it can push. */
+  static TURN_RATE_MAX = 2.4;   // rad/s — fastest turn (smallest fish)
+  static TURN_RATE_MIN = 0.8;   // rad/s — slowest turn (largest fish)
 
   // ── Burst-and-coast cruise throttle ─────────────────────────────────────────
   // Each fish pulses a throttle T∈[~0,1] on its own randomized cadence:
@@ -213,6 +220,13 @@ export class FishBase {
   get maxForce() {
     const c = this.constructor;
     return c.MAX_FORCE_MAX - this._sizeFrac * (c.MAX_FORCE_MAX - c.MAX_FORCE_MIN);
+  }
+
+  /** Hard turn-rate ceiling (rad/s) for this fish, interpolated by size.
+   *  Small fish turn faster; large fish sweep wider arcs. Live getter. */
+  get maxTurnRate() {
+    const c = this.constructor;
+    return c.TURN_RATE_MAX - this._sizeFrac * (c.TURN_RATE_MAX - c.TURN_RATE_MIN);
   }
 
   /** Max speed for this fish (logical px/ms), class static × per-fish jitter. Live. */
@@ -296,6 +310,23 @@ export class FishBase {
     if (sp > maxSpeed) {
       this.vx = (this.vx / sp) * maxSpeed;
       this.vy = (this.vy / sp) * maxSpeed;
+    }
+
+    // ── 2b. Hard turn-rate clamp ─────────────────────────────────────────────
+    // After forces + drag, the velocity direction may have rotated more than
+    // maxTurnRate allows in one frame — most visibly at low speed where even a
+    // small net force dominates a near-zero velocity vector (the spin cycle).
+    // Clamp the heading change to maxTurnRate×dt; preserve speed unchanged.
+    const spAfterDrag = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (spAfterDrag > 1e-6) {
+      const prospH  = Math.atan2(this.vy, this.vx);
+      const delta   = _angleDiff(prospH, this.heading);
+      const maxDelta = this.maxTurnRate / 1000 * deltaMs;
+      if (Math.abs(delta) > maxDelta) {
+        const clampedH = this.heading + Math.sign(delta) * maxDelta;
+        this.vx = Math.cos(clampedH) * spAfterDrag;
+        this.vy = Math.sin(clampedH) * spAfterDrag;
+      }
     }
 
     // ── 3. Move + hard boundary clamp (safety net beneath the `edges` force) ──
