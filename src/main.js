@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     grid.clear();
     sim.update(deltaMs);
     sim.draw();
+    grid.drawBorder();
     overlay.draw(sim.entities);
 
     requestAnimationFrame(frame);

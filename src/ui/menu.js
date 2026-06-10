@@ -57,6 +57,16 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       </div>
     </details>
     <details>
+      <summary>Border</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Show border</span>
+          <input type="checkbox" id="toggle-border">
+        </label>
+        <div id="border-sliders"></div>
+      </div>
+    </details>
+    <details>
       <summary>Debug</summary>
       <div class="menu-rows">
         <label class="menu-row">
@@ -133,6 +143,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
+    border: { ...grid.border },
   });
 
   function setFishCount(n) {
@@ -174,6 +185,12 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       if (Number.isFinite(d.density))        grid.density        = clamp(d.density, DENSITY_RANGE.min, DENSITY_RANGE.max);
       if (Number.isFinite(d.worldShortEdge)) grid.worldShortEdge = clamp(d.worldShortEdge, WORLD_RANGE.min, WORLD_RANGE.max);
       applyGrid();
+    }
+    if (persisted.border) {
+      const b = persisted.border;
+      if (typeof b.enabled === 'boolean') grid.border.enabled = b.enabled;
+      if (Number.isFinite(b.width))       grid.border.width   = clamp(b.width,   0.5, 10);
+      if (Number.isFinite(b.opacity))     grid.border.opacity = clamp(b.opacity, 0,   1);
     }
   }
 
@@ -338,6 +355,38 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     getMax: () => WORLD_RANGE.max,
   });
   displayHost.appendChild(worldRow);
+
+  // ── Border controls ──────────────────────────────────────────────────────────
+  const borderHost   = panel.querySelector('#border-sliders');
+  const borderToggle = panel.querySelector('#toggle-border');
+  borderToggle.checked = grid.border.enabled;
+  borderToggle.addEventListener('change', (e) => { grid.border.enabled = e.target.checked; save(); });
+
+  const { row: borderWidthRow } = makeRow({
+    label: 'Width',
+    infoText: 'Width: border thickness in world units. 1 = one logical pixel wide.',
+    decimals: 1,
+    valueStep: 0.5,
+    hasBounds: false,
+    getVal: () => grid.border.width,
+    setVal: (v) => { grid.border.width = clamp(v, 0.5, 10); },
+    getMin: () => 0.5,
+    getMax: () => 10,
+  });
+  borderHost.appendChild(borderWidthRow);
+
+  const { row: borderOpacityRow } = makeRow({
+    label: 'Opacity',
+    infoText: 'Opacity: border visibility. 0 = invisible, 1 = fully white.',
+    decimals: 2,
+    valueStep: 0.05,
+    hasBounds: false,
+    getVal: () => grid.border.opacity,
+    setVal: (v) => { grid.border.opacity = clamp(v, 0, 1); save(); },
+    getMin: () => 0,
+    getMax: () => 1,
+  });
+  borderHost.appendChild(borderOpacityRow);
 
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
   const copyBtn = panel.querySelector('#btn-copy-tuning');

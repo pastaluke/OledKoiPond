@@ -41,6 +41,9 @@ export class Grid {
     this.scale = 1;        // physical px per world unit
     this.cellScale = 1;    // physical px per display cell (= scale / density)
 
+    /** Border drawn over the pond after each frame. Width is in world units. */
+    this.border = { enabled: false, width: 1, opacity: 0.5 };
+
     this.resize();
 
     window.addEventListener('resize', () => {
@@ -118,6 +121,21 @@ export class Grid {
    */
   drawPixel(lx, ly, r, g, b) {
     this.drawCell(lx * this.density, ly * this.density, r, g, b);
+  }
+
+  /**
+   * Draws the pond border (if enabled) directly on the canvas after sim.draw().
+   * Width and position are in world units so the border scales with the grid.
+   */
+  drawBorder() {
+    if (!this.border.enabled) return;
+    const lw = this.border.width * this.scale;
+    const { ctx, canvas } = this;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,255,255,${this.border.opacity})`;
+    ctx.lineWidth = lw;
+    ctx.strokeRect(lw / 2, lw / 2, canvas.width - lw, canvas.height - lw);
+    ctx.restore();
   }
 
   /**
