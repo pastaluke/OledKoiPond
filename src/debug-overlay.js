@@ -26,6 +26,12 @@ const STATE_COLOR = {
   socialize: 'rgba(255,210,60,0.95)',   // amber — (future triggered state)
 };
 
+// Burst-and-coast throttle phase colours (orthogonal to STATE above).
+const PHASE_COLOR = {
+  burst: 'rgba(255,140,40,0.95)',   // orange — propelling
+  glide: 'rgba(120,200,255,0.95)',  // blue   — coasting
+};
+
 // Recompute all spline control points for a fish.
 // Returns { T, TC, W, BC, H } — all in physical canvas pixels.
 function _splinePoints(fish, scale) {
@@ -364,125 +370,98 @@ export class DebugOverlay {
     const { ctx, grid } = this;
     const scale = grid.scale;
 
-    const cls        = fish.constructor;
+    // ── High-level state-machine state (swim today; socialize/feed/… later) ──
     const state      = fish.state ?? 'swim';
     const stateColor = STATE_COLOR[state] ?? STATE_COLOR.swim;
 
-    // Speed values in logical-px/s (multiply px/ms by 1000)
-    const spdMin = 0;
-    const spdCur = Math.hypot(fish.vx ?? 0, fish.vy ?? 0)  * 1000;
-    const spdMax = (fish.maxSpeed ?? cls.SPEED_MAX ?? 0)   * 1000;
+    // ── Burst-and-coast throttle: phase, ms left in phase, eased throttle level ──
+    const phase      = fish._phase ?? 'glide';
+    const phaseColor = PHASE_COLOR[phase] ?? C_LABEL;
+    const holdMs     = Math.max(0, Math.round(fish._thrHold ?? 0));
+    const throttle   = fish._throttle ?? 0;
+    const thrTarget  = fish._thrTarget ?? 0;
 
-    // Rotation values in rad/s. steeringBend clamps to ±1.2 and ≈ turnRate*0.8,
-    // so the displayed range is ±1.5 rad/s.
-    const rotMax = 1.5;
-    const rotMin = -rotMax;
-    const rotCur = (fish.steeringBend  ?? 0) / 0.8;    // estimate from bend
+    // ── Speed in logical-px/s (px/ms × 1000) ─────────────────────────────────
+    const spdCur = Math.hypot(fish.vx ?? 0, fish.vy ?? 0) * 1000;
+    const spdMax = (fish.maxSpeed ?? 0)                   * 1000;
 
-    // Font size: at least 8px physical, scales with canvas resolution
-    const fontSize = Math.max(8, Math.floor(scale * 2));
+    // ── Rotation in rad/s. steeringBend clamps to ±1.2 ≈ turnRate×0.8 → ±1.5. ──
+    const rotMax = 1.5, rotMin = -rotMax;
+    const rotCur = (fish.steeringBend ?? 0) / 0.8;
+
+    // Each line is an array of coloured segments; box auto-sizes to the widest.
+    const sep = { text: ' / ', color: C_LABEL };
+    const lines = [
+      [ { text: state.toUpperCase(), color: stateColor } ],
+      [ { text: phase.toUpperCase(),  color: phaseColor },
+        { text: ` ${holdMs}ms`,       color: C_LABEL } ],
+      [ { text: 'thr ',                 color: C_LABEL },
+        { text: throttle.toFixed(2),    color: C_CUR   },
+        { text: ' → ',             color: C_LABEL },
+        { text: thrTarget.toFixed(2),   color: phaseColor } ],
+      [ { text: 'spd ',              color: C_LABEL },
+        { text: '0.0',               color: C_MIN   }, sep,
+        { text: spdCur.toFixed(1),   color: C_CUR   }, sep,
+        { text: spdMax.toFixed(1),   color: C_MAX   } ],
+      [ { text: 'rot ',              color: C_LABEL },
+        { text: rotMin.toFixed(2),   color: C_MIN   }, sep,
+        { text: rotCur.toFixed(2),   color: C_CUR   }, sep,
+        { text: rotMax.toFixed(2),   color: C_MAX   } ],
+    ];
+
+    // Position: centred above the fish's topmost extent, 6px gap.
+    const cx   = fish.x * scale;
+    const topY = (fish.y - fish.half) * scale;
+    this._drawStatsBox(lines, cx, topY - 6, stateColor);
+  }
+
+  /**
+   * Render a centred, dark, bordered multi-line text box whose bottom edge sits at
+   * (cx, bottomY). Each line is an array of { text, color } segments laid out L→R.
+   * @param {{text:string,color:string}[][]} lines
+   * @param {number} cx       - horizontal centre (physical px)
+   * @param {number} bottomY  - box bottom edge (physical px)
+   * @param {string} borderColor
+   */
+  _drawStatsBox(lines, cx, bottomY, borderColor) {
+    const { ctx, grid } = this;
+    const fontSize = Math.max(8, Math.floor(grid.scale * 2));
+    const lineH    = fontSize + 2;
+    const pad      = 4;
+
+    ctx.save();
     ctx.font = `${fontSize}px monospace`;
-    ctx.textAlign    = 'center';
+    ctx.textAlign    = 'left';
     ctx.textBaseline = 'bottom';
 
-    // Three lines of text
-    const line1 = state.toUpperCase();
-    const line2_label = 'spd ';
-    const line2_min   = spdMin.toFixed(1);
-    const line2_sep1  = ' / ';
-    const line2_cur   = spdCur.toFixed(1);
-    const line2_sep2  = ' / ';
-    const line2_max   = spdMax.toFixed(1);
-    const line3_label = 'rot ';
-    const line3_min   = rotMin.toFixed(2);
-    const line3_sep1  = ' / ';
-    const line3_cur   = rotCur.toFixed(2);
-    const line3_sep2  = ' / ';
-    const line3_max   = rotMax.toFixed(2);
+    // Measure: widest line sets box width; line count sets height.
+    const lineWidths = lines.map(segs =>
+      segs.reduce((w, s) => w + ctx.measureText(s.text).width, 0));
+    const boxW = Math.max(...lineWidths) + pad * 2;
+    const boxH = lineH * lines.length + pad * 2;
+    const boxX = cx - boxW / 2;
+    const boxY = bottomY - boxH;
 
-    // Measure widths for background box
-    const fullLine2 = line2_label + line2_min + line2_sep1 + line2_cur + line2_sep2 + line2_max;
-    const fullLine3 = line3_label + line3_min + line3_sep1 + line3_cur + line3_sep2 + line3_max;
-    const maxWidth  = Math.max(
-      ctx.measureText(line1).width,
-      ctx.measureText(fullLine2).width,
-      ctx.measureText(fullLine3).width,
-    );
-
-    const lineH   = fontSize + 2;
-    const pad     = 4;
-    const boxW    = maxWidth + pad * 2;
-    const boxH    = lineH * 3 + pad * 2;
-
-    // Position: centered above the fish's topmost extent
-    const topY  = (fish.y - fish.half) * scale;
-    const boxX  = fish.x * scale - boxW / 2;
-    const boxY  = topY - boxH - 6;   // 6px gap above fish
-
-    // ── Background + border ──────────────────────────────────────────────────
-    ctx.save();
+    // Background + state-coloured border.
     ctx.fillStyle   = 'rgba(0,0,0,0.65)';
-    ctx.strokeStyle = stateColor;
+    ctx.strokeStyle = borderColor;
     ctx.lineWidth   = 1.5;
     ctx.beginPath();
     ctx.roundRect(boxX, boxY, boxW, boxH, 3);
     ctx.fill();
     ctx.stroke();
 
-    // ── Line 1: state label ──────────────────────────────────────────────────
-    const cx = fish.x * scale;   // horizontal centre
-    let lineY = boxY + pad + lineH;
-
-    ctx.fillStyle = stateColor;
-    ctx.fillText(line1, cx, lineY);
-    lineY += lineH;
-
-    // ── Line 2: speed (multi-color) ──────────────────────────────────────────
-    _drawColorSegments(ctx, cx, lineY, fontSize, [
-      { text: line2_label, color: C_LABEL },
-      { text: line2_min,   color: C_MIN   },
-      { text: line2_sep1,  color: C_LABEL },
-      { text: line2_cur,   color: C_CUR   },
-      { text: line2_sep2,  color: C_LABEL },
-      { text: line2_max,   color: C_MAX   },
-    ]);
-    lineY += lineH;
-
-    // ── Line 3: rotation (multi-color) ──────────────────────────────────────
-    _drawColorSegments(ctx, cx, lineY, fontSize, [
-      { text: line3_label, color: C_LABEL },
-      { text: line3_min,   color: C_MIN   },
-      { text: line3_sep1,  color: C_LABEL },
-      { text: line3_cur,   color: C_CUR   },
-      { text: line3_sep2,  color: C_LABEL },
-      { text: line3_max,   color: C_MAX   },
-    ]);
-
+    // Each line centred horizontally; segments drawn left→right from there.
+    let y = boxY + pad + lineH;
+    for (let i = 0; i < lines.length; i++) {
+      let drawX = cx - lineWidths[i] / 2;
+      for (const { text, color } of lines[i]) {
+        ctx.fillStyle = color;
+        ctx.fillText(text, drawX, y);
+        drawX += ctx.measureText(text).width;
+      }
+      y += lineH;
+    }
     ctx.restore();
-  }
-}
-
-/**
- * Draw a series of text segments with individual colours, centred on cx.
- * All segments are measured first to compute total width, then drawn left→right.
- * @param {CanvasRenderingContext2D} ctx
- * @param {number} cx   - horizontal centre (physical px)
- * @param {number} y    - baseline y (physical px)
- * @param {number} fontSize
- * @param {{ text: string, color: string }[]} segments
- */
-function _drawColorSegments(ctx, cx, y, fontSize, segments) {
-  ctx.font = `${fontSize}px monospace`;
-  ctx.textBaseline = 'bottom';
-
-  const totalW = segments.reduce((s, seg) => s + ctx.measureText(seg.text).width, 0);
-  let drawX = cx - totalW / 2;
-
-  for (const { text, color } of segments) {
-    const w = ctx.measureText(text).width;
-    ctx.fillStyle   = color;
-    ctx.textAlign   = 'left';
-    ctx.fillText(text, drawX, y);
-    drawX += w;
   }
 }
