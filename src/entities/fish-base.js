@@ -145,6 +145,10 @@ export class FishBase {
   static MAX_FORCE_MAX = 0.00045;   // smallest fish — tightest arc
   static MAX_FORCE_MIN = 0.00022;   // largest fish  — widest arc
 
+  /** When true, draw() fills the fish body solid rather than outline-only.
+   *  Toggled globally from the Fish menu section. */
+  static FILLED = false;
+
   /** Hard per-frame turn-rate cap (rad/s), interpolated by size.
    *  Prevents the spin cycle at low speed where boids forces dominate a near-zero
    *  velocity vector and whip the heading every frame. Separate from MAX_FORCE —
@@ -363,6 +367,22 @@ export class FishBase {
     // Center on the display-cell grid; spline offsets are already in display cells.
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     const { r, g, b } = this.color;
-    for (const { x, y } of pixels) grid.drawCell(ocx + x, ocy + y, r, g, b);
+
+    if (this.constructor.FILLED) {
+      // Scanline fill: for each y-row, paint every cell between the leftmost and
+      // rightmost outline pixel so the body is solid rather than hollow.
+      const rows = new Map();
+      for (const { x, y } of pixels) {
+        const ay = ocy + y, ax = ocx + x;
+        const row = rows.get(ay);
+        if (!row) rows.set(ay, { min: ax, max: ax });
+        else { if (ax < row.min) row.min = ax; if (ax > row.max) row.max = ax; }
+      }
+      for (const [ay, { min, max }] of rows) {
+        for (let ax = min; ax <= max; ax++) grid.drawCell(ax, ay, r, g, b);
+      }
+    } else {
+      for (const { x, y } of pixels) grid.drawCell(ocx + x, ocy + y, r, g, b);
+    }
   }
 }

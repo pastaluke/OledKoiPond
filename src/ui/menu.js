@@ -51,6 +51,16 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       </div>
     </details>
     <details>
+      <summary>Fish</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Filled in</span>
+          <input type="checkbox" id="toggle-filled">
+        </label>
+        <div id="fish-sliders"></div>
+      </div>
+    </details>
+    <details>
       <summary>Display</summary>
       <div class="menu-rows">
         <div id="display-sliders"></div>
@@ -142,8 +152,9 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   // ── Persistence ─────────────────────────────────────────────────────────────
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
+    fish:    { filled: FishClass.FILLED },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
-    border: { ...grid.border },
+    border:  { ...grid.border },
   });
 
   function setFishCount(n) {
@@ -185,6 +196,9 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       if (Number.isFinite(d.density))        grid.density        = clamp(d.density, DENSITY_RANGE.min, DENSITY_RANGE.max);
       if (Number.isFinite(d.worldShortEdge)) grid.worldShortEdge = clamp(d.worldShortEdge, WORLD_RANGE.min, WORLD_RANGE.max);
       applyGrid();
+    }
+    if (persisted.fish) {
+      if (typeof persisted.fish.filled === 'boolean') FishClass.FILLED = persisted.fish.filled;
     }
     if (persisted.border) {
       const b = persisted.border;
@@ -313,6 +327,12 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     sliderHost.appendChild(row);
   }
 
+  // ── Fish section ─────────────────────────────────────────────────────────────
+  const fishHost    = panel.querySelector('#fish-sliders');
+  const filledToggle = panel.querySelector('#toggle-filled');
+  filledToggle.checked = FishClass.FILLED;
+  filledToggle.addEventListener('change', (e) => { FishClass.FILLED = e.target.checked; save(); });
+
   // Fish count — value control only (fixed range, no bound brackets).
   const { row: countRow } = makeRow({
     label: 'Fish count',
@@ -325,7 +345,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     getMin: () => FISH_MIN,
     getMax: () => FISH_MAX,
   });
-  sliderHost.appendChild(countRow);
+  fishHost.appendChild(countRow);
 
   // ── Build display sliders (grid knobs) ────────────────────────────────────────
   const displayHost = panel.querySelector('#display-sliders');

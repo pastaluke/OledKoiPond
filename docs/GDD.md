@@ -361,6 +361,7 @@ ColorConfig {
 - Custom entity authoring tool (in-app pixel editor)
 - Google Play wrapper
 - Steam / Electron wrapper
+- **Render style system** — Fish (and other entities) will support multiple named render styles (e.g. outline, filled, gradient, glow). Styles compose with other visual layers: the border, the water ripple layer, and any future shader-like passes such as directional highlights/shadows relative to a configurable light source direction. Selecting a style applies cohesively across all participating layers.
 - **Fish naming & name-triggered Easter eggs** — Players can name individual fish. Certain names trigger hidden effects or behaviors, like cheat codes in old RTS games. The list of special names and what they do is TBD.
 - **Ripple-driven pixel effects** — Ripple layer values influence the pixels beneath them on the entity render layer. Base effect: a ripple passing over a fish outline brightens that pixel slightly. Extended effect: a special ripple type (trigger TBD) causes fish outline pixels to shift to rainbow colors as the wave passes over them.
 - **Ambient clock** — Optional display of the current time in a thematically consistent style. Slowly drifts around the pond to prevent screen burn-in. Fish occasionally stop and look at it for a moment. When a digit changes, that digit emits a ripple. 
