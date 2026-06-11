@@ -12,6 +12,20 @@ git push -u origin main
 git checkout <dev-branch>   # return to dev branch
 ```
 
+## Development execution model
+The user operates in two distinct modes:
+
+**Plan mode** — organizing, discussing, designing, documenting. No code is
+written unless explicitly requested. Treat all conversation as planning unless
+the user clearly signals otherwise.
+
+**Execution mode** — the user will explicitly say they want a task implemented.
+When they do, they may orchestrate multiple agents in parallel (fan-out pattern)
+to work on independent stories simultaneously. Each agent prompt will be
+self-contained with enough context to act without back-referencing the
+conversation. Do not start implementing during plan mode, even if the path is
+obvious.
+
 ## Future feature convention
 When the user says **"future feature: [description]"**, append it to the
 **Future / Backlog** list in `docs/GDD.md`. Capture the description faithfully;
