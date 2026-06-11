@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SprintBoard — OledKoiPond</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: rgba(255,255,255,0.8);
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 14px 20px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #0a0a0a;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 10px;
+      letter-spacing: 0.3px;
+    }
+
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .filter-btn {
+      padding: 3px 9px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: transparent;
+      color: rgba(255,255,255,0.5);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      transition: background 0.12s, color 0.12s;
+    }
+    .filter-btn:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.75); }
+    .filter-btn.active {
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.9);
+      border-color: rgba(255,255,255,0.25);
+    }
+
+    .sep { width: 1px; height: 16px; background: rgba(255,255,255,0.08); flex-shrink: 0; }
+
+    .action-btn {
+      padding: 3px 9px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.55);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      transition: background 0.12s, color 0.12s;
+    }
+    .action-btn:hover { background: rgba(255,255,255,0.09); color: rgba(255,255,255,0.8); }
+
+    /* ── Board ── */
+    #board {
+      display: flex;
+      gap: 10px;
+      padding: 14px 20px;
+      overflow-x: auto;
+      align-items: flex-start;
+      min-height: calc(100vh - 78px);
+    }
+
+    /* ── Columns ── */
+    details.column {
+      flex: 0 0 215px;
+      min-width: 215px;
+      background: #111;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.055);
+    }
+
+    details.column > summary {
+      list-style: none;
+      padding: 9px 11px;
+      border-bottom: 1px solid rgba(255,255,255,0.055);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      user-select: none;
+    }
+    details.column > summary::-webkit-details-marker { display: none; }
+
+    .col-title {
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.6px;
+      color: rgba(255,255,255,0.6);
+      text-transform: uppercase;
+      flex: 1;
+    }
+
+    .col-count {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.055);
+      padding: 1px 6px;
+      border-radius: 8px;
+      min-width: 20px;
+      text-align: center;
+    }
+
+    .col-body {
+      min-height: 50px;
+      padding: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .col-body.drag-over { background: rgba(255,255,255,0.025); }
+
+    /* ── Cards ── */
+    .card {
+      background: #161616;
+      border-radius: 5px;
+      border: 1px solid rgba(255,255,255,0.065);
+      overflow: hidden;
+      cursor: grab;
+      transition: border-color 0.12s, transform 0.1s;
+    }
+    .card:hover {
+      border-color: rgba(255,255,255,0.15);
+      transform: translateY(-1px);
+    }
+    .card.dragging { opacity: 0.35; cursor: grabbing; }
+
+    .card-banner { height: 3px; }
+
+    .card-body { padding: 7px 9px; }
+
+    .card-meta {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 4px;
+    }
+    .card-epic {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .card-id {
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+      margin-left: auto;
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.82);
+      line-height: 1.4;
+      margin-bottom: 5px;
+    }
+
+    .card-sprint {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.055);
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 5px;
+    }
+
+    .card-notes {
+      font-size: 11px;
+      color: rgba(255,255,255,0.32);
+      line-height: 1.45;
+    }
+
+    .card.hidden { display: none; }
+
+    /* ── Desktop: columns always open, non-interactive summary ── */
+    @media (min-width: 641px) {
+      details.column > summary { pointer-events: none; cursor: default; }
+    }
+
+    /* ── Mobile: stack columns vertically ── */
+    @media (max-width: 640px) {
+      #board {
+        flex-direction: column;
+        overflow-x: visible;
+        padding: 10px 12px;
+        gap: 8px;
+      }
+      details.column {
+        flex: none;
+        min-width: 0;
+        width: 100%;
+      }
+    }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: rgba(28,28,28,0.97);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,255,255,0.85);
+      padding: 7px 14px;
+      border-radius: 5px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 100;
+      max-width: 90vw;
+      text-align: center;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🐟 OledKoiPond — SprintBoard</h1>
+  <div id="controls">
+    <button class="filter-btn active" data-epic="all">All</button>
+    <button class="filter-btn" data-epic="E1" style="color:#00d2ff;border-color:#00d2ff33">E1 Polish</button>
+    <button class="filter-btn" data-epic="E2" style="color:#4488ff;border-color:#4488ff33">E2 Water</button>
+    <button class="filter-btn" data-epic="E3" style="color:#aa66ff;border-color:#aa66ff33">E3 Visual</button>
+    <button class="filter-btn" data-epic="E4" style="color:#44cc88;border-color:#44cc8833">E4 Entities</button>
+    <button class="filter-btn" data-epic="E5" style="color:#ff9944;border-color:#ff994433">E5 Deploy</button>
+    <button class="filter-btn" data-epic="E6" style="color:#ff5599;border-color:#ff559933">E6 Creator</button>
+    <span class="sep"></span>
+    <button class="action-btn" id="copy-btn">Copy JSON</button>
+    <button class="action-btn" id="reset-btn">Reset</button>
+  </div>
+</header>
+
+<main id="board"></main>
+<div id="toast"></div>
+
+<script>
+// Edit tickets.json, then run: node dev-artifacts/build-board.js
+const BAKED_DATA = /* BEGIN_TICKETS */ [
+  {
+    "id": "E1-1",
+    "epic": "E1",
+    "title": "PWA manifest + icons",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "manifest.json + icons so Add to Home Screen shows a proper icon and name instead of a screenshot"
+  },
+  {
+    "id": "E1-2",
+    "epic": "E1",
+    "title": "iOS home-screen meta tags",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "meta theme-color and apple-mobile-web-app-capable tags so the status bar goes black on home-screen launch"
+  },
+  {
+    "id": "E1-3",
+    "epic": "E1",
+    "title": "Fish color controls in menu",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "Hue / saturation sliders or a color picker per species in the Fish menu"
+  },
+  {
+    "id": "E1-4",
+    "epic": "E1",
+    "title": "Koi color palette variety",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Currently a fixed list; expose palette selection in menu"
+  },
+  {
+    "id": "E1-5",
+    "epic": "E1",
+    "title": "Performance profiling pass",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Measure frame time on mid-range Android; identify bottlenecks"
+  },
+  {
+    "id": "E1-6",
+    "epic": "E1",
+    "title": "Edge-factor debug stat",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Add edge-factor to Entity Stats box (how deep the fish is in the wall-avoidance band)"
+  },
+  {
+    "id": "E2-1",
+    "epic": "E2",
+    "title": "Tap/touch → pixelated ripple",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "Visual ripple at tap point — simple expanding ring, pixelated, no full fluid sim yet"
+  },
+  {
+    "id": "E2-2",
+    "epic": "E2",
+    "title": "2D wave-propagation fluid grid",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "CPU, discrete wave equation from GDD §8"
+  },
+  {
+    "id": "E2-3",
+    "epic": "E2",
+    "title": "Ripple injection from fish movement",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Body displacement → fluid grid"
+  },
+  {
+    "id": "E2-4",
+    "epic": "E2",
+    "title": "Ripple overlay renderer",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Fluid grid values → semi-transparent pixel overlay"
+  },
+  {
+    "id": "E2-5",
+    "epic": "E2",
+    "title": "Tap → inject ripple into fluid grid",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Replaces/extends E2-1 once the full fluid sim is in place"
+  },
+  {
+    "id": "E2-6",
+    "epic": "E2",
+    "title": "Ripple-driven pixel brightness",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Overlay values brighten fish outline pixels beneath"
+  },
+  {
+    "id": "E2-7",
+    "epic": "E2",
+    "title": "Rainbow ripple type",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Special ripple → rainbow color pass over fish outline pixels"
+  },
+  {
+    "id": "E3-1",
+    "epic": "E3",
+    "title": "ColorConfig struct on entities",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Mode (solid/rainbow/pulse), base RGB, speed — attached to each entity"
+  },
+  {
+    "id": "E3-2",
+    "epic": "E3",
+    "title": "Formalise render style enum",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "outline and filled are the first two entries; replace the checkbox with a selector"
+  },
+  {
+    "id": "E3-3",
+    "epic": "E3",
+    "title": "gradient render style",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Fill uses a per-row brightness gradient (lighter belly, darker back)"
+  },
+  {
+    "id": "E3-4",
+    "epic": "E3",
+    "title": "glow render style",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Soft halo of dim pixels around the outline (offset copies at lower opacity)"
+  },
+  {
+    "id": "E3-5",
+    "epic": "E3",
+    "title": "Directional highlight pass",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Configurable light-source angle; compute highlight/shadow side of each entity"
+  },
+  {
+    "id": "E3-6",
+    "epic": "E3",
+    "title": "Style + color controls in Fish menu",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Integrate render style and color settings into the Fish section of the menu"
+  },
+  {
+    "id": "E3-7",
+    "epic": "E3",
+    "title": "Border color control",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Border is currently hardcoded white; add a color picker or hue control"
+  },
+  {
+    "id": "E3-8",
+    "epic": "E3",
+    "title": "5.5-second breathing circle",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Ambient pulsing circle overlay — slow inhale/exhale rhythm from GDD"
+  },
+  {
+    "id": "E3-9",
+    "epic": "E3",
+    "title": "Ambient clock",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Thematically consistent clock display from GDD"
+  },
+  {
+    "id": "E4-1",
+    "epic": "E4",
+    "title": "Fish socializing state machine",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Approach, face, kiss / follow outcomes — see GDD"
+  },
+  {
+    "id": "E4-2",
+    "epic": "E4",
+    "title": "_neighborCount → socialize trigger",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Low neighbor count → seek company; high count → peel off"
+  },
+  {
+    "id": "E4-3",
+    "epic": "E4",
+    "title": "bubble entity",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Rising circle that pops at the top with a ripple event"
+  },
+  {
+    "id": "E4-4",
+    "epic": "E4",
+    "title": "lily_pad entity",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Static entity with very slow drift"
+  },
+  {
+    "id": "E4-5",
+    "epic": "E4",
+    "title": "Entity config file",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Register new entity types without code changes"
+  },
+  {
+    "id": "E4-6",
+    "epic": "E4",
+    "title": "Fish naming UI + Easter eggs",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Tap a fish → name input; special names in a list trigger different effects"
+  },
+  {
+    "id": "E4-7",
+    "epic": "E4",
+    "title": "Gyroscope / tilt controls",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Fish react to device orientation"
+  },
+  {
+    "id": "E5-1",
+    "epic": "E5",
+    "title": "PWA manifest + icons (deployment)",
+    "status": "ready-for-design",
+    "sprint": "Sprint 1",
+    "notes": "Overlaps E1-1 and E1-2 — do together; completes the nightstand use-case"
+  },
+  {
+    "id": "E5-2",
+    "epic": "E5",
+    "title": "itch.io HTML5 export",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Zip dist/ and upload; confirm it plays correctly"
+  },
+  {
+    "id": "E5-3",
+    "epic": "E5",
+    "title": "itch.io page copy and screenshots",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Write store page copy and capture screenshots for the itch.io listing"
+  },
+  {
+    "id": "E5-4",
+    "epic": "E5",
+    "title": "Orientation-change handling",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Gracefully reflow canvas and UI when phone rotates"
+  },
+  {
+    "id": "E5-5",
+    "epic": "E5",
+    "title": "Google Play wrapper",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Long-term: Trusted Web Activity or similar"
+  },
+  {
+    "id": "E5-6",
+    "epic": "E5",
+    "title": "Steam / Electron wrapper",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Long-term: desktop distribution via Electron"
+  },
+  {
+    "id": "E6-1",
+    "epic": "E6",
+    "title": "Entity plugin API contract",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Define what a third-party entity class is allowed to read and write"
+  },
+  {
+    "id": "E6-2",
+    "epic": "E6",
+    "title": "Worker-based entity sandbox",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Proof of concept: run one entity type inside a Web Worker"
+  },
+  {
+    "id": "E6-3",
+    "epic": "E6",
+    "title": "Import whitelist static analyser",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Check import graph at load time before running plugin code"
+  },
+  {
+    "id": "E6-4",
+    "epic": "E6",
+    "title": "Fragment shader / visual pass DSL",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "Design a restricted GLSL DSL or custom DSL for untrusted visual passes"
+  },
+  {
+    "id": "E6-5",
+    "epic": "E6",
+    "title": "Shader sandbox",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "OffscreenCanvas / WebGL isolation for untrusted visual passes"
+  },
+  {
+    "id": "E6-6",
+    "epic": "E6",
+    "title": "Preset bundle format",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "JSON: entity config + tuning + render style bundled together"
+  },
+  {
+    "id": "E6-7",
+    "epic": "E6",
+    "title": "In-app preset browser / importer",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "UI for browsing and importing community preset bundles"
+  },
+  {
+    "id": "E6-8",
+    "epic": "E6",
+    "title": "Companion sharing site",
+    "status": "backlog",
+    "sprint": "",
+    "notes": "itch.io community page or self-hosted site for sharing presets"
+  }
+]
+ /* END_TICKETS */;
+
+const COLUMNS = [
+  { id: 'idea-pond',        label: 'Idea Pond',         emoji: '💡' },
+  { id: 'backlog',          label: 'Backlog',            emoji: '⬜' },
+  { id: 'ready-for-design', label: 'Ready for Design',  emoji: '🟦' },
+  { id: 'implementation',   label: 'Implementation',    emoji: '🔶' },
+  { id: 'testing',          label: 'Testing',            emoji: '🧪' },
+  { id: 'live',             label: 'Live',               emoji: '✅' },
+];
+
+const EPIC_COLORS = {
+  E1: '#00d2ff', E2: '#4488ff', E3: '#aa66ff',
+  E4: '#44cc88', E5: '#ff9944', E6: '#ff5599',
+};
+
+const EPIC_NAMES = {
+  E1: 'Core Polish',       E2: 'Water & Interaction',
+  E3: 'Visual System',     E4: 'Entity Ecosystem',
+  E5: 'Deployment',        E6: 'Creator Workshop',
+};
+
+let tickets = [];
+let activeEpic = 'all';
+
+function load() {
+  const saved = localStorage.getItem('koipond.board');
+  tickets = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(BAKED_DATA));
+}
+
+function persist() {
+  localStorage.setItem('koipond.board', JSON.stringify(tickets));
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function makeCard(t) {
+  const color  = EPIC_COLORS[t.epic] || '#666';
+  const hidden = activeEpic !== 'all' && t.epic !== activeEpic;
+
+  const card = document.createElement('div');
+  card.className = 'card' + (hidden ? ' hidden' : '');
+  card.draggable = true;
+  card.dataset.id = t.id;
+
+  card.innerHTML =
+    `<div class="card-banner" style="background:${color}"></div>` +
+    `<div class="card-body">` +
+      `<div class="card-meta">` +
+        `<span class="card-epic" style="color:${color}">${escHtml(t.epic)} · ${escHtml(EPIC_NAMES[t.epic] || '')}</span>` +
+        `<span class="card-id">${escHtml(t.id)}</span>` +
+      `</div>` +
+      `<div class="card-title">${escHtml(t.title)}</div>` +
+      (t.sprint ? `<span class="card-sprint">${escHtml(t.sprint)}</span>` : '') +
+      (t.notes  ? `<div class="card-notes">${escHtml(t.notes)}</div>`   : '') +
+    `</div>`;
+
+  card.addEventListener('dragstart', e => {
+    e.dataTransfer.setData('text/plain', t.id);
+    card.classList.add('dragging');
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  return card;
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  for (const col of COLUMNS) {
+    const colTickets = tickets.filter(t => t.status === col.id);
+    const visCount = activeEpic === 'all'
+      ? colTickets.length
+      : colTickets.filter(t => t.epic === activeEpic).length;
+
+    const details = document.createElement('details');
+    details.className = 'column';
+    details.setAttribute('open', '');
+    details.dataset.colId = col.id;
+
+    const summary = document.createElement('summary');
+    summary.innerHTML =
+      `<span class="col-title">${col.emoji} ${col.label}</span>` +
+      `<span class="col-count">${visCount}</span>`;
+
+    const body = document.createElement('div');
+    body.className = 'col-body';
+
+    for (const t of colTickets) body.appendChild(makeCard(t));
+
+    body.addEventListener('dragover',  e => { e.preventDefault(); body.classList.add('drag-over'); });
+    body.addEventListener('dragleave', ()  => body.classList.remove('drag-over'));
+    body.addEventListener('drop', e => {
+      e.preventDefault();
+      body.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      const ticket = tickets.find(t => t.id === id);
+      if (ticket && ticket.status !== col.id) {
+        ticket.status = col.id;
+        persist();
+        renderBoard();
+      }
+    });
+
+    details.appendChild(summary);
+    details.appendChild(body);
+    board.appendChild(details);
+  }
+}
+
+// Epic filter
+document.getElementById('controls').addEventListener('click', e => {
+  const btn = e.target.closest('.filter-btn');
+  if (!btn) return;
+  activeEpic = btn.dataset.epic;
+  document.querySelectorAll('.filter-btn')
+    .forEach(b => b.classList.toggle('active', b === btn));
+  renderBoard();
+});
+
+// Copy JSON
+document.getElementById('copy-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(JSON.stringify(tickets, null, 2))
+    .then(() => showToast('JSON copied — paste into tickets.json, then run build-board.js'))
+    .catch(() => showToast('Copy failed — check browser permissions'));
+});
+
+// Reset
+document.getElementById('reset-btn').addEventListener('click', () => {
+  if (!confirm('Reset to baked-in data? All drag changes will be lost.')) return;
+  localStorage.removeItem('koipond.board');
+  load();
+  renderBoard();
+});
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+load();
+renderBoard();
+</script>
+</body>
+</html>
