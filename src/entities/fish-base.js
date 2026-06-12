@@ -7,6 +7,7 @@
 
 import { BEHAVIORS } from '../movement/behaviors.js';
 import { STATES, nextState } from '../movement/states.js';
+import { rollColor, getActivePalette, getSpecialPalette } from '../palettes/index.js';
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
 // curve: number → power exponent (1=uniform, >1=small-biased, <1=large-biased)
@@ -216,7 +217,7 @@ export class FishBase {
     this._wanderTheta = Math.random() * Math.PI * 2;
     this._neighborCount = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
 
-    this.color = cls.COLORS[Math.floor(Math.random() * cls.COLORS.length)];
+    this.color = rollColor(getActivePalette(), getSpecialPalette());
   }
 
   /** Max steering force for this fish (logical px/ms²), interpolated by size from

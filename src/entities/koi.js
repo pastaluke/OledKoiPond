@@ -15,11 +15,5 @@ export class Koi extends FishBase {
   static PERCEPTION_RADIUS = 30;   // px — ≈2× body length, ≈2.5× separation
   static SEPARATION_DIST   = 12;   // px — ≈0.75× body length
 
-  static COLORS = [
-    { r: 255, g: 140, b: 0   },   // orange
-    { r: 255, g: 60,  b: 60  },   // red-orange
-    { r: 255, g: 220, b: 100 },   // yellow
-    { r: 200, g: 255, b: 180 },   // pale green-white
-    { r: 255, g: 255, b: 220 },   // cream / white
-  ];
+  // Colors managed by src/palettes/ — see builtin/koi-classic.js for the defaults.
 }

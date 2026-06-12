@@ -8,6 +8,7 @@ import { Simulation   } from './simulation.js';
 import { Koi          } from './entities/koi.js';
 import { DebugOverlay } from './debug-overlay.js';
 import { initMenu     } from './ui/menu.js';
+import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -42,6 +43,19 @@ document.addEventListener('DOMContentLoaded', () => {
     overlay.sync();
     prevW = grid.logicalW;
     prevH = grid.logicalH;
+  });
+
+  // Feed: tap/click recolors the nearest fish from the active palette bag.
+  canvas.addEventListener('pointerdown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const lx = (e.clientX - rect.left) / grid.scale;
+    const ly = (e.clientY - rect.top)  / grid.scale;
+    let nearest = null, minD2 = Infinity;
+    for (const fish of sim.entities) {
+      const d2 = (fish.x - lx) ** 2 + (fish.y - ly) ** 2;
+      if (d2 < minD2) { minD2 = d2; nearest = fish; }
+    }
+    if (nearest) nearest.color = rollColor(getActivePalette(), getSpecialPalette());
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).

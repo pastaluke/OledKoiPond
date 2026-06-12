@@ -5,6 +5,9 @@ import {
   MOVEMENT_PARAMS, snapshot, applyValues, defaultRanges,
   loadPersisted, savePersisted, toCodeSnippet,
 } from '../movement/tuning.js';
+import {
+  BUILTIN_PALETTES, setActivePalette, getActivePaletteId,
+} from '../palettes/index.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -56,6 +59,10 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
         <label class="menu-row">
           <span>Filled in</span>
           <input type="checkbox" id="toggle-filled">
+        </label>
+        <label class="menu-row">
+          <span>Food bag</span>
+          <select id="palette-select" class="menu-select"></select>
         </label>
         <div id="fish-sliders"></div>
       </div>
@@ -152,7 +159,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   // ── Persistence ─────────────────────────────────────────────────────────────
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
-    fish:    { filled: FishClass.FILLED },
+    fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border },
   });
@@ -198,7 +205,8 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       applyGrid();
     }
     if (persisted.fish) {
-      if (typeof persisted.fish.filled === 'boolean') FishClass.FILLED = persisted.fish.filled;
+      if (typeof persisted.fish.filled   === 'boolean') FishClass.FILLED = persisted.fish.filled;
+      if (typeof persisted.fish.paletteId === 'string') setActivePalette(persisted.fish.paletteId);
     }
     if (persisted.border) {
       const b = persisted.border;
@@ -332,6 +340,16 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   const filledToggle = panel.querySelector('#toggle-filled');
   filledToggle.checked = FishClass.FILLED;
   filledToggle.addEventListener('change', (e) => { FishClass.FILLED = e.target.checked; save(); });
+
+  const palSel = panel.querySelector('#palette-select');
+  for (const p of BUILTIN_PALETTES) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    palSel.appendChild(opt);
+  }
+  palSel.value = getActivePaletteId();
+  palSel.addEventListener('change', (e) => { setActivePalette(e.target.value); save(); });
 
   // Fish count — value control only (fixed range, no bound brackets).
   const { row: countRow } = makeRow({
