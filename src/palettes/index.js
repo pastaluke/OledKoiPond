@@ -9,11 +9,18 @@ import {
   initRegistry, rollColor,
   setActivePalette, getActivePaletteId,
   getActivePalette, getSpecialPalette,
+  loadCustomPalettes, addCustomPalette, updateCustomPalette, deleteCustomPalette,
+  getAllPalettes, getCustomPalettes, isBuiltin,
 } from './palette-manager.js';
 
 export const BUILTIN_PALETTES = [koiClassic, special];
 
-// Default active palette is the first entry (koi-classic).
-initRegistry(BUILTIN_PALETTES);
+// Merge persisted custom palettes into the registry on init.
+const _customs = loadCustomPalettes();
+initRegistry([...BUILTIN_PALETTES, ..._customs]);
 
-export { rollColor, setActivePalette, getActivePaletteId, getActivePalette, getSpecialPalette };
+export {
+  rollColor, setActivePalette, getActivePaletteId, getActivePalette, getSpecialPalette,
+  getAllPalettes, getCustomPalettes, isBuiltin, loadCustomPalettes,
+  addCustomPalette, updateCustomPalette, deleteCustomPalette,
+};

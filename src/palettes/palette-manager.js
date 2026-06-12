@@ -2,14 +2,48 @@
 // Weighted-random color rolling from a palette bag.
 // Colors without pct → equal-split; remainder % → draws from the special bag.
 
+const CUSTOM_KEY = 'koipond.palettes';
+
 let _registry = [];
 let _activePaletteId = null;
+const _builtinIds = new Set();
 
 export function initRegistry(palettes) {
   _registry = palettes;
+  _builtinIds.clear();
+  for (const p of palettes) { if (p.builtin) _builtinIds.add(p.id); }
   if (_activePaletteId === null && palettes.length > 0) {
     _activePaletteId = palettes[0].id;
   }
+}
+
+export function isBuiltin(id) { return _builtinIds.has(id); }
+export function getAllPalettes() { return [..._registry]; }
+export function getCustomPalettes() { return _registry.filter(p => !p.builtin); }
+
+export function loadCustomPalettes() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY)) || []; }
+  catch { return []; }
+}
+
+function _saveCustomPalettes() {
+  try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(getCustomPalettes())); } catch { /* ignore */ }
+}
+
+export function addCustomPalette(palette) {
+  _registry = [..._registry.filter(p => p.id !== palette.id), palette];
+  _saveCustomPalettes();
+}
+
+export function updateCustomPalette(id, patch) {
+  _registry = _registry.map(p => (p.id === id && !p.builtin) ? { ...p, ...patch } : p);
+  _saveCustomPalettes();
+}
+
+export function deleteCustomPalette(id) {
+  if (isBuiltin(id)) return;
+  _registry = _registry.filter(p => p.id !== id);
+  _saveCustomPalettes();
 }
 
 export function setActivePalette(id) {

@@ -6,7 +6,9 @@ import {
   loadPersisted, savePersisted, toCodeSnippet,
 } from '../movement/tuning.js';
 import {
-  BUILTIN_PALETTES, setActivePalette, getActivePaletteId,
+  getAllPalettes, isBuiltin,
+  setActivePalette, getActivePaletteId, getActivePalette,
+  addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
@@ -64,6 +66,26 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
           <span>Food bag</span>
           <select id="palette-select" class="menu-select"></select>
         </label>
+        <div id="palette-editor" class="pal-editor">
+          <div id="pal-color-list" class="pal-color-list"></div>
+          <div class="pal-add-row" id="pal-add-row">
+            <input type="text" id="pal-color-input" class="menu-text-input" placeholder="#ff8c00 or 255,140,0">
+            <button type="button" class="pal-icon-btn" id="pal-paste-btn" title="Paste from clipboard">&#x1F4CB;</button>
+            <button type="button" class="pal-icon-btn" id="pal-add-btn" title="Add color">+</button>
+          </div>
+          <label class="menu-row" id="pal-name-row">
+            <span>Name</span>
+            <input type="text" id="pal-name-input" class="menu-text-input" maxlength="32">
+          </label>
+          <div class="menu-btn-row" id="pal-csv-row">
+            <button class="menu-action" id="pal-copy-csv">Copy CSV</button>
+            <button class="menu-action" id="pal-paste-csv">Paste CSV</button>
+          </div>
+          <div class="menu-btn-row" id="pal-manage-row">
+            <button class="menu-action" id="pal-delete-btn">Delete palette</button>
+          </div>
+        </div>
+        <button class="menu-action" id="pal-new-btn">+ New palette</button>
         <div id="fish-sliders"></div>
       </div>
     </details>
@@ -341,15 +363,179 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   filledToggle.checked = FishClass.FILLED;
   filledToggle.addEventListener('change', (e) => { FishClass.FILLED = e.target.checked; save(); });
 
-  const palSel = panel.querySelector('#palette-select');
-  for (const p of BUILTIN_PALETTES) {
+  const palSel       = panel.querySelector('#palette-select');
+  const palColorList = panel.querySelector('#pal-color-list');
+  const palAddRow    = panel.querySelector('#pal-add-row');
+  const palColorInput = panel.querySelector('#pal-color-input');
+  const palPasteBtn  = panel.querySelector('#pal-paste-btn');
+  const palAddBtn    = panel.querySelector('#pal-add-btn');
+  const palNameRow   = panel.querySelector('#pal-name-row');
+  const palNameInput = panel.querySelector('#pal-name-input');
+  const palCsvRow    = panel.querySelector('#pal-csv-row');
+  const palCopyCsv   = panel.querySelector('#pal-copy-csv');
+  const palPasteCsv  = panel.querySelector('#pal-paste-csv');
+  const palManageRow = panel.querySelector('#pal-manage-row');
+  const palDeleteBtn = panel.querySelector('#pal-delete-btn');
+  const palNewBtn    = panel.querySelector('#pal-new-btn');
+
+  function addOption(sel, value, text) {
     const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = p.name;
-    palSel.appendChild(opt);
+    opt.value = value;
+    opt.textContent = text;
+    sel.appendChild(opt);
   }
-  palSel.value = getActivePaletteId();
-  palSel.addEventListener('change', (e) => { setActivePalette(e.target.value); save(); });
+
+  function refreshPaletteSel() {
+    palSel.innerHTML = '';
+    for (const p of getAllPalettes()) addOption(palSel, p.id, p.name);
+    palSel.value = getActivePaletteId() ?? (getAllPalettes()[0]?.id ?? '');
+  }
+
+  function parseColor(str) {
+    str = str.trim();
+    const h = str.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (h) return { r: parseInt(h[1], 16), g: parseInt(h[2], 16), b: parseInt(h[3], 16) };
+    const parts = str.split(/[\s,]+/).map(s => parseInt(s, 10));
+    if (parts.length >= 3 && parts.every(v => Number.isInteger(v) && v >= 0 && v <= 255))
+      return { r: parts[0], g: parts[1], b: parts[2] };
+    return null;
+  }
+
+  function renderColorList(pal, custom) {
+    palColorList.innerHTML = '';
+    (pal.colors || []).forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'pal-color-row';
+      row.innerHTML = `
+        <span class="pal-swatch" style="background:rgb(${c.r},${c.g},${c.b})"></span>
+        <span class="pal-rgb-text">${c.r}, ${c.g}, ${c.b}</span>
+        ${custom ? `<button class="pal-del-color" data-idx="${i}" title="Remove color">&times;</button>` : ''}
+      `;
+      palColorList.appendChild(row);
+    });
+    if (custom) {
+      palColorList.querySelectorAll('.pal-del-color').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.idx, 10);
+          if (window.confirm('Remove this color?')) {
+            const p = getActivePalette();
+            const newColors = (p.colors || []).filter((_, i) => i !== idx);
+            updateCustomPalette(getActivePaletteId(), { colors: newColors });
+            refreshEditor();
+          }
+        });
+      });
+    }
+  }
+
+  function refreshEditor() {
+    const id  = getActivePaletteId();
+    const pal = getActivePalette();
+    if (!pal) return;
+    const custom = !isBuiltin(id);
+    palNameRow.hidden    = !custom;
+    palAddRow.hidden     = !custom;
+    palCsvRow.hidden     = !custom;
+    palManageRow.hidden  = !custom;
+    renderColorList(pal, custom);
+    if (custom) palNameInput.value = pal.name;
+  }
+
+  refreshPaletteSel();
+  refreshEditor();
+
+  palSel.addEventListener('change', (e) => {
+    setActivePalette(e.target.value);
+    save();
+    refreshEditor();
+  });
+
+  // Clipboard paste into color input
+  palPasteBtn.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      palColorInput.value = text.trim();
+    } catch { /* clipboard not available */ }
+  });
+
+  // Add a single color
+  palAddBtn.addEventListener('click', () => {
+    const c = parseColor(palColorInput.value);
+    if (!c) { alert('Invalid color. Use #rrggbb or r, g, b.'); return; }
+    const pal = getActivePalette();
+    updateCustomPalette(getActivePaletteId(), { colors: [...(pal.colors || []), c] });
+    palColorInput.value = '';
+    refreshEditor();
+    save();
+  });
+
+  // Also add color on Enter in the input
+  palColorInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); palAddBtn.click(); }
+  });
+
+  // Palette name update
+  palNameInput.addEventListener('change', () => {
+    const name = palNameInput.value.trim() || 'New Palette';
+    updateCustomPalette(getActivePaletteId(), { name });
+    const opt = palSel.querySelector(`option[value="${getActivePaletteId()}"]`);
+    if (opt) opt.textContent = name;
+    save();
+  });
+
+  // Copy CSV
+  palCopyCsv.addEventListener('click', async () => {
+    const pal = getActivePalette();
+    const csv = (pal.colors || []).map(c => `${c.r},${c.g},${c.b}`).join('\n');
+    try { await navigator.clipboard.writeText(csv); }
+    catch { console.log(csv); }
+    const prev = palCopyCsv.textContent;
+    palCopyCsv.textContent = 'Copied!';
+    setTimeout(() => { palCopyCsv.textContent = prev; }, 1200);
+  });
+
+  // Paste CSV — appends to existing colors
+  palPasteCsv.addEventListener('click', async () => {
+    let text;
+    try { text = await navigator.clipboard.readText(); }
+    catch { alert('Clipboard access denied.'); return; }
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l !== '');
+    const parsed = [];
+    for (let i = 0; i < lines.length; i++) {
+      const c = parseColor(lines[i]);
+      if (!c) { alert(`Invalid color on line ${i + 1}: "${lines[i]}". No colors were imported.`); return; }
+      parsed.push(c);
+    }
+    if (!parsed.length) return;
+    const pal = getActivePalette();
+    updateCustomPalette(getActivePaletteId(), { colors: [...(pal.colors || []), ...parsed] });
+    refreshEditor();
+    save();
+  });
+
+  // New palette
+  palNewBtn.addEventListener('click', () => {
+    const id = `custom-${Date.now()}`;
+    addCustomPalette({ id, name: 'New Palette', colors: [] });
+    refreshPaletteSel();
+    palSel.value = id;
+    setActivePalette(id);
+    save();
+    refreshEditor();
+  });
+
+  // Delete palette
+  palDeleteBtn.addEventListener('click', () => {
+    const id = getActivePaletteId();
+    if (isBuiltin(id)) return;
+    if (!window.confirm('Delete this palette?')) return;
+    deleteCustomPalette(id);
+    const fallback = getAllPalettes()[0];
+    if (fallback) setActivePalette(fallback.id);
+    save();
+    refreshPaletteSel();
+    refreshEditor();
+  });
 
   // Fish count — value control only (fixed range, no bound brackets).
   const { row: countRow } = makeRow({

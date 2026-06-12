@@ -3,5 +3,6 @@
 export default {
   id: 'special',
   name: 'Special',
+  builtin: true,
   colors: [],
 };
