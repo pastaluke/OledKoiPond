@@ -79,7 +79,7 @@ export class DebugOverlay {
     this.canvas = overlayCanvas;
     this.ctx    = overlayCanvas.getContext('2d');
     this.grid         = grid;
-    this.splineEnabled = true;
+    this.splineEnabled = false;
     this.statsEnabled  = false;
     // New per-visualization toggles (all default OFF).
     this.perceptionEnabled = false;  // PERCEPTION_RADIUS circle

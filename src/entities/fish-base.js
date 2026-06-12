@@ -130,21 +130,21 @@ export class FishBase {
   static SEPARATION_DIST   = 8;    // px — desired minimum gap between fish
 
   // Steering-behavior weights (per-frame force composition, see movement/states.js).
-  static SEPARATION_WEIGHT = 1.6;
-  static ALIGNMENT_WEIGHT  = 1.0;   // effective weight = this × SCHOOL_WEIGHT
-  static COHESION_WEIGHT   = 0.8;   // effective weight = this × SCHOOL_WEIGHT
-  static WANDER_WEIGHT     = 0.45;
-  static EDGE_WEIGHT       = 2.6;   // ≥1.5× separation so containment dominates near walls
+  static SEPARATION_WEIGHT = 0.40;
+  static ALIGNMENT_WEIGHT  = 0.35;   // effective weight = this × SCHOOL_WEIGHT
+  static COHESION_WEIGHT   = 0.65;   // effective weight = this × SCHOOL_WEIGHT
+  static WANDER_WEIGHT     = 0.40;
+  static EDGE_WEIGHT       = 0.80;
   /** Inside the wall-avoidance band, fade wander + alignment + cohesion by up to
    *  this fraction (0 = no change, 1 = those fully off at the wall) so edge steering
    *  isn't overpowered by schooling/wander near walls. Ramps with depth into band. */
-  static EDGE_YIELD        = 0.9;
+  static EDGE_YIELD        = 0.45;
 
   /** Max steering force (logical px/ms²), interpolated by size: small fish are
    *  nimbler (higher force → tighter turn arcs), large fish sweep wider. Low relative
    *  to SPEED_MAX → smooth, fish-like arcs rather than snappy banking. */
-  static MAX_FORCE_MAX = 0.00045;   // smallest fish — tightest arc
-  static MAX_FORCE_MIN = 0.00022;   // largest fish  — widest arc
+  static MAX_FORCE_MAX = 0.00003;   // smallest fish — tightest arc
+  static MAX_FORCE_MIN = 0.00003;   // largest fish  — widest arc
 
   /** When true, draw() fills the fish body solid rather than outline-only.
    *  Toggled globally from the Fish menu section. */
@@ -164,14 +164,14 @@ export class FishBase {
   // so the fish accelerates in bursts then coasts down. See update()/_updateThrottle.
   // Safety behaviors (separation/edges) ignore T and keep full authority.
   static CRUISE_GLIDE_MIN = 0.0;    // glide throttle floor (fraction of maxSpeed)
-  static CRUISE_GLIDE_MAX = 0.22;   // glide throttle ceiling — re-sampled per glide
+  static CRUISE_GLIDE_MAX = 0.19;   // glide throttle ceiling — re-sampled per glide
   static CRUISE_BURST_MIN = 0.85;   // burst throttle ∈ [this, 1.0] — re-sampled per burst
   static GLIDE_MS_MIN = 700;        // glide (coast) duration range, ms
-  static GLIDE_MS_MAX = 2600;
+  static GLIDE_MS_MAX = 3900;
   static BURST_MS_MIN = 250;        // burst (propel) duration range, ms
-  static BURST_MS_MAX = 750;
+  static BURST_MS_MAX = 2600;
   static THROTTLE_EASE_MS = 300;    // smoothing time-constant easing T toward its target
-  static GLIDE_DRAG = 0.25;         // per-second velocity multiplier at full glide (T=0)
+  static GLIDE_DRAG = 1.00;         // per-second velocity multiplier at full glide (T=0)
   static SWIM_BEAT_RATE = 0.012;    // tail-beat rate (rad/ms) at full speed
 
   constructor(grid) {

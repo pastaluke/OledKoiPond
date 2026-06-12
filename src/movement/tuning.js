@@ -44,7 +44,7 @@ export const MOVEMENT_PARAMS = [
     desc: 'Water resistance during a glide (per-second speed kept). Lower = momentum bleeds off fast → quick stop; 1 = no drag (coasts on forever). Only bites when throttled down.' },
   { key: 'GLIDE_MS_MAX',      label: 'Glide time',  min: 500,    max: 5000,   floor: 100,     ceil: 12000, step: 100,     coarse: 250,     decimals: 0,
     desc: 'Longest a coast/glide lasts (ms); each glide is a random draw up to this. Higher = longer, lazier drifts between bursts.' },
-  { key: 'BURST_MS_MAX',      label: 'Burst time',  min: 200,    max: 2000,   floor: 50,      ceil: 4000,  step: 50,      coarse: 100,     decimals: 0,
+  { key: 'BURST_MS_MAX',      label: 'Burst time',  min: 200,    max: 3000,   floor: 50,      ceil: 4000,  step: 50,      coarse: 100,     decimals: 0,
     desc: 'Longest a propulsion burst lasts (ms); each burst is a random draw up to this. Higher = stronger, longer accelerations.' },
 ];
 
