@@ -450,14 +450,36 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   });
 
   // ── Interactions ────────────────────────────────────────────────────────────
+
+  // Idle-fade: button fades out after 3s of no touch; any touch brings it back.
+  let hideTimer = null;
+
+  function showBtn() {
+    btn.classList.remove('faded');
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (panel.hidden) btn.classList.add('faded'); }, 3000);
+  }
+
+  scheduleHide();
+
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     panel.hidden = !panel.hidden;
-    if (panel.hidden) hideInfo();
+    if (panel.hidden) {
+      hideInfo();
+      scheduleHide();
+    } else {
+      clearTimeout(hideTimer);   // stay visible while panel is open
+    }
   });
 
-  // Close when tapping outside the panel or button
+  // Close when tapping outside the panel or button; always reset the idle timer.
   document.addEventListener('pointerdown', (e) => {
+    showBtn();
+    scheduleHide();
     if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
       panel.hidden = true;
       hideInfo();
