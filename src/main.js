@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi });
+  initMenu({ overlay, sim, grid, FishClass: Koi, compositor });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sim.draw();
     grid.drawBorder();
     overlay.draw(sim.entities);
-    compositor.frame();
+    compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);
 
     requestAnimationFrame(frame);
   }

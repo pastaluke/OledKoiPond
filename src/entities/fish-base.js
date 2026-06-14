@@ -172,6 +172,11 @@ export class FishBase {
    *  Toggled globally from the Fish menu section. */
   static FILLED = false;
 
+  /** When true, fish are hard-clamped to the world bounds each frame (safety net).
+   *  When false, only the EDGE_WEIGHT force keeps them away from walls — fish can
+   *  overshoot at high speed or with EDGE_WEIGHT lowered. */
+  static HARD_BORDER = true;
+
   /** Hard per-frame turn-rate cap (rad/s), interpolated by size.
    *  Prevents the spin cycle at low speed where boids forces dominate a near-zero
    *  velocity vector and whip the heading every frame. Separate from MAX_FORCE —
@@ -356,11 +361,13 @@ export class FishBase {
       }
     }
 
-    // ── 3. Move + hard boundary clamp (safety net beneath the `edges` force) ──
+    // ── 3. Move + optional hard boundary clamp ──────────────────────────────
     this.x += this.vx * deltaMs;
     this.y += this.vy * deltaMs;
-    this.x = Math.max(this.half, Math.min(logicalW - this.half, this.x));
-    this.y = Math.max(this.half, Math.min(logicalH - this.half, this.y));
+    if (c.HARD_BORDER) {
+      this.x = Math.max(this.half, Math.min(logicalW - this.half, this.x));
+      this.y = Math.max(this.half, Math.min(logicalH - this.half, this.y));
+    }
 
     // ── 4. Heading + steering bend — derived from the actual turn rate, which
     //       drives the body curve in the renderer. ───────────────────────────

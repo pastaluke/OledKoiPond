@@ -23,7 +23,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../grid.js').Grid} refs.grid
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass }) {
+export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
@@ -119,6 +119,14 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
           <span>Show border</span>
           <input type="checkbox" id="toggle-border">
         </label>
+        <label class="menu-row">
+          <span>Hard wall</span>
+          <input type="checkbox" id="toggle-hard-border">
+        </label>
+        <label class="menu-row">
+          <span>Glass edge</span>
+          <input type="checkbox" id="toggle-glass-edge">
+        </label>
         <div id="border-sliders"></div>
       </div>
     </details>
@@ -202,7 +210,7 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
     shape:   JSON.parse(JSON.stringify(liveShape)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
-    border:  { ...grid.border },
+    border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge },
   });
 
   function setFishCount(n) {
@@ -256,9 +264,11 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     }
     if (persisted.border) {
       const b = persisted.border;
-      if (typeof b.enabled === 'boolean') grid.border.enabled = b.enabled;
-      if (Number.isFinite(b.width))       grid.border.width   = clamp(b.width,   0.5, 10);
-      if (Number.isFinite(b.opacity))     grid.border.opacity = clamp(b.opacity, 0,   1);
+      if (typeof b.enabled    === 'boolean') grid.border.enabled  = b.enabled;
+      if (Number.isFinite(b.width))          grid.border.width    = clamp(b.width,   0.5, 10);
+      if (Number.isFinite(b.opacity))        grid.border.opacity  = clamp(b.opacity, 0,   1);
+      if (typeof b.hardBorder === 'boolean') FishClass.HARD_BORDER = b.hardBorder;
+      if (typeof b.glassEdge  === 'boolean') compositor.setGlassEdge(b.glassEdge);
     }
     if (persisted.shape && Array.isArray(persisted.shape.profile)) {
       liveShape = persisted.shape;
@@ -809,16 +819,20 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   });
   displayHost.appendChild(densityRow);
 
+  const ZOOM_BASE = 120;
   const { row: worldRow } = makeRow({
-    label: 'World size',
-    infoText: 'World size: world units across the short screen edge (zoom). Higher = more world on screen, so fish look smaller and slower; schooling and edge behavior are unchanged. Default 120.',
-    decimals: 0,
-    valueStep: 10,
+    label: 'Zoom',
+    infoText: 'Zoom: higher = fish appear bigger. Internally sets world units across the short edge (120 / zoom). Default 1.0.',
+    decimals: 2,
+    valueStep: 0.05,
     hasBounds: false,
-    getVal: () => grid.worldShortEdge,
-    setVal: (v) => { grid.worldShortEdge = clamp(v, WORLD_RANGE.min, WORLD_RANGE.max); applyGrid(); },
-    getMin: () => WORLD_RANGE.min,
-    getMax: () => WORLD_RANGE.max,
+    getVal: () => ZOOM_BASE / grid.worldShortEdge,
+    setVal: (v) => {
+      grid.worldShortEdge = clamp(Math.round(ZOOM_BASE / Math.max(v, 0.01)), WORLD_RANGE.min, WORLD_RANGE.max);
+      applyGrid();
+    },
+    getMin: () => ZOOM_BASE / WORLD_RANGE.max,
+    getMax: () => ZOOM_BASE / WORLD_RANGE.min,
   });
   displayHost.appendChild(worldRow);
 
@@ -827,6 +841,14 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   const borderToggle = panel.querySelector('#toggle-border');
   borderToggle.checked = grid.border.enabled;
   borderToggle.addEventListener('change', (e) => { grid.border.enabled = e.target.checked; save(); });
+
+  const hardBorderToggle = panel.querySelector('#toggle-hard-border');
+  hardBorderToggle.checked = FishClass.HARD_BORDER;
+  hardBorderToggle.addEventListener('change', (e) => { FishClass.HARD_BORDER = e.target.checked; save(); });
+
+  const glassEdgeToggle = panel.querySelector('#toggle-glass-edge');
+  glassEdgeToggle.checked = compositor.glassEdge;
+  glassEdgeToggle.addEventListener('change', (e) => { compositor.setGlassEdge(e.target.checked); save(); });
 
   const { row: borderWidthRow } = makeRow({
     label: 'Width',
