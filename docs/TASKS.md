@@ -497,7 +497,71 @@ any additional configuration.
 
 ---
 
+### E10 · Hold-to-Attract Fish
+Click and hold anywhere on the pond (not on a glass shape) to create a temporary
+attraction point. Fish are drawn toward it; when they arrive they orbit it in lazy
+arcs, each fish choosing its own clockwise or counterclockwise direction.
 
+**Interaction contract:**
+- `pointerdown` on the WebGL canvas when **no glass shape is hit** → start attraction
+  at UV `(u, v)`.
+- `pointermove` (while held) → move the attraction point with the finger/cursor.
+- `pointerup` / `pointercancel` → clear the point; fish resume normal behaviors.
+- Glass shape drag takes priority — if `hitTest()` returns ≥ 0 the attraction logic
+  is skipped entirely (existing priority order is unchanged).
+
+**Behavior model — two-phase per fish:**
+
+*Phase 1 — Approach (dist > orbitRadius):*
+- New behavior `attract(fish, ctx)` in `behaviors.js` reads `ctx.attractPoint`
+  (`{x, y}` in logical coords, or `null`).
+- Returns a seek force toward the point weighted by a distance falloff:
+  `weight = clamp(1 - dist / falloffDist, 0, 1)²` — fish very close feel full pull,
+  fish beyond `falloffDist` (≈ 2× the pond's short edge) feel almost nothing.
+- Blended into the per-fish force sum at a high weight (e.g., 3.0) so it
+  dominates over wander/alignment/cohesion but not over separation.
+
+*Phase 2 — Orbit (dist ≤ orbitRadius):*
+- On first entry: `fish._orbitChirality = Math.random() < 0.5 ? 1 : -1` (±1, random
+  per fish per approach, stays fixed for that visit).
+- Each frame: compute the **tangent** to the orbit circle at the fish's current
+  position — `perp = (-dy, dx) * chirality` where `(dx, dy) = normalize(fish - center)`.
+  Target speed = fish's `cruiseSpeed`. Return a steer force toward
+  `center + normalize(fish-center)*orbitRadius + perp*lookAhead` where
+  `lookAhead = cruiseSpeed * 200ms`. This naturally keeps the fish circling without
+  locking it to a rail.
+- Separation still runs at full weight so fish don't stack on each other while
+  orbiting.
+
+**`orbitRadius`:** `fish.length * 3` — close enough to look purposeful, far enough
+that 5 fish can orbit without crowding.
+
+**`falloffDist`:** `grid.logicalShortEdge` (half the pond) — fish across the whole
+pond notice the point, but very distantly.
+
+**Integration points:**
+
+| Location | Change |
+|----------|--------|
+| `src/movement/behaviors.js` | Add `export function attract(fish, ctx)` |
+| `src/simulation.js` | Expose `attractPoint = null` on the `Simulation` instance; pass it in the per-fish `ctx` each frame |
+| `src/main.js` | On `pointerdown` (no shape hit): convert client coords to logical, set `sim.attractPoint`; on `pointermove` while held: update it; on `pointerup`/`cancel`: clear to `null` |
+| `src/entities/fish-base.js` | Add `_orbitChirality = 0` to constructor; reset to 0 when attraction clears (so next approach picks a fresh direction) |
+| `src/debug-overlay.js` (optional) | Draw a faint pulsing ring at `sim.attractPoint` when set, to confirm the touch is registered |
+
+**No new menu sliders needed** — orbit radius and falloff distance are derived from
+fish length and world size, so they stay proportional automatically. Could add tuning
+knobs later if feel needs adjusting.
+
+**Persistence:** none — attraction point is purely ephemeral interaction state.
+
+**Interaction with E9 (TV remote):** in canvas mode, Space-on-empty could toggle a
+"hold" at the cursor position — the point stays active until Space is pressed again.
+This is a natural extension but deferred to when E9 is implemented.
+
+---
+
+| # | Question | Notes |
 |---|----------|-------|
 | A1 | Fluid sim on CPU or GPU? | CPU is simpler; GPU fragment shader is faster at scale. Decide when E2-2 is picked up. |
 | A2 | Entity plugin format: ES module, JSON + behavior keys, or WASM? | ES module is ergonomic; WASM is more sandbox-friendly. |
