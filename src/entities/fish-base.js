@@ -157,6 +157,7 @@ export class FishBase {
   static COHESION_WEIGHT   = 0.65;   // effective weight = this × SCHOOL_WEIGHT
   static WANDER_WEIGHT     = 0.40;
   static EDGE_WEIGHT       = 0.80;
+  static ATTRACT_WEIGHT    = 3.0;
   /** Inside the wall-avoidance band, fade wander + alignment + cohesion by up to
    *  this fraction (0 = no change, 1 = those fully off at the wall) so edge steering
    *  isn't overpowered by schooling/wander near walls. Ramps with depth into band. */
@@ -240,10 +241,11 @@ export class FishBase {
     this._thrHold   = Math.random() * cls.GLIDE_MS_MAX;   // random initial offset
 
     // Movement state machine + wander angle (consumed by movement/ behaviors).
-    this.state        = 'swim';
-    this._wanderTheta = Math.random() * Math.PI * 2;
-    this._wanderOmega = 0;   // smoothly-evolving wander rotation rate (rad/ms)
-    this._neighborCount = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
+    this.state           = 'swim';
+    this._wanderTheta    = Math.random() * Math.PI * 2;
+    this._wanderOmega    = 0;   // smoothly-evolving wander rotation rate (rad/ms)
+    this._neighborCount  = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
+    this._orbitChirality = 0;   // ±1 set on first entry to attract orbit; 0 = unassigned
 
     this.color = rollColor(getActivePalette(), getSpecialPalette());
   }
@@ -301,7 +303,7 @@ export class FishBase {
    * @param {object}    grid      - Grid instance with logicalW / logicalH
    * @param {FishBase[]} neighbors - fish within PERCEPTION_RADIUS (from Simulation)
    */
-  update(deltaMs, grid, neighbors) {
+  update(deltaMs, grid, neighbors, attractPoint = null) {
     const { logicalW, logicalH } = grid;
     const c = this.constructor;
     const maxSpeed = this.maxSpeed;
@@ -314,7 +316,11 @@ export class FishBase {
     this._neighborCount = neighbors.length;
 
     // ── 1. Compose steering forces from the active state's behaviors ─────────
-    const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs };
+    // Reset orbit chirality on the first frame after attraction ends so the next
+    // approach picks a fresh random direction (the attract behavior resets it during
+    // approach, but it can't run when weight=0 — this covers the cleared-point case).
+    if (!attractPoint && this._orbitChirality) this._orbitChirality = 0;
+    const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs, attractPoint };
     this.state = nextState(this, ctx);
     const weights = STATES[this.state].behaviors(this, ctx);
     let ax = 0, ay = 0;

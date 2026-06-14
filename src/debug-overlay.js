@@ -90,6 +90,8 @@ export class DebugOverlay {
     this.wanderEnabled     = false;  // projected wander circle + target
     /** Optional GlassShapes instance — faint grab-handle rings drawn when set. */
     this.glassShapes       = null;
+    /** Active attract point in logical coords, or null. Set by main.js. */
+    this.attractPoint      = null;
     this.sync();
   }
 
@@ -126,6 +128,8 @@ export class DebugOverlay {
     // Glass-shape grab handles — always on when shapes exist, since a glass lens
     // over pure-black water is otherwise invisible and impossible to grab.
     if (this.glassShapes) this._drawGlassShapes();
+
+    if (this.attractPoint) this._drawAttractPoint();
   }
 
   // ─── Glass shape handles — faint outer (rim) + inner (band) rings ─────────────
@@ -158,6 +162,33 @@ export class DebugOverlay {
         : `rgba(180,210,255,${0.2 * opacity})`;
       ctx.beginPath(); ctx.arc(px, py, rInner, 0, Math.PI * 2); ctx.stroke();
     });
+    ctx.restore();
+  }
+
+  // ─── Attract point — pulsing dashed ring at the held pointer ────────────────
+  _drawAttractPoint() {
+    const { ctx, grid } = this;
+    const ap = this.attractPoint;
+    if (!ap) return;
+    const scale = grid.scale;
+    const x = ap.x * scale;
+    const y = ap.y * scale;
+    const t = performance.now() * 0.003;
+    const r = 10 + Math.sin(t) * 3;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,210,255,0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.lineDashOffset = -(t * 8);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,210,255,0.45)';
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 

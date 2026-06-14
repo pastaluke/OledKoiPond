@@ -16,6 +16,8 @@ export class Simulation {
     this.grid     = grid;
     /** @type {import('./entities/fish-base.js').FishBase[]} */
     this.entities = [];
+    /** Active attraction point in logical coords, or null. Set by main.js on hold. */
+    this.attractPoint = null;
   }
 
   /** Add an entity to the simulation. Returns the entity for chaining. */
@@ -49,7 +51,7 @@ export class Simulation {
         }
       }
 
-      fish.update(deltaMs, grid, neighbors);
+      fish.update(deltaMs, grid, neighbors, this.attractPoint);
     }
   }
 

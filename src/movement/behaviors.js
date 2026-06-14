@@ -107,6 +107,40 @@ export const BEHAVIORS = {
     return seek(fish, tx, ty, Math.max(fish.cruiseSpeed, sp));
   },
 
+  // Draw fish toward a held pointer and orbit it when they arrive.
+  // Two phases based on distance to ctx.attractPoint:
+  //   Approach: quadratic-falloff seek force; chirality reset to 0 so next visit re-randomises.
+  //   Orbit:    pick chirality ±1 once on entry, steer toward a point ~30° ahead on the circle.
+  attract(fish, ctx) {
+    const ap = ctx.attractPoint;
+    if (!ap) return new Vec2(0, 0);
+    const dx = ap.x - fish.x, dy = ap.y - fish.y;
+    const dist = Math.hypot(dx, dy);
+    const orbitRadius = fish.length * 3;
+
+    if (dist > orbitRadius) {
+      // Approach: reset chirality so next orbit entry picks a fresh direction.
+      fish._orbitChirality = 0;
+      // Quadratic falloff over the pond's larger dimension so distant fish feel a gentle pull.
+      const falloffDist = Math.max(ctx.bounds.width, ctx.bounds.height);
+      const t = Math.max(0, 1 - dist / falloffDist);
+      const sp = Math.hypot(fish.vx, fish.vy);
+      const f = seek(fish, ap.x, ap.y, Math.max(fish.cruiseSpeed * 1.5, sp));
+      f.x *= t * t;
+      f.y *= t * t;
+      return f;
+    }
+
+    // Orbit: assign chirality on first entry; steer to a lookahead point on the circle.
+    if (!fish._orbitChirality) fish._orbitChirality = Math.random() < 0.5 ? 1 : -1;
+    const a = Math.atan2(fish.y - ap.y, fish.x - ap.x);
+    const ahead = 0.5 * fish._orbitChirality;   // ~30° ahead in chirality direction
+    const tx = ap.x + Math.cos(a + ahead) * orbitRadius;
+    const ty = ap.y + Math.sin(a + ahead) * orbitRadius;
+    const sp = Math.hypot(fish.vx, fish.vy);
+    return seek(fish, tx, ty, Math.max(fish.cruiseSpeed, sp));
+  },
+
   // Steer back inward when near a pond wall (Reynolds "containment"). Smooth,
   // unlike the hard position clamp that backs it up in update().
   edges(fish, ctx) {

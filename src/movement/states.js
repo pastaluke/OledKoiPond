@@ -40,13 +40,16 @@ export const STATES = {
       // Separation + edges keep full authority.
       const ef    = (ctx && ctx.bounds) ? edgeFactor(fish, ctx.bounds) : 0;
       const yield_ = 1 - ef * c.EDGE_YIELD;
+      const attractW = ctx.attractPoint ? (c.ATTRACT_WEIGHT ?? 3.0) : 0;
 
       return {
         separation: c.SEPARATION_WEIGHT,
         alignment:  c.ALIGNMENT_WEIGHT * school * yield_,
-        cohesion:   c.COHESION_WEIGHT * school * yield_,
-        wander:     c.WANDER_WEIGHT * yield_,
+        cohesion:   c.COHESION_WEIGHT  * school * yield_,
+        // Suppress wander while attracted — attract replaces it as the directional goal.
+        wander:     attractW ? 0 : c.WANDER_WEIGHT * yield_,
         edges:      c.EDGE_WEIGHT,
+        attract:    attractW,
       };
     },
     update() { return null; },   // baseline never transitions (scaffolding for future states)

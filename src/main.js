@@ -54,13 +54,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Pointer handling on the visible WebGL canvas (canvas#pond is hidden):
   //   • drag a glass shape if the press lands on one, else
-  //   • feed: recolor the nearest fish from the active palette bag.
+  //   • hold 200ms → fish swim toward pointer and orbit; quick tap → recolor nearest fish.
   let dragShape = -1, dragOffX = 0, dragOffY = 0;
+  let attractHoldTimer = null;
+  const _attractPos = { x: 0, y: 0 };
+
+  function _clearAttract() {
+    if (attractHoldTimer !== null) { clearTimeout(attractHoldTimer); attractHoldTimer = null; }
+    sim.attractPoint     = null;
+    overlay.attractPoint = null;
+  }
+
+  function _recolorNearest(lx, ly) {
+    let nearest = null, minD2 = Infinity;
+    for (const fish of sim.entities) {
+      const d2 = (fish.x - lx) ** 2 + (fish.y - ly) ** 2;
+      if (d2 < minD2) { minD2 = d2; nearest = fish; }
+    }
+    if (nearest) nearest.color = rollColor(getActivePalette(), getSpecialPalette());
+  }
 
   glCanvas.addEventListener('pointerdown', (e) => {
     const rect = glCanvas.getBoundingClientRect();
-    const u = (e.clientX - rect.left) / rect.width;
-    const v = (e.clientY - rect.top)  / rect.height;
+    const u  = (e.clientX - rect.left) / rect.width;
+    const v  = (e.clientY - rect.top)  / rect.height;
+    const lx = (e.clientX - rect.left) / grid.scale;
+    const ly = (e.clientY - rect.top)  / grid.scale;
 
     // Glass shapes take priority — grab the topmost one under the pointer.
     const hit = glassShapes.hitTest(u, v);
@@ -74,37 +93,58 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Feed the nearest fish.
-    const lx = (e.clientX - rect.left) / grid.scale;
-    const ly = (e.clientY - rect.top)  / grid.scale;
-    let nearest = null, minD2 = Infinity;
-    for (const fish of sim.entities) {
-      const d2 = (fish.x - lx) ** 2 + (fish.y - ly) ** 2;
-      if (d2 < minD2) { minD2 = d2; nearest = fish; }
-    }
-    if (nearest) nearest.color = rollColor(getActivePalette(), getSpecialPalette());
+    // Hold-to-attract: capture pointer and start 200ms timer.
+    _attractPos.x = lx;
+    _attractPos.y = ly;
+    glCanvas.setPointerCapture(e.pointerId);
+    attractHoldTimer = setTimeout(() => {
+      attractHoldTimer = null;
+      sim.attractPoint     = _attractPos;
+      overlay.attractPoint = _attractPos;
+    }, 200);
   });
 
   glCanvas.addEventListener('pointermove', (e) => {
     glassShapes.touchActivity();
-    if (dragShape < 0) return;
-    const s = glassShapes.list[dragShape];
-    if (!s) { dragShape = -1; return; }
+
+    if (dragShape >= 0) {
+      const s = glassShapes.list[dragShape];
+      if (!s) { dragShape = -1; return; }
+      const rect = glCanvas.getBoundingClientRect();
+      const u = (e.clientX - rect.left) / rect.width;
+      const v = (e.clientY - rect.top)  / rect.height;
+      s.cx = Math.max(0, Math.min(1, u + dragOffX));
+      s.cy = Math.max(0, Math.min(1, v + dragOffY));
+      glassShapes.sync();
+      return;
+    }
+
+    // Track pointer for attract (active or pending timer).
     const rect = glCanvas.getBoundingClientRect();
-    const u = (e.clientX - rect.left) / rect.width;
-    const v = (e.clientY - rect.top)  / rect.height;
-    s.cx = Math.max(0, Math.min(1, u + dragOffX));
-    s.cy = Math.max(0, Math.min(1, v + dragOffY));
-    glassShapes.sync();
+    _attractPos.x = (e.clientX - rect.left) / grid.scale;
+    _attractPos.y = (e.clientY - rect.top)  / grid.scale;
   });
 
-  const endShapeDrag = () => {
-    if (dragShape < 0) return;
-    dragShape = -1;
-    glassShapes.requestSave();
-  };
-  glCanvas.addEventListener('pointerup', endShapeDrag);
-  glCanvas.addEventListener('pointercancel', endShapeDrag);
+  glCanvas.addEventListener('pointerup', () => {
+    if (dragShape >= 0) {
+      dragShape = -1;
+      glassShapes.requestSave();
+      return;
+    }
+    if (attractHoldTimer !== null) {
+      // Quick tap: cancel hold timer, recolor nearest fish.
+      clearTimeout(attractHoldTimer);
+      attractHoldTimer = null;
+      _recolorNearest(_attractPos.x, _attractPos.y);
+    } else {
+      _clearAttract();
+    }
+  });
+
+  glCanvas.addEventListener('pointercancel', () => {
+    if (dragShape >= 0) { dragShape = -1; glassShapes.requestSave(); return; }
+    _clearAttract();
+  });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
   initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes });
