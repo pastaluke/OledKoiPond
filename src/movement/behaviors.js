@@ -13,7 +13,9 @@
 
 import { Vec2 } from './vec2.js';
 
-const WANDER_RATE = 0.018;   // rad per ms — how fast the wander angle drifts
+// How quickly the wander rotation rate can accelerate (fraction of maxOmega per ms).
+// Smaller → smoother direction changes; larger → more twitchy. ~0.004 gives ~1-2s meanders.
+const WANDER_ACCEL = 0.004;
 // Exported so the debug overlay can draw the wall-avoidance zone accurately.
 export const EDGE_MARGIN = 14;      // logical px from a wall where steer-away kicks in
 
@@ -60,40 +62,49 @@ export const BEHAVIORS = {
   },
 
   // Match the average heading of neighbors (within perception radius).
+  // Uses max(cruiseSpeed, currentSpeed) so alignment never brakes — only redirects.
   alignment(fish, ctx) {
     let vx = 0, vy = 0, count = 0;
     for (const o of ctx.neighbors) { vx += o.vx; vy += o.vy; count++; }
     if (count === 0) return new Vec2(0, 0);
-    return steer(fish, vx, vy, fish.cruiseSpeed);   // steer toward the averaged velocity direction
+    const sp = Math.hypot(fish.vx, fish.vy);
+    return steer(fish, vx, vy, Math.max(fish.cruiseSpeed, sp));
   },
 
   // Steer toward the average position (center of mass) of neighbors.
+  // Uses max(cruiseSpeed, currentSpeed) so cohesion never brakes — only redirects.
   cohesion(fish, ctx) {
     let cx = 0, cy = 0, count = 0;
     for (const o of ctx.neighbors) { cx += o.x; cy += o.y; count++; }
     if (count === 0) return new Vec2(0, 0);
-    return seek(fish, cx / count, cy / count, fish.cruiseSpeed);
+    const sp = Math.hypot(fish.vx, fish.vy);
+    return seek(fish, cx / count, cy / count, Math.max(fish.cruiseSpeed, sp));
   },
 
-  // Smooth random walk: a target on a circle projected ahead of the fish, whose
-  // angle drifts only slightly each frame → meandering, not twitchy. Keeps lone
-  // fish (no neighbors) in natural motion. Mutates fish._wanderTheta.
+  // Smooth random walk: a target on a circle projected ahead of the fish. The
+  // rotation rate (_wanderOmega) evolves gradually — bounded by the fish's actual
+  // turn geometry — so the target meanders rather than jumping each frame.
+  // Never brakes: targetSpeed = max(cruiseSpeed, currentSpeed).
   wander(fish, ctx) {
-    fish._wanderTheta += (Math.random() * 2 - 1) * WANDER_RATE * ctx.dt;
+    const dist   = fish.length * 1.2;
+    const radius = fish.length * 0.6;
+    // Max rotation rate the fish can actually follow given circle geometry + turn rate.
+    const maxOmega = (fish.maxTurnRate / 1000) * (dist / radius);
+    // Small random acceleration each frame; clamped so omega evolves smoothly.
+    const nudge = (Math.random() * 2 - 1) * maxOmega * WANDER_ACCEL * ctx.dt;
+    fish._wanderOmega = Math.max(-maxOmega, Math.min(maxOmega, fish._wanderOmega + nudge));
+    fish._wanderTheta += fish._wanderOmega * ctx.dt;
 
     const sp = Math.hypot(fish.vx, fish.vy);
     const hx = sp > 1e-6 ? fish.vx / sp : Math.cos(fish.heading);
     const hy = sp > 1e-6 ? fish.vy / sp : Math.sin(fish.heading);
 
-    const dist   = fish.length * 1.2;   // circle center this far ahead
-    const radius = fish.length * 0.6;   // wander circle radius
     const cx = fish.x + hx * dist;
     const cy = fish.y + hy * dist;
-
     const heading = Math.atan2(hy, hx);
     const tx = cx + Math.cos(fish._wanderTheta + heading) * radius;
     const ty = cy + Math.sin(fish._wanderTheta + heading) * radius;
-    return seek(fish, tx, ty, fish.cruiseSpeed);
+    return seek(fish, tx, ty, Math.max(fish.cruiseSpeed, sp));
   },
 
   // Steer back inward when near a pond wall (Reynolds "containment"). Smooth,

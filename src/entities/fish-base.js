@@ -242,6 +242,7 @@ export class FishBase {
     // Movement state machine + wander angle (consumed by movement/ behaviors).
     this.state        = 'swim';
     this._wanderTheta = Math.random() * Math.PI * 2;
+    this._wanderOmega = 0;   // smoothly-evolving wander rotation rate (rad/ms)
     this._neighborCount = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
 
     this.color = rollColor(getActivePalette(), getSpecialPalette());
