@@ -88,6 +88,8 @@ export class DebugOverlay {
     this.neighborsEnabled  = false;  // links to perceived neighbors
     this.velocityEnabled   = false;  // velocity vector arrow
     this.wanderEnabled     = false;  // projected wander circle + target
+    /** Optional GlassShapes instance — faint grab-handle rings drawn when set. */
+    this.glassShapes       = null;
     this.sync();
   }
 
@@ -120,6 +122,31 @@ export class DebugOverlay {
       if (this.splineEnabled)     this._drawSpline(fish);
       if (this.statsEnabled)      this._drawFishStats(fish);
     }
+
+    // Glass-shape grab handles — always on when shapes exist, since a glass lens
+    // over pure-black water is otherwise invisible and impossible to grab.
+    if (this.glassShapes) this._drawGlassShapes();
+  }
+
+  // ─── Glass shape handles — faint outer (rim) + inner (band) rings ─────────────
+  _drawGlassShapes() {
+    const gs = this.glassShapes;
+    if (!gs.list.length) return;
+    const { ctx } = this;
+    const W = this.canvas.width, H = this.canvas.height;
+    ctx.save();
+    gs.list.forEach((s, i) => {
+      const px = s.cx * W, py = s.cy * H;
+      const rOuter = s.radius * H;                       // radius is in height units
+      const rInner = Math.max(0, s.radius * (1 - s.bandFrac) * H);
+      const sel = i === gs.selected;
+      ctx.lineWidth = sel ? 1.5 : 1;
+      ctx.strokeStyle = sel ? 'rgba(0,210,255,0.9)' : 'rgba(180,210,255,0.4)';
+      ctx.beginPath(); ctx.arc(px, py, rOuter, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = sel ? 'rgba(0,210,255,0.4)' : 'rgba(180,210,255,0.2)';
+      ctx.beginPath(); ctx.arc(px, py, rInner, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.restore();
   }
 
   // ─── Perception radius — circle within which a fish senses others ────────────

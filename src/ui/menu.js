@@ -23,7 +23,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../grid.js').Grid} refs.grid
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
+export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes }) {
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
@@ -131,6 +131,20 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
       </div>
     </details>
     <details>
+      <summary>Glass shapes</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Shape</span>
+          <select id="glass-shape-sel" class="menu-select"></select>
+        </label>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="glass-add">+ Add</button>
+          <button class="menu-action" id="glass-remove">Remove</button>
+        </div>
+        <div id="glass-shape-sliders"></div>
+      </div>
+    </details>
+    <details>
       <summary>Debug</summary>
       <div class="menu-rows">
         <label class="menu-row">
@@ -211,6 +225,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
     shape:   JSON.parse(JSON.stringify(liveShape)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge },
+    glassShapes: glassShapes.serialize(),
   });
 
   function setFishCount(n) {
@@ -274,6 +289,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
       liveShape = persisted.shape;
       FishClass.SHAPE = liveShape;
     }
+    if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -875,6 +891,56 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor }) {
     getMax: () => 1,
   });
   borderHost.appendChild(borderOpacityRow);
+
+  // ── Glass shapes ─────────────────────────────────────────────────────────────
+  // Draggable glass lenses on the render layer. The select + sliders drive the
+  // currently-selected shape; dragging on canvas moves it (see main.js).
+  const glassSel        = panel.querySelector('#glass-shape-sel');
+  const glassSliderHost = panel.querySelector('#glass-shape-sliders');
+
+  function refreshGlassSel() {
+    glassSel.innerHTML = '';
+    glassShapes.list.forEach((_, i) => addOption(glassSel, i, `Shape ${i + 1}`));
+    if (glassShapes.selected >= 0) glassSel.value = String(glassShapes.selected);
+  }
+
+  function buildGlassSliders() {
+    glassSliderHost.innerHTML = '';
+    const s = glassShapes.current;
+    if (!s) return;
+    const mk = (cfg) => glassSliderHost.appendChild(makeRow({ hasBounds: false, ...cfg }).row);
+    mk({
+      label: 'Radius', decimals: 2, valueStep: 0.01,
+      getVal: () => s.radius, getMin: () => 0.02, getMax: () => 0.6,
+      setVal: (v) => { s.radius = clamp(v, 0.02, 0.6); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Rim width', decimals: 2, valueStep: 0.01,
+      getVal: () => s.bandFrac, getMin: () => 0.02, getMax: () => 1,
+      setVal: (v) => { s.bandFrac = clamp(v, 0.02, 1); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Distortion', decimals: 0, valueStep: 1,
+      getVal: () => s.strength, getMin: () => 0, getMax: () => 40,
+      setVal: (v) => { s.strength = clamp(v, 0, 40); glassShapes.sync(); save(); },
+    });
+  }
+
+  function refreshGlassUI() { refreshGlassSel(); buildGlassSliders(); }
+
+  glassShapes.onChange  = refreshGlassUI;
+  glassShapes.onPersist = save;
+  refreshGlassUI();
+
+  glassSel.addEventListener('change', (e) => {
+    glassShapes.select(parseInt(e.target.value, 10));
+  });
+  panel.querySelector('#glass-add').addEventListener('click', () => {
+    if (glassShapes.add()) save();
+  });
+  panel.querySelector('#glass-remove').addEventListener('click', () => {
+    if (glassShapes.selected >= 0) { glassShapes.remove(glassShapes.selected); save(); }
+  });
 
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
   const copyBtn = panel.querySelector('#btn-copy-tuning');
