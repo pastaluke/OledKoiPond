@@ -205,7 +205,84 @@ on the main thread with DOM access. Two-tier approach:
 
 ---
 
-## Open architectural decisions
+### E8 · Glass Layer Polish
+Refinements and new behaviours for the glass shapes + border shader layer.
+
+#### E8-1 — Guide ring fade on inactivity  ⬜
+The grab-handle rings drawn by the debug overlay should fade out after 3 s of no
+pointer activity and instantly reappear on hover/touch — "invisible until you need
+them".
+
+**Implementation:**
+- `GlassShapes` gets a `lastActivity = performance.now()` property, reset on any
+  pointer event over the canvas AND on add/remove/select.
+- `main.js` adds a bare `pointermove` listener (not drag-only) that calls
+  `glassShapes.touchActivity()`.
+- `debug-overlay._drawGlassShapes()` computes `opacity` from
+  `(now - lastActivity)`: full for first 3 000 ms, linear fade over the following
+  500 ms, then 0. Multiplied into both ring `strokeStyle` alphas so the rings
+  vanish smoothly without changing the hit-test logic.
+
+---
+
+#### E8-2 — Diegetic border glass (upgrade `borderShift`)  ⬜
+The border glass edge currently uses a simple linear chromatic shift. Give it the
+same liquidGL-inspired displacement model as the shapes so it reads as glass rather
+than a post-process filter.
+
+**Shader changes (`compositor.js`):**
+- Rename `borderShift(uv, dir, t, strength, px)` → keep but add `refraction` and
+  `bevelDepth` params.
+- Inside: `dispAmt = t * refraction + pow(t, 10.0) * bevelDepth` (smooth +
+  sharp-rim kick). Apply as uniform UV shift first, then layer the chromatic split
+  on top at ±1.5× along norm. The `pow(t,10)` concentrates the bevel right at the
+  wall, identical to how the shape rim looks.
+- New uniforms: `uBorderRefr` (float), `uBorderBevel` (float), `uBorderSpecular`
+  (bool). `uGlassStr` stays as the chromatic amount (rename label only in menu).
+
+**JS/Menu changes:**
+- `setGlassEdge(enabled, {chromatic, refraction, bevelDepth, specular})` — extend
+  the signature; defaults keep current behaviour.
+- Border section gains 3 new sliders: **Refraction** (0–0.04, step 0.001),
+  **Bevel depth** (0–0.08, step 0.001), and a **Specular** checkbox. Existing
+  Chromatic slider stays (was "Glass edge strength").
+- Persistence: add `borderRefr`, `borderBevel`, `borderSpecular` alongside
+  existing `border` blob in `save()`.
+
+---
+
+#### E8-3 — Glass shape autonomous wander + wall bounce  ⬜
+Per-shape optional animation: the shape drifts autonomously in lazy arcs and
+bounces off pond walls with physically-correct angle-of-reflection.
+
+**Data model additions (not persisted — ephemeral):**
+```js
+shape._vx = 0; shape._vy = 0; // UV/s velocity, set on wander enable
+shape._vOmega = 0;             // rad/s angular drift rate (smooth random walk)
+```
+**Persisted per shape:** `wander: bool`, `wanderSpeed: number` (UV/s, default 0.02).
+
+**`GlassShapes.update(deltaMs, aspect)` (new method):**
+1. Skip shapes where `!s.wander`.
+2. Angular drift: nudge `_vOmega` by `±0.08 * maxOmega` each frame (clamped to
+   `±0.5 rad/s`); rotate velocity by `_vOmega * dt` — same pattern as fish
+   `_wanderOmega`.
+3. Integrate: `cx += _vx * dt; cy += _vy * dt`.
+4. Wall bounce — radius is in height-fraction units; x-walls need aspect correction
+   (`cx_min = radius / aspect`, `cx_max = 1 - radius / aspect`):
+   - Left/right breach → `_vx = ±|_vx|`, clamp cx; reset `_vOmega` to a gentle
+     post-bounce value so the shape curves away rather than skimming the wall.
+   - Top/bottom breach → `_vy = ±|_vy|`, clamp cy.
+5. After update, call `sync()` so uniforms reflect the new position.
+
+**`main.js`:** call `glassShapes.update(deltaMs, compositor.aspect)` each frame
+before `compositor.frame()`.
+
+**Menu:** per-shape **Wander** checkbox + **Speed** slider (0.005–0.05, step 0.005).
+On enable: assign a random initial velocity at `wanderSpeed`; on disable: zero the
+velocity so the shape stops where it is.
+
+---
 
 | # | Question | Notes |
 |---|----------|-------|
