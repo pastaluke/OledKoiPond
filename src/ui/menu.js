@@ -90,6 +90,23 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       </div>
     </details>
     <details>
+      <summary>Shape</summary>
+      <div class="menu-rows">
+        <canvas id="shape-preview" class="shape-preview"></canvas>
+        <label class="menu-row">
+          <span>Point</span>
+          <select id="shape-point-sel" class="menu-select"></select>
+        </label>
+        <div id="shape-t-row"></div>
+        <div id="shape-w-row"></div>
+        <div id="shape-spine-sliders"></div>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-copy-shape">Copy values</button>
+          <button class="menu-action" id="btn-reset-shape">Reset</button>
+        </div>
+      </div>
+    </details>
+    <details>
       <summary>Display</summary>
       <div class="menu-rows">
         <div id="display-sliders"></div>
@@ -179,9 +196,11 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
   });
 
   // ── Persistence ─────────────────────────────────────────────────────────────
+  // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
     fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
+    shape:   JSON.parse(JSON.stringify(liveShape)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border },
   });
@@ -191,6 +210,11 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     while (sim.entities.length < n) sim.add(new FishClass(grid));
     while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
   }
+
+  // ── Shape state — live mutable copy of FishClass.SHAPE ───────────────────────
+  // Captured before persisted restore so Reset can return to code defaults.
+  const defaultShape = JSON.parse(JSON.stringify(FishClass.SHAPE));
+  let liveShape      = JSON.parse(JSON.stringify(FishClass.SHAPE));
 
   // ── Display knobs (owned by the Grid) ─────────────────────────────────────────
   const DENSITY_RANGE = { min: 1, max: 4 };    // display cells per world unit
@@ -235,6 +259,10 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
       if (typeof b.enabled === 'boolean') grid.border.enabled = b.enabled;
       if (Number.isFinite(b.width))       grid.border.width   = clamp(b.width,   0.5, 10);
       if (Number.isFinite(b.opacity))     grid.border.opacity = clamp(b.opacity, 0,   1);
+    }
+    if (persisted.shape && Array.isArray(persisted.shape.profile)) {
+      liveShape = persisted.shape;
+      FishClass.SHAPE = liveShape;
     }
   }
 
@@ -550,6 +578,220 @@ export function initMenu({ overlay, sim, grid, FishClass }) {
     getMax: () => FISH_MAX,
   });
   fishHost.appendChild(countRow);
+
+  // ── Shape editor ─────────────────────────────────────────────────────────────
+  const PT_LABELS = ['Tail tip','Fin base','Fin peak','Peduncle','Waist rise','Belly','Belly end','Head taper','Snout'];
+  const shapePreview  = panel.querySelector('#shape-preview');
+  const shapePointSel = panel.querySelector('#shape-point-sel');
+  const shapeTHost    = panel.querySelector('#shape-t-row');
+  const shapeWHost    = panel.querySelector('#shape-w-row');
+  const shapeSpineHost = panel.querySelector('#shape-spine-sliders');
+
+  // Local interpolator for the preview canvas (mirrors the one in fish-base.js).
+  function _widthAtLocal(t, profile) {
+    for (let i = 1; i < profile.length; i++) {
+      const [t0, w0] = profile[i - 1], [t1, w1] = profile[i];
+      if (t <= t1) return w0 + (w1 - w0) * ((t - t0) / (t1 - t0));
+    }
+    return profile[profile.length - 1][1];
+  }
+
+  function redrawShapePreview() {
+    const pr = liveShape.profile;
+    const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
+    const W = shapePreview.clientWidth || 200;
+    const H = shapePreview.clientHeight || 60;
+    shapePreview.width  = W;
+    shapePreview.height = H;
+    const ctx2 = shapePreview.getContext('2d');
+    ctx2.clearRect(0, 0, W, H);
+
+    const scale  = (H / 2 - 4) / maxW;
+    const cy     = H / 2;
+    const selIdx = parseInt(shapePointSel.value, 10);
+
+    // Draw filled silhouette
+    ctx2.beginPath();
+    const STEPS = 80;
+    ctx2.moveTo(0, cy);
+    for (let i = 0; i <= STEPS; i++) {
+      const t = i / STEPS;
+      const hw = _widthAtLocal(t, pr) * scale;
+      ctx2.lineTo(t * W, cy - hw);
+    }
+    for (let i = STEPS; i >= 0; i--) {
+      const t = i / STEPS;
+      const hw = _widthAtLocal(t, pr) * scale;
+      ctx2.lineTo(t * W, cy + hw);
+    }
+    ctx2.closePath();
+    ctx2.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx2.fill();
+    ctx2.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx2.lineWidth = 1;
+    ctx2.stroke();
+
+    // Draw control-point dots
+    pr.forEach(([t, w], i) => {
+      const x = t * W, y = cy - w * scale;
+      ctx2.beginPath();
+      ctx2.arc(x, y, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
+      ctx2.fillStyle = i === selIdx ? 'rgb(0,210,255)' : 'rgba(255,255,255,0.5)';
+      ctx2.fill();
+      // Mirror dot below centerline
+      ctx2.beginPath();
+      ctx2.arc(x, cy + w * scale, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
+      ctx2.fillStyle = i === selIdx ? 'rgba(0,210,255,0.5)' : 'rgba(255,255,255,0.25)';
+      ctx2.fill();
+    });
+  }
+
+  let shapeTRow = null, shapeWRow = null;
+
+  function buildShapeSliders(idx) {
+    shapeTHost.innerHTML = '';
+    shapeWHost.innerHTML = '';
+    const pr   = liveShape.profile;
+    const isEndpoint = idx === 0 || idx === pr.length - 1;
+
+    // t-position slider
+    const tMin = isEndpoint ? pr[idx][0] : pr[idx - 1][0] + 0.01;
+    const tMax = isEndpoint ? pr[idx][0] : pr[idx + 1][0] - 0.01;
+    const tResult = makeRow({
+      label: 't position',
+      decimals: 2,
+      valueStep: 0.01,
+      hasBounds: false,
+      getVal: () => pr[idx][0],
+      setVal: (v) => {
+        pr[idx][0] = Math.round(v * 100) / 100;
+        // Update option label
+        const opt = shapePointSel.options[idx];
+        if (opt) opt.textContent = `${PT_LABELS[idx] ?? `Point ${idx}`}  t=${pr[idx][0].toFixed(2)}`;
+        FishClass.SHAPE = liveShape;
+        redrawShapePreview();
+        save();
+      },
+      getMin: () => tMin,
+      getMax: () => tMax,
+    });
+    shapeTHost.appendChild(tResult.row);
+    if (isEndpoint) {
+      tResult.row.querySelector('input[type="range"]').disabled = true;
+      tResult.row.querySelectorAll('.step-btn').forEach(b => b.disabled = true);
+      tResult.row.style.opacity = '0.4';
+    }
+    shapeTRow = tResult;
+
+    // Half-width slider
+    const wResult = makeRow({
+      label: 'Half-width',
+      decimals: 2,
+      valueStep: 0.01,
+      hasBounds: false,
+      getVal: () => pr[idx][1],
+      setVal: (v) => {
+        pr[idx][1] = Math.round(v * 100) / 100;
+        FishClass.SHAPE = liveShape;
+        redrawShapePreview();
+        save();
+      },
+      getMin: () => 0,
+      getMax: () => 5.0,
+    });
+    shapeWHost.appendChild(wResult.row);
+    shapeWRow = wResult;
+  }
+
+  // Populate point dropdown
+  function buildShapePointSel() {
+    shapePointSel.innerHTML = '';
+    liveShape.profile.forEach(([t, ], i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = `${PT_LABELS[i] ?? `Point ${i}`}  t=${t.toFixed(2)}`;
+      shapePointSel.appendChild(opt);
+    });
+    shapePointSel.value = 0;
+  }
+
+  buildShapePointSel();
+  buildShapeSliders(0);
+  redrawShapePreview();
+
+  shapePointSel.addEventListener('change', () => {
+    const idx = parseInt(shapePointSel.value, 10);
+    buildShapeSliders(idx);
+    redrawShapePreview();
+  });
+
+  // Spine / animation param sliders
+  const SPINE_PARAMS = [
+    { key: 'headFrac',   label: 'Head offset',  min: 0.10, max: 0.80 },
+    { key: 'tailFrac',   label: 'Tail offset',  min: 0.10, max: 0.90 },
+    { key: 'waistFrac',  label: 'Waist',        min: 0.05, max: 0.60 },
+    { key: 'wiggleFrac', label: 'Tail wiggle',  min: 0.00, max: 0.50 },
+    { key: 'bendWaist',  label: 'Waist bend',   min: 0.00, max: 0.50 },
+    { key: 'bendBody',   label: 'Body bend',    min: 0.00, max: 0.50 },
+  ];
+  for (const sp of SPINE_PARAMS) {
+    const { row } = makeRow({
+      label: sp.label,
+      decimals: 3,
+      valueStep: 0.001,
+      hasBounds: false,
+      getVal: () => liveShape[sp.key],
+      setVal: (v) => {
+        liveShape[sp.key] = Math.round(v * 1000) / 1000;
+        FishClass.SHAPE = liveShape;
+        save();
+      },
+      getMin: () => sp.min,
+      getMax: () => sp.max,
+    });
+    shapeSpineHost.appendChild(row);
+  }
+
+  // Copy shape values
+  panel.querySelector('#btn-copy-shape').addEventListener('click', async () => {
+    const pr   = liveShape.profile;
+    const pad  = 11;
+    const lines = [
+      'static SHAPE = {',
+      `  headFrac:   ${liveShape.headFrac.toFixed(3)},`,
+      `  tailFrac:   ${liveShape.tailFrac.toFixed(3)},`,
+      `  waistFrac:  ${liveShape.waistFrac.toFixed(3)},`,
+      `  wiggleFrac: ${liveShape.wiggleFrac.toFixed(3)},`,
+      `  bendWaist:  ${liveShape.bendWaist.toFixed(3)},`,
+      `  bendBody:   ${liveShape.bendBody.toFixed(3)},`,
+      '  profile: [',
+      ...pr.map(([t, w], i) => `    [${t.toFixed(2)}, ${w.toFixed(2)}],  // ${PT_LABELS[i] ?? `Point ${i}`}`),
+      '  ],',
+      '};',
+    ];
+    const snippet = lines.join('\n');
+    const copyBtn = panel.querySelector('#btn-copy-shape');
+    try { await navigator.clipboard.writeText(snippet); }
+    catch { console.log(snippet); }
+    const prev = copyBtn.textContent;
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => { copyBtn.textContent = prev; }, 1200);
+  });
+
+  // Reset shape
+  panel.querySelector('#btn-reset-shape').addEventListener('click', () => {
+    liveShape = JSON.parse(JSON.stringify(defaultShape));
+    FishClass.SHAPE = liveShape;
+    buildShapePointSel();
+    buildShapeSliders(parseInt(shapePointSel.value, 10));
+    redrawShapePreview();
+    save();
+  });
+
+  // Redraw preview when Shape section is opened (canvas size may have been 0 when hidden).
+  panel.querySelector('#shape-preview').closest('details').addEventListener('toggle', (e) => {
+    if (e.target.open) redrawShapePreview();
+  });
 
   // ── Build display sliders (grid knobs) ────────────────────────────────────────
   const displayHost = panel.querySelector('#display-sliders');

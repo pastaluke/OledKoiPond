@@ -23,19 +23,16 @@ function _sampleSize(min, max, curve) {
 }
 
 // ─── Spline renderer ──────────────────────────────────────────────────────────
-const WAIST_FRAC = 0.28;   // tail bezier spans t ∈ [0, WAIST_FRAC]
 const SWIM_AMP_FLOOR = 0.06;   // faint idle tail sway kept when a fish is nearly stopped
 
-// Half-width profile along fish body: t=0 (tail tip) → t=1 (head tip)
-function _widthAt(t) {
-  if (t < 0.06) return (t / 0.06) * 0.4;
-  if (t < 0.13) return 0.4 + ((t - 0.06) / 0.07) * 1.4;  // tail fin widens
-  if (t < 0.20) return 1.8 - ((t - 0.13) / 0.07) * 1.4;  // peduncle narrows
-  if (t < 0.28) return 0.4 + ((t - 0.20) / 0.08) * 0.9;  // body rises
-  if (t < 0.55) return 1.3 + ((t - 0.28) / 0.27) * 0.9;  // body widens
-  if (t < 0.72) return 2.2;                                 // body max
-  if (t < 0.88) return 2.2 - ((t - 0.72) / 0.16) * 1.4;  // taper to head
-  return 0.8 - ((t - 0.88) / 0.12) * 0.7;                  // snout
+// Half-width at position t along the body, linearly interpolated from a profile array.
+// profile: [[t, halfWidth], ...] sorted by t, t=0 (tail tip) → t=1 (head tip).
+function _widthAt(t, profile) {
+  for (let i = 1; i < profile.length; i++) {
+    const [t0, w0] = profile[i - 1], [t1, w1] = profile[i];
+    if (t <= t1) return w0 + (w1 - w0) * ((t - t0) / (t1 - t0));
+  }
+  return profile[profile.length - 1][1];
 }
 
 // Snaps outline points to the DISPLAY-CELL grid (density cells per world unit). All
@@ -56,25 +53,28 @@ function _outlinePx(set, bx, by, nx, ny, w, d) {
 // swimOsc  : swim oscillation in [-1, 1]
 // length   : fish nose-to-tail length in world units
 // density  : display cells per world unit (render fidelity). 1 = current behavior.
-function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, swimAmp = 1) {
+// shape    : FishBase.SHAPE — all body proportions + profile
+function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, swimAmp = 1, shape) {
+  const { headFrac, tailFrac, waistFrac, wiggleFrac, bendWaist, bendBody, profile } = shape;
+
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
 
-  const headDist  = length * 0.42;
-  const tailDist  = length * 0.58;
-  const waistDist = tailDist - length * WAIST_FRAC;
+  const headDist  = length * headFrac;
+  const tailDist  = length * tailFrac;
+  const waistDist = tailDist - length * waistFrac;
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  const Wx = -cosH * waistDist - cosP * steeringBend * length * 0.12;
-  const Wy = -sinH * waistDist - sinP * steeringBend * length * 0.12;
+  const Wx = -cosH * waistDist - cosP * steeringBend * length * bendWaist;
+  const Wy = -sinH * waistDist - sinP * steeringBend * length * bendWaist;
 
-  const tailWigglePx = length * 0.156 * swimAmp;   // ≈ 2.5 px at length=16, scaled by speed
+  const tailWigglePx = length * wiggleFrac * swimAmp;
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
 
-  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * 0.22;
-  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * 0.22;
+  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
+  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
 
   const set = new Set();
 
@@ -82,23 +82,23 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, sw
   const TAIL_STEPS = 18 * density, BODY_STEPS = 42 * density;
 
   for (let i = 0; i <= TAIL_STEPS; i++) {
-    const s = i / TAIL_STEPS, t = s * WAIST_FRAC;
+    const s = i / TAIL_STEPS, t = s * waistFrac;
     const bx = (1-s)*(1-s)*Tx + 2*(1-s)*s*TCx + s*s*Wx;
     const by = (1-s)*(1-s)*Ty + 2*(1-s)*s*TCy + s*s*Wy;
     const dx = 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx);
     const dy = 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy);
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t), density);
+    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t, profile), density);
   }
 
   for (let i = 0; i <= BODY_STEPS; i++) {
-    const s = i / BODY_STEPS, t = WAIST_FRAC + s * (1 - WAIST_FRAC);
+    const s = i / BODY_STEPS, t = waistFrac + s * (1 - waistFrac);
     const bx = (1-s)*(1-s)*Wx + 2*(1-s)*s*BCx + s*s*Hx;
     const by = (1-s)*(1-s)*Wy + 2*(1-s)*s*BCy + s*s*Hy;
     const dx = 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx);
     const dy = 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy);
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t), density);
+    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t, profile), density);
   }
 
   return [...set].map(k => { const [x, y] = k.split(',').map(Number); return { x, y }; });
@@ -122,6 +122,28 @@ export class FishBase {
   static SIZE_CURVE = 1.0;
   static SPEED_MAX  = 0.03;   // logical px/ms
   static COLORS     = [{ r: 200, g: 200, b: 200 }];
+
+  /** Body shape definition — all rendering constants in one place.
+   *  Subclasses can override; the live shape editor mutates FishClass.SHAPE directly. */
+  static SHAPE = {
+    headFrac:   0.42,   // fraction of length: center → head tip
+    tailFrac:   0.58,   // fraction of length: center → tail tip
+    waistFrac:  0.28,   // tail bézier span (fraction of tailDist)
+    wiggleFrac: 0.156,  // tail wiggle amplitude (fraction of length)
+    bendWaist:  0.12,   // waist lateral-bow factor with steering
+    bendBody:   0.22,   // body control-point bow factor with steering
+    profile: [          // [t, halfWidth] breakpoints, linearly interpolated
+      [0.00, 0.0],  // tail tip
+      [0.06, 0.4],  // fin base
+      [0.13, 1.8],  // fin peak
+      [0.20, 0.4],  // peduncle (pinch)
+      [0.28, 1.3],  // waist rise
+      [0.55, 2.2],  // belly
+      [0.72, 2.2],  // belly end
+      [0.88, 0.8],  // head taper
+      [1.00, 0.1],  // snout
+    ],
+  };
 
   // Schooling (boids) — SCHOOL_WEIGHT 0=solitary, 1=strong schooler.
   // Scales the alignment + cohesion forces (separation always applies).
@@ -364,7 +386,7 @@ export class FishBase {
   draw(grid) {
     const D       = grid.density;
     const swimOsc = Math.sin(this.swimPhase);
-    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D, this.swimAmp);
+    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D, this.swimAmp, this.constructor.SHAPE);
     // Center on the display-cell grid; spline offsets are already in display cells.
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     const { r, g, b } = this.color;
