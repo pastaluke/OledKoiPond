@@ -9,6 +9,7 @@ import { Koi          } from './entities/koi.js';
 import { DebugOverlay } from './debug-overlay.js';
 import { initMenu     } from './ui/menu.js';
 import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index.js';
+import { Compositor } from './renderer/compositor.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -18,9 +19,12 @@ const DISPLAY_DENSITY = 2;
 
 document.addEventListener('DOMContentLoaded', () => {
   const canvas      = /** @type {HTMLCanvasElement} */ (document.getElementById('pond'));
+  const glCanvas    = /** @type {HTMLCanvasElement} */ (document.getElementById('webgl'));
   const debugCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('debug'));
 
   const grid    = new Grid(canvas, { density: DISPLAY_DENSITY });
+  grid.setWebglCanvas(glCanvas);
+  const compositor = new Compositor(canvas, glCanvas);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
 
@@ -46,8 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Feed: tap/click recolors the nearest fish from the active palette bag.
-  canvas.addEventListener('pointerdown', (e) => {
-    const rect = canvas.getBoundingClientRect();
+  // Listener is on the visible WebGL canvas since canvas#pond is hidden.
+  glCanvas.addEventListener('pointerdown', (e) => {
+    const rect = glCanvas.getBoundingClientRect();
     const lx = (e.clientX - rect.left) / grid.scale;
     const ly = (e.clientY - rect.top)  / grid.scale;
     let nearest = null, minD2 = Infinity;
@@ -73,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sim.draw();
     grid.drawBorder();
     overlay.draw(sim.entities);
+    compositor.frame();
 
     requestAnimationFrame(frame);
   }

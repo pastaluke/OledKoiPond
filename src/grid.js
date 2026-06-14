@@ -44,6 +44,9 @@ export class Grid {
     /** Border drawn over the pond after each frame. Width is in world units. */
     this.border = { enabled: false, width: 1, opacity: 0.5 };
 
+    /** WebGL output canvas, set by setWebglCanvas() after construction. */
+    this.webglCanvas = null;
+
     this.resize();
 
     window.addEventListener('resize', () => {
@@ -81,9 +84,24 @@ export class Grid {
       this.logicalH = logicalShort;
     }
 
-    // Set physical canvas resolution
+    // Set physical canvas resolution on both the 2D render target and WebGL output.
     this.canvas.width  = Math.round(this.logicalW * this.scale);
     this.canvas.height = Math.round(this.logicalH * this.scale);
+    if (this.webglCanvas) {
+      this.webglCanvas.width  = this.canvas.width;
+      this.webglCanvas.height = this.canvas.height;
+    }
+  }
+
+  /**
+   * Registers the WebGL output canvas and immediately syncs its dimensions.
+   * Call once after construction, before the first frame.
+   * @param {HTMLCanvasElement} canvas
+   */
+  setWebglCanvas(canvas) {
+    this.webglCanvas = canvas;
+    canvas.width  = this.canvas.width;
+    canvas.height = this.canvas.height;
   }
 
   /**

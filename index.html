@@ -13,7 +13,20 @@
       background: #000000;
     }
 
+    /* Hidden Canvas2D render target — kept in-layout so clientWidth/clientHeight
+       remain valid for grid.resize(); invisible and non-interactive. */
     canvas#pond {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Visible WebGL output canvas. */
+    canvas#webgl {
       display: block;
       width: 100vw;
       height: 100vh;
@@ -440,6 +453,7 @@
 </head>
 <body>
   <canvas id="pond"></canvas>
+  <canvas id="webgl"></canvas>
   <canvas id="debug"></canvas>
   <script type="module" src="src/main.js"></script>
 </body>
