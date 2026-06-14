@@ -284,6 +284,148 @@ velocity so the shape stops where it is.
 
 ---
 
+#### E8-4 — Static specular environment field + normal warping  ⬜
+
+**What changes and why:**
+The current specular highlight on glass shapes is driven by `uTime` — two virtual
+light blobs orbit Lissajous paths across the screen and the glass brightens as they
+pass over it. This means the highlight *moves on its own* regardless of what you do.
+
+This story replaces the time-driven position with a **static light field in screen
+space**: a procedural function `envLight(vec2 screenUV) → float` that returns how
+bright that patch of the screen is supposed to be. The glass then samples this
+field wherever it currently sits. Move the lens → it reveals a different portion of
+the field → the highlight shifts with you, not against you. Time is out; position
+is in.
+
+This is also the foundational hook for the water lighting system. When E7-2 (CPU
+wave grid) and E7-4 (wave normals → fragment shader) land, the wave height map gets
+uploaded as a texture. At that point, `envLight()` can sample it and glass shapes
+will reflect actual ripples — fish swim past, they inject waves (E2-3), waves
+propagate, glass surfaces catch the light off crests. The architecture is designed
+so that upgrade is a few added lines inside `envLight()`, not a refactor.
+
+---
+
+**GLSL changes (`compositor.js` — the `FRAG` string):**
+
+*New uniform:*
+```glsl
+uniform int   uSpecularMode;    // 0=off  1=animated(legacy)  2=static-field
+uniform float uSpecularCurve;   // normal-warp strength; 0=flat, ~0.04=glassy rim
+// (reserved for E7-4):
+// uniform sampler2D uWaveTex;  // wave height/normal map from CPU sim
+// uniform float uWaveSpecStr;  // wave contribution to specular
+```
+
+*`envLight()` function — insert before `main()`:*
+```glsl
+// Static light environment sampled by glass surfaces. Three soft sources at
+// fixed asymmetric positions; full-screen variation so any shape position is
+// interesting. Designed to accept uWaveTex in E7-4 without signature change.
+float envLight(vec2 fieldUV) {
+  float h = 0.0;
+  h += smoothstep(0.45, 0.0, distance(fieldUV, vec2(0.22, 0.25))) * 0.14;
+  h += smoothstep(0.55, 0.0, distance(fieldUV, vec2(0.75, 0.38))) * 0.10;
+  h += smoothstep(0.40, 0.0, distance(fieldUV, vec2(0.52, 0.72))) * 0.08;
+  // E7-4 hook: h += texture2D(uWaveTex, fieldUV).r * uWaveSpecStr;
+  return h;
+}
+```
+
+*Replace shape specular block (currently lines 173–179):*
+```glsl
+if (specular > 0.5) {
+  if (uSpecularMode == 1) {
+    // Legacy: animated time-driven blobs (kept for A/B comparison).
+    vec2 lp1 = vec2(sin(uTime * 0.2), cos(uTime * 0.30)) * 0.6 + 0.5;
+    vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
+    float h  = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
+             + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
+    c.rgb += h;
+  } else if (uSpecularMode == 2) {
+    // Static field: warp lookup by outward surface normal at the rim.
+    // -normTC = outward (away from center); edgeFact is strongest at the rim.
+    vec2 fieldUV = uv - normTC * edgeFact * uSpecularCurve;
+    float h = envLight(fieldUV);
+    // Slight centre-falloff: glass edge reads brighter than the flat centre.
+    h *= mix(1.0, centreBlend, 0.5);
+    c.rgb += h;
+  }
+}
+```
+
+*Replace border specular block (currently lines 101–108) — same pattern:*
+```glsl
+if (uBorderSpecular) {
+  if (uSpecularMode == 1) {
+    // Legacy animated blobs.
+    vec2 lp1 = vec2(sin(uTime * 0.15), cos(uTime * 0.22)) * 0.45 + 0.5;
+    vec2 lp2 = vec2(sin(uTime * -0.28 + 2.1), cos(uTime * 0.18 - 0.8)) * 0.45 + 0.5;
+    float h = smoothstep(0.15, 0.0, distance(uv, lp1)) * 0.15 * t
+            + smoothstep(0.18, 0.0, distance(uv, lp2)) * 0.10 * t;
+    c.rgb += h;
+  } else if (uSpecularMode == 2) {
+    // Static field: norm already computed (inward normal); warp by -norm (outward).
+    vec2 fieldUV = uv - norm * t * uSpecularCurve;
+    c.rgb += envLight(fieldUV) * t;
+  }
+}
+```
+
+---
+
+**JS/Menu changes (`compositor.js` + `menu.js`):**
+
+- `Compositor` gains `_specularMode = 2` (default to static field; 1 = animated for
+  backward compat), `_specularCurve = 0.035` (default).
+- New JS uniform locations: `uSpecularMode`, `uSpecularCurve`.
+- `setGlassEdge()` opts gains `specularMode` and `specularCurve` params.
+- Menu — Specular section (below existing Specular checkbox):
+  - **Mode** select: `Animated | Static field` (radio/select)
+  - **Curvature** slider: 0.00–0.10, step 0.005 — controls how strongly the rim
+    bends the light field; 0 = flat glass, ~0.04 = strong dome.
+  - Persist both in `save()` blob.
+
+---
+
+**E7-4 upgrade path (documented here, not implemented in E8-4):**
+
+When E7-4 lands, the following changes integrate water into the specular field:
+
+1. Upload the wave height map as `uWaveTex` (WebGL texture unit 1) alongside
+   `uTex` (unit 0). This happens in `compositor.frame()`.
+2. Add `uniform sampler2D uWaveTex` and `uniform float uWaveSpecStr` to FRAG.
+3. Inside `envLight()`, uncomment the E7-4 hook line. The wave crests now
+   contribute to the light field — glass surfaces over choppy water sparkle more.
+4. Because the field UV is already normal-warped, wave normals get a second pass:
+   they distort the UV displacement (E7-4) *and* they show up brighter in the
+   specular field. Fish swimming past → ripples → glass glints. The two systems
+   compose without additional work.
+
+No other changes to the specular system are needed; the `envLight()` abstraction
+absorbs the wave texture naturally.
+
+---
+
+**Optional follow-up tuning knobs (not in scope for this story):**
+
+- `specularDrift` float (0 = fully static, 0.01–0.05 = the field breathes very
+  slowly): `fieldUV += sin(uTime * drift) * 0.02` — gives life without losing the
+  reveal mechanic. Could ship as a separate menu row after E8-4 is confirmed.
+- Per-shape `specularIntensity` multiplier (currently uniform per scene).
+
+---
+
+**Affected files:**
+
+| File | Change |
+|------|--------|
+| `src/renderer/compositor.js` | Add `envLight()` GLSL fn; `uSpecularMode`, `uSpecularCurve` uniforms; rewrite shape + border specular blocks; new JS state + getters |
+| `src/ui/menu.js` | Mode select + Curvature slider in Glass section; persist to `save()` |
+
+---
+
 ### E9 · TV Remote / Keyboard-Only Navigation
 Full keyboard parity with mouse and touch. Every interaction reachable with Arrow
 keys + Spacebar only — no mouse, no trackpad, no touch required. Designed around the
