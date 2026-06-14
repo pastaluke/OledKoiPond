@@ -4,6 +4,7 @@
 
 import koiClassic from './builtin/koi-classic.js';
 import special    from './builtin/special.js';
+import community  from './builtin/community.js';
 
 import {
   initRegistry, rollColor,
@@ -13,7 +14,7 @@ import {
   getAllPalettes, getCustomPalettes, isBuiltin,
 } from './palette-manager.js';
 
-export const BUILTIN_PALETTES = [koiClassic, special];
+export const BUILTIN_PALETTES = [koiClassic, ...community, special];
 
 // Merge persisted custom palettes into the registry on init.
 const _customs = loadCustomPalettes();
