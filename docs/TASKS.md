@@ -284,7 +284,220 @@ velocity so the shape stops where it is.
 
 ---
 
-| # | Question | Notes |
+### E9 · TV Remote / Keyboard-Only Navigation
+Full keyboard parity with mouse and touch. Every interaction reachable with Arrow
+keys + Spacebar only — no mouse, no trackpad, no touch required. Designed around the
+"10-foot UI" model (TV remote, game controller D-pad, set-top box) while remaining a
+usability win for any keyboard-driven user.
+
+**Research findings (2026-06-14):**
+- W3C CSS Spatial Navigation Level 1 is a draft but **zero browser implementations**;
+  polyfills exist (WICG) but are incomplete. We roll our own.
+- Roving tabindex pattern wins over `aria-activedescendant` here because the browser
+  auto-scrolls the newly-focused element into view for free.
+- TV remotes (Samsung Tizen, LG webOS, Roku) all emit standard `event.key` strings:
+  `"ArrowLeft"`, `"ArrowUp"`, `"ArrowRight"`, `"ArrowDown"`, `"Enter"`, `" "`.
+  Using `event.key` (not numeric keycodes) gives us cross-platform TV compat for free.
+- Native `<input type="range">` responds to arrow keys automatically when focused;
+  we only need to intercept Up/Down to navigate away rather than changing the slider
+  value, and let Left/Right change the value as expected.
+- `element.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'nearest' })`
+  is the standard, widely-supported API for keeping a focused element in view.
+- Grab-and-move on TV home screens: Enter to grab, arrows to move, Enter to drop.
+  ARIA: `role="button"` + `aria-pressed="true"` while grabbed.
+
+**Architecture — two-mode model:**
+A `KeyNavManager` class owns the keyboard listener and dispatches to one of two modes:
+- **CANVAS mode** (default, menu closed): arrows move a UV-space cursor drawn by the
+  debug overlay; Space selects/grabs the shape under the cursor or drops food.
+- **MENU mode** (menu open): arrows navigate the flat ordered list of focusable
+  elements in the panel; native input behaviors still apply per element type.
+
+Mode switches: opening the hamburger menu → MENU; closing/Escape → CANVAS.
+One global `keydown` listener on `window`, `preventDefault()` only when we consume
+the key (never suppress native text input inside color/name fields).
+
+---
+
+#### E9-1 — KeyNavManager + canvas cursor mode  ⬜
+
+**New file: `src/ui/key-nav.js`** — exports `KeyNavManager` class.
+
+```js
+// Constructed in main.js, receives references to glassShapes and compositor.
+class KeyNavManager {
+  constructor({ glassShapes, compositor, overlay }) { ... }
+  setMode(mode) { ... }   // 'canvas' | 'menu'
+  frame(dt) { ... }       // called each animation frame; integrates cursor velocity
+}
+```
+
+**Canvas cursor state:**
+- `cursorX = 0.5`, `cursorY = 0.5` — UV space, 0–1
+- `_vx = 0`, `_vy = 0` — current velocity (UV/s)
+- `_heldKeys` — Set of currently-held arrow keys
+- `_holdTimer` — timestamp of first keydown (for acceleration)
+
+**Cursor movement:**
+- On `keydown` for an Arrow key: add to `_heldKeys`; set base velocity
+  (`BASE_SPEED = 0.15 UV/s`).
+- After 500ms of continuous hold: ramp to `FAST_SPEED = 0.40 UV/s`.
+- `frame(dt)`: integrate `cursorX += _vx * dt`, `cursorY += _vy * dt`; clamp to 0–1.
+- On `keyup`: remove from `_heldKeys`; zero that axis.
+- Cursor wraps at edges (same as fish wander) rather than hard-stopping.
+
+**Grab flow:**
+- Space/Enter on canvas mode → `hitIdx = glassShapes.hitTest(cursorX, cursorY)`
+  - If hit and not grabbed: `glassShapes.select(hitIdx)`, enter **grab mode**
+    (`_grabbed = hitIdx`); visual: overlay draws grab ring around shape.
+  - If grabbed: drop — `glassShapes.requestSave()`, `_grabbed = -1`.
+- Space on empty canvas (no hit, no grab): drop food at cursor UV (same as
+  current mouse-click feed behavior — fire `'feed'` event with `{u, v}`).
+- Escape while grabbed: drop without save; Escape in canvas mode (nothing grabbed):
+  do nothing / deselect.
+
+**Debug overlay integration:**
+- `overlay.keyNav = keyNavManager` (assigned in main.js).
+- `_drawKeyNavCursor()` called at end of `draw()` when `keyNav` is set and mode is
+  `'canvas'`:
+  - Draw a small crosshair (4 short lines ±8px) + circle (r=10px) at canvas pixel
+    coords `(cursorX * W, cursorY * H)`.
+  - When grabbed: additionally pulse the grabbed shape's outer ring with a brighter
+    stroke (reuse `_drawGlassShapes` ring, override color to `#fff`).
+  - Color: `rgba(0, 210, 255, 0.85)` (matches existing selection highlight color).
+
+**`main.js` wiring:**
+```js
+import { KeyNavManager } from './ui/key-nav.js';
+const keyNav = new KeyNavManager({ glassShapes, compositor, overlay });
+// In animation loop, before compositor.frame():
+keyNav.frame(deltaMs / 1000);
+```
+
+---
+
+#### E9-2 — Menu roving-focus navigation  ⬜
+
+Keyboard focus moves through all interactive elements in the panel using Up/Down
+arrows. Each element scrolls into view automatically via the roving tabindex pattern.
+
+**Focusable element types (in DOM order):**
+1. `<summary>` elements (section headers) — toggle `<details>` open/closed
+2. `<input type="checkbox">`
+3. `<select>`
+4. `<input type="range">` (one per slider row)
+5. `<button>` elements (Add/Remove, Copy values, Reset, action buttons)
+
+Excluded from arrow navigation: `<input type="text">` / `<input type="color">` —
+these need full keyboard; user reaches them with Tab if needed.
+
+**Focus list management:**
+- `_buildFocusList()`: call `panel.querySelectorAll(SELECTORS)`, filter to
+  `offsetParent !== null` (skips hidden elements inside collapsed `<details>`).
+- Rebuild on: menu open, any `<details>` toggle event.
+- `_focusIdx` — index into the current list.
+
+**Roving tabindex:**
+- All elements in list: `tabindex = -1`.
+- Active element: `tabindex = 0`, call `.focus()`, call
+  `.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'nearest' })`.
+
+**Key handling in MENU mode:**
+| Key | On `<summary>` | On `<input type="range">` | On checkbox/select/button | General |
+|-----|--------------|--------------------------|--------------------------|---------|
+| ArrowDown | move to next | move to next (prevent default) | move to next | +1 in list |
+| ArrowUp | move to prev | move to prev (prevent default) | move to prev | −1 in list |
+| ArrowRight | expand section | +1 step (native, don't intercept) | — | — |
+| ArrowLeft | collapse section | −1 step (native, don't intercept) | — | — |
+| Enter / Space | toggle open/closed | — | activate (click) | — |
+| Escape | close menu → CANVAS mode | — | — | — |
+| Tab | hand off to browser | (native) | (native) | (native) |
+
+Section expand/collapse via arrow:
+- Right on a collapsed `<summary>` → `details.open = true`; rebuild list; move focus
+  to the first control inside that section (next in list after the summary).
+- Left on an open `<summary>` → `details.open = false`; rebuild list; focus stays on
+  the summary (which is still in the list).
+- Down from an open `<summary>` → move to first control inside (next in list).
+- Down from the last control in a section → move to next section's `<summary>`.
+
+**`menu.js` integration:**
+- On menu open: `keyNav.setMode('menu')`, `keyNav.menuPanel = panel`,
+  `keyNav.buildFocusList()`, focus first element.
+- On menu close: `keyNav.setMode('canvas')`.
+- Each `<details>` toggle listener also calls `keyNav.buildFocusList()`.
+
+**CSS — ensure focus ring is visible on dark background (`index.html`):**
+```css
+.menu-panel :focus-visible {
+  outline: 2px solid rgba(0, 210, 255, 0.9);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+```
+
+---
+
+#### E9-3 — Fish targeting via canvas cursor  ⬜
+
+Extends canvas cursor mode (E9-1) to allow selecting and following a fish.
+
+- When Space is pressed in canvas mode with no glass shape under the cursor:
+  check for the nearest fish within `0.08` UV (aspect-corrected) of `cursorX/cursorY`.
+- If a fish is within range: enter **fish-follow mode** — cursor locks to that fish
+  (UV coords track the fish each frame), overlay draws a ring around the fish (color
+  `rgba(255, 200, 0, 0.7)` — distinct from glass shape cyan).
+- Space again: drop food at the fish's current position and exit follow mode.
+- Escape: exit follow mode without feeding.
+- Arrows in fish-follow mode: nudge a "feed point" offset relative to the fish (±0.05
+  UV), so the user can place food slightly ahead of the fish; not required for V1.
+
+**Debug overlay integration:**
+- When `_fishTarget` is set: draw a dashed circle at the fish's screen position with
+  `r = 18px`; `strokeStyle = 'rgba(255,200,0,0.7)'`.
+
+---
+
+#### E9-4 — TV remote key compatibility + polish  ⬜
+
+Ensures the system works on Samsung Tizen, LG webOS, and similar TV browsers without
+any additional configuration.
+
+**Key mapping robustness:**
+- Use `event.key` exclusively (string form): `"ArrowLeft"`, `"ArrowUp"`,
+  `"ArrowRight"`, `"ArrowDown"`, `"Enter"`, `" "`, `"Escape"`, `"Tab"`.
+- Do **not** use `event.keyCode` — deprecated and inconsistent across TV platforms.
+- Samsung Tizen remote Back button = `event.key === "GoBack"` → treat as Escape.
+- LG webOS Magic Remote pointer events arrive as mouse events — existing mouse/touch
+  handling already covers this with no changes needed.
+
+**Mode indicator (optional UX polish):**
+- When in MENU mode, dim the canvas cursor (opacity 0.3) to visually confirm "you're
+  in the menu now."
+- When returning to CANVAS mode, the cursor briefly pulses bright (scale from 1.5→1
+  over 300ms) to confirm "you're back on the pond."
+
+**Accessibility:**
+- Add `aria-label="Pond canvas — use arrow keys to move cursor, space to interact"`
+  to the WebGL canvas element.
+- Add `role="application"` to the canvas wrapper so screen readers understand it
+  accepts keyboard input.
+- Announce mode changes with an `aria-live="polite"` hidden element:
+  `"Canvas mode — arrow keys move cursor"` / `"Menu open — arrow keys navigate"`.
+
+**Affected files summary:**
+
+| File | Change |
+|------|--------|
+| `src/ui/key-nav.js` | New — KeyNavManager class (E9-1) |
+| `src/main.js` | Instantiate KeyNavManager; wire frame loop and hamburger toggle |
+| `src/debug-overlay.js` | Draw canvas cursor crosshair + fish-follow ring (E9-1, E9-3) |
+| `src/ui/menu.js` | Notify KeyNavManager on open/close; wrap `<details>` toggles |
+| `index.html` | `:focus-visible` CSS for dark theme (E9-2) |
+
+---
+
+
 |---|----------|-------|
 | A1 | Fluid sim on CPU or GPU? | CPU is simpler; GPU fragment shader is faster at scale. Decide when E2-2 is picked up. |
 | A2 | Entity plugin format: ES module, JSON + behavior keys, or WASM? | ES module is ergonomic; WASM is more sandbox-friendly. |
