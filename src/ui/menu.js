@@ -224,7 +224,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
     shape:   JSON.parse(JSON.stringify(liveShape)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
-    border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge },
+    border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge,
+               borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
+               borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular },
     glassShapes: glassShapes.serialize(),
   });
 
@@ -283,7 +285,12 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (Number.isFinite(b.width))          grid.border.width    = clamp(b.width,   0.5, 10);
       if (Number.isFinite(b.opacity))        grid.border.opacity  = clamp(b.opacity, 0,   1);
       if (typeof b.hardBorder === 'boolean') FishClass.HARD_BORDER = b.hardBorder;
-      if (typeof b.glassEdge  === 'boolean') compositor.setGlassEdge(b.glassEdge);
+      if (typeof b.glassEdge  === 'boolean') compositor.setGlassEdge(b.glassEdge, {
+        chromatic:  Number.isFinite(b.borderChromatic) ? b.borderChromatic : undefined,
+        refraction: Number.isFinite(b.borderRefr)      ? b.borderRefr      : undefined,
+        bevelDepth: Number.isFinite(b.borderBevel)     ? b.borderBevel     : undefined,
+        specular:   typeof b.borderSpecular === 'boolean' ? b.borderSpecular : undefined,
+      });
     }
     if (persisted.shape && Array.isArray(persisted.shape.profile)) {
       liveShape = persisted.shape;
@@ -892,6 +899,44 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   });
   borderHost.appendChild(borderOpacityRow);
 
+  const { row: borderChromaticRow } = makeRow({
+    label: 'Chromatic', decimals: 1, valueStep: 0.5,
+    hasBounds: false,
+    getVal: () => compositor.borderChromatic,
+    setVal: (v) => { compositor.setGlassEdge(compositor.glassEdge, { chromatic: clamp(v, 0, 20) }); save(); },
+    getMin: () => 0, getMax: () => 20,
+  });
+  borderHost.appendChild(borderChromaticRow);
+
+  const { row: borderRefrRow } = makeRow({
+    label: 'Refraction', decimals: 3, valueStep: 0.001,
+    hasBounds: false,
+    getVal: () => compositor.borderRefr,
+    setVal: (v) => { compositor.setGlassEdge(compositor.glassEdge, { refraction: clamp(v, 0, 0.04) }); save(); },
+    getMin: () => 0, getMax: () => 0.04,
+  });
+  borderHost.appendChild(borderRefrRow);
+
+  const { row: borderBevelRow } = makeRow({
+    label: 'Bevel depth', decimals: 3, valueStep: 0.001,
+    hasBounds: false,
+    getVal: () => compositor.borderBevel,
+    setVal: (v) => { compositor.setGlassEdge(compositor.glassEdge, { bevelDepth: clamp(v, 0, 0.08) }); save(); },
+    getMin: () => 0, getMax: () => 0.08,
+  });
+  borderHost.appendChild(borderBevelRow);
+
+  const borderSpecularRow = document.createElement('label');
+  borderSpecularRow.className = 'menu-row';
+  borderSpecularRow.innerHTML = '<span>Specular</span><input type="checkbox">';
+  const borderSpecularChk = borderSpecularRow.querySelector('input');
+  borderSpecularChk.checked = compositor.borderSpecular;
+  borderSpecularChk.addEventListener('change', (e) => {
+    compositor.setGlassEdge(compositor.glassEdge, { specular: e.target.checked });
+    save();
+  });
+  borderHost.appendChild(borderSpecularRow);
+
   // ── Glass shapes ─────────────────────────────────────────────────────────────
   // Draggable glass lenses on the render layer. The select + sliders drive the
   // currently-selected shape; dragging on canvas moves it (see main.js).
@@ -958,6 +1003,33 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       save();
     });
     glassSliderHost.appendChild(specRow);
+
+    // Wander toggle
+    const wanderRow = document.createElement('label');
+    wanderRow.className = 'menu-row';
+    wanderRow.innerHTML = '<span>Wander</span><input type="checkbox">';
+    const wanderChk = wanderRow.querySelector('input');
+    wanderChk.checked = !!s.wander;
+    wanderChk.addEventListener('change', (e) => {
+      s.wander = e.target.checked;
+      if (s.wander) {
+        const angle = Math.random() * Math.PI * 2;
+        s._vx    = Math.cos(angle) * s.wanderSpeed;
+        s._vy    = Math.sin(angle) * s.wanderSpeed;
+        s._vOmega = 0;
+      } else {
+        s._vx = null; s._vy = null; s._vOmega = null;
+      }
+      glassShapes.sync();
+      save();
+    });
+    glassSliderHost.appendChild(wanderRow);
+
+    mk({
+      label: 'Speed', decimals: 3, valueStep: 0.005,
+      getVal: () => s.wanderSpeed, getMin: () => 0.005, getMax: () => 0.05,
+      setVal: (v) => { s.wanderSpeed = clamp(v, 0.005, 0.05); save(); },
+    });
   }
 
   function refreshGlassUI() { refreshGlassSel(); buildGlassSliders(); }

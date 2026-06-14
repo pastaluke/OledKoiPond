@@ -132,6 +132,14 @@ export class DebugOverlay {
   _drawGlassShapes() {
     const gs = this.glassShapes;
     if (!gs.list.length) return;
+
+    // Fade rings after 3s inactivity; fully gone at 3.5s.
+    const elapsed = performance.now() - gs.lastActivity;
+    const opacity = elapsed < 3000 ? 1.0
+      : elapsed < 3500 ? 1.0 - (elapsed - 3000) / 500
+      : 0.0;
+    if (opacity <= 0) return;
+
     const { ctx } = this;
     const W = this.canvas.width, H = this.canvas.height;
     ctx.save();
@@ -141,9 +149,13 @@ export class DebugOverlay {
       const rInner = Math.max(0, s.radius * (1 - s.bevelWidth) * H);
       const sel = i === gs.selected;
       ctx.lineWidth = sel ? 1.5 : 1;
-      ctx.strokeStyle = sel ? 'rgba(0,210,255,0.9)' : 'rgba(180,210,255,0.4)';
+      ctx.strokeStyle = sel
+        ? `rgba(0,210,255,${0.9 * opacity})`
+        : `rgba(180,210,255,${0.4 * opacity})`;
       ctx.beginPath(); ctx.arc(px, py, rOuter, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = sel ? 'rgba(0,210,255,0.4)' : 'rgba(180,210,255,0.2)';
+      ctx.strokeStyle = sel
+        ? `rgba(0,210,255,${0.4 * opacity})`
+        : `rgba(180,210,255,${0.2 * opacity})`;
       ctx.beginPath(); ctx.arc(px, py, rInner, 0, Math.PI * 2); ctx.stroke();
     });
     ctx.restore();

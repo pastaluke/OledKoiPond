@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   glCanvas.addEventListener('pointermove', (e) => {
+    glassShapes.touchActivity();
     if (dragShape < 0) return;
     const s = glassShapes.list[dragShape];
     if (!s) { dragShape = -1; return; }
@@ -120,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sim.draw();
     grid.drawBorder();
     overlay.draw(sim.entities);
+    glassShapes.update(deltaMs, compositor.aspect);
     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);
 
     requestAnimationFrame(frame);

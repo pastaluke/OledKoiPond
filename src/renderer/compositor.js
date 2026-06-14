@@ -34,6 +34,9 @@ uniform float uThreshold;
 uniform bool  uGlassEdge;
 uniform float uBorderPx;
 uniform float uGlassStr;
+uniform float uBorderRefr;
+uniform float uBorderBevel;
+uniform bool  uBorderSpecular;
 
 // Glass shapes — all geometry in height-fraction UV units (aspect-corrected in shader).
 // uShapeA: (cx, cy, radius, bevelWidthFrac)
@@ -62,12 +65,16 @@ vec4 frostSample(vec2 uv, vec2 texel, float radius) {
   return sum / 16.0;
 }
 
-// Border chromatic displacement (simple linear band, no bevel — screen edge look).
-vec4 borderShift(vec2 uv, vec2 dir, float t, float strength, vec2 px) {
-  float disp = t * strength;
-  float r = texture2D(uTex, uv + dir * disp * 1.5 * px).r;
-  float g = texture2D(uTex, uv + dir * disp * 1.0 * px).g;
-  float b = texture2D(uTex, uv + dir * disp * 0.5 * px).b;
+// Border chromatic displacement with optional refraction and bevel kick.
+// dir: inward normal; t: edge factor (1.0 at wall, 0.0 inside).
+// chromatic: aberration pixels; refraction: uniform UV shift; bevelDepth: sharp-rim kick.
+vec4 borderShift(vec2 uv, vec2 dir, float t, float chromatic, float refraction, float bevelDepth, vec2 px) {
+  float dispAmt = t * refraction + pow(t, 10.0) * bevelDepth;
+  vec2 sampleUV = clamp(uv + dir * dispAmt, vec2(0.001), vec2(0.999));
+  float cs = chromatic * t;
+  float r = texture2D(uTex, clamp(sampleUV + dir * cs * 1.5 * px, vec2(0.001), vec2(0.999))).r;
+  float g = texture2D(uTex, sampleUV).g;
+  float b = texture2D(uTex, clamp(sampleUV + dir * cs * 0.5 * px, vec2(0.001), vec2(0.999))).b;
   return vec4(r, g, b, 1.0);
 }
 
@@ -77,7 +84,7 @@ void main() {
   float aspect = uRes.x / uRes.y;
   vec4 c = texture2D(uTex, uv);
 
-  // ── Border glass edge — chromatic band hugging the screen rectangle ───────────
+  // ── Border glass edge — displacement + chromatic band hugging the screen rectangle ─
   if (uGlassEdge && uBorderPx > 0.0) {
     float dL = uv.x * uRes.x;
     float dR = (1.0 - uv.x) * uRes.x;
@@ -90,7 +97,14 @@ void main() {
         1.0 / (dL + 0.5) - 1.0 / (dR + 0.5),
         1.0 / (dT + 0.5) - 1.0 / (dB + 0.5)
       ));
-      c = borderShift(uv, norm, t, uGlassStr, px);
+      c = borderShift(uv, norm, t, uGlassStr, uBorderRefr, uBorderBevel, px);
+      if (uBorderSpecular) {
+        vec2 lp1 = vec2(sin(uTime * 0.15), cos(uTime * 0.22)) * 0.45 + 0.5;
+        vec2 lp2 = vec2(sin(uTime * -0.28 + 2.1), cos(uTime * 0.18 - 0.8)) * 0.45 + 0.5;
+        float h = smoothstep(0.15, 0.0, distance(uv, lp1)) * 0.15 * t
+                + smoothstep(0.18, 0.0, distance(uv, lp2)) * 0.10 * t;
+        c.rgb += h;
+      }
     }
   }
 
@@ -126,7 +140,6 @@ void main() {
     float edgeFact  = 1.0 - smoothstep(0.0, bevelBand, radius - dist);
 
     // Centre blend: 0 at exact center → 1 at 40% radius outward.
-    // Keeps the lens centre as a clean passthrough window.
     float centreBlend = smoothstep(0.0, radius * 0.4, dist);
 
     // Displacement: smooth refraction + sharp bevel at rim (liquidGL formula).
@@ -141,11 +154,8 @@ void main() {
 
     vec4 refracted;
     if (frost_px > 0.0) {
-      // Frost blur: Poisson disk — chromatic skipped (invisible through blur).
       refracted = frostSample(sampleUV, px, frost_px);
     } else {
-      // Chromatic split: R/G/B sampled at ±offset along normTC, proportional to
-      // edgeFact so fringing concentrates at the rim and fades toward centre.
       float cs = chromatic_px * edgeFact;
       refracted = vec4(
         texture2D(uTex, sampleUV + normTC * cs * 1.5 * px).r,
@@ -155,15 +165,11 @@ void main() {
       );
     }
 
-    // Anti-halo: near the centre where centreBlend≈0, displacement is tiny but
-    // magnification can still shift the sample across a hard edge → blend back
-    // to the base pixel to avoid jarring seams.
     vec4  base     = texture2D(uTex, uv);
     float diff     = clamp(length(refracted.rgb - base.rgb) * 4.0, 0.0, 1.0);
     float antiHalo = (1.0 - centreBlend) * diff;
     c = mix(refracted, base, antiHalo);
 
-    // Specular: two animated light glints orbiting with sin/cos of uTime.
     if (specular > 0.5) {
       vec2 lp1 = vec2(sin(uTime * 0.2 ), cos(uTime *  0.30      )) * 0.6 + 0.5;
       vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
@@ -221,7 +227,10 @@ export class Compositor {
     this._uTime       = loc('uTime');
     this._uGlassEdge  = loc('uGlassEdge');
     this._uBorderPx   = loc('uBorderPx');
-    this._uGlassStr   = loc('uGlassStr');
+    this._uGlassStr       = loc('uGlassStr');
+    this._uBorderRefr     = loc('uBorderRefr');
+    this._uBorderBevel    = loc('uBorderBevel');
+    this._uBorderSpecular = loc('uBorderSpecular');
     this._uShapeCount = loc('uShapeCount');
     this._uShapeA     = loc('uShapeA[0]');
     this._uShapeB     = loc('uShapeB[0]');
@@ -232,6 +241,13 @@ export class Compositor {
     gl.uniform1i(this._uGlassEdge, 0);
     gl.uniform1f(this._uBorderPx, 0);
     gl.uniform1f(this._uGlassStr, 6.0);
+    gl.uniform1f(this._uBorderRefr, 0);
+    gl.uniform1f(this._uBorderBevel, 0);
+    gl.uniform1i(this._uBorderSpecular, 0);
+    this._borderChromatic = 6;
+    this._borderRefr = 0;
+    this._borderBevel = 0;
+    this._borderSpecular = false;
     gl.uniform1i(this._uShapeCount, 0);
   }
 
@@ -263,18 +279,31 @@ export class Compositor {
   }
 
   /**
-   * Enable/disable the glass edge chromatic aberration effect.
+   * Enable/disable the border glass edge effect.
    * @param {boolean} enabled
-   * @param {number}  [strength=6] - Displacement in pixels at the wall; R shifts 1.5×, B 0.5×.
+   * @param {{ chromatic?: number, refraction?: number, bevelDepth?: number, specular?: boolean }} [opts]
    */
-  setGlassEdge(enabled, strength = 6) {
+  setGlassEdge(enabled, opts = {}) {
+    const { chromatic = this._borderChromatic, refraction = this._borderRefr,
+            bevelDepth = this._borderBevel, specular = this._borderSpecular } = opts;
     const gl = this._gl;
-    this._glassEdge = enabled;
-    gl.uniform1i(this._uGlassEdge, enabled ? 1 : 0);
-    gl.uniform1f(this._uGlassStr, strength);
+    this._glassEdge       = enabled;
+    this._borderChromatic = chromatic;
+    this._borderRefr      = refraction;
+    this._borderBevel     = bevelDepth;
+    this._borderSpecular  = specular;
+    gl.uniform1i(this._uGlassEdge,      enabled  ? 1 : 0);
+    gl.uniform1f(this._uGlassStr,       chromatic);
+    gl.uniform1f(this._uBorderRefr,     refraction);
+    gl.uniform1f(this._uBorderBevel,    bevelDepth);
+    gl.uniform1i(this._uBorderSpecular, specular ? 1 : 0);
   }
 
   get glassEdge() { return this._glassEdge; }
+  get borderChromatic() { return this._borderChromatic; }
+  get borderRefr()      { return this._borderRefr; }
+  get borderBevel()     { return this._borderBevel; }
+  get borderSpecular()  { return this._borderSpecular; }
 
   /**
    * Upload the active glass shapes as uniforms.
