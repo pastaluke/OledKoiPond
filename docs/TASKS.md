@@ -41,6 +41,17 @@ The GDD roadmap was written pre-implementation. Actual state:
 | Fish section + Fish count in menu | ✅ |
 | Cloudflare Pages auto-deploy from main | ✅ |
 | future-feature convention + GDD backlog | ✅ |
+| Colour palette system (built-in + custom, localStorage) | ✅ |
+| Palette editor in menu (add/delete/CSV/rename) | ✅ |
+| Community palette file + palette registry | ✅ |
+| Live fish shape editor (profile points + spine params + preview canvas) | ✅ |
+| Data-driven `static SHAPE` on FishBase | ✅ |
+| WebGL compositor layer (Canvas2D → texture → WebGL quad) | ✅ |
+| Glass edge chromatic-aberration shader (border band, R/G/B split) | ✅ |
+| Hard wall toggle (`static HARD_BORDER`, decoupled from glass) | ✅ |
+| Zoom slider (replaces World size, inverted semantics) | ✅ |
+| Cruise behaviors no longer brake fish (max(cruiseSpeed, sp) target) | ✅ |
+| Smooth wander: `_wanderOmega` evolves gradually, bounded by turn rate | ✅ |
 
 ---
 
@@ -57,6 +68,34 @@ Tighten and stabilize what exists before adding major systems.
 | E1-4 | Koi color palette variety — currently a fixed list; expose palette selection in menu | ⬜ |
 | E1-5 | Performance profiling pass — measure frame time on mid-range Android; identify bottlenecks | ⬜ |
 | E1-6 | Edge-factor debug stat in Entity Stats box (how deep the fish is in the wall-avoidance band) | ⬜ |
+
+---
+
+### E7 · Render Pipeline
+The layered WebGL post-processing stack. Each step is an independent pass that
+can be toggled without breaking others. Architecture: Canvas2D (hidden, pond
+render target) → WebGL fullscreen quad (Compositor) → stacked fragment shader
+uniforms. One shader program; uniforms gate each effect on/off.
+
+| Step | Story | Status |
+|------|-------|--------|
+| 1 | **WebGL compositor** — Canvas2D pond as texture; fullscreen quad; chroma-key black→transparent; Y-flip in vertex shader | ✅ Done |
+| 2 | **Water surface — simple mode** — CPU wave equation (2D discrete, damping ≈ 0.97); fish inject energy proportional to speed; output: per-cell brightness tint drawn over pond canvas before compositor upload | ⬜ |
+| 3 | **Glass edge shader** — chromatic aberration in border band; R/G/B displaced along inward edge normal at 1.5×/1.0×/0.5×; `uBorderPx` driven by `border.width × scale` | ✅ Done |
+| 4 | **Water refractive mode** — wave normals → UV displacement function in fragment shader; replaces simple tint with actual texture distortion; shares displacement math with Step 3/7 | ⬜ |
+| 5 | **Boundary object + camera** — separate soft-border `Boundary` class; hard/soft toggle in menu; optional camera/viewport sub-region (pond smaller than full screen) | 🔶 Partial — hard-border toggle done; Boundary class + camera not yet |
+| 6 | **Display filter shaders** — named filter presets selectable in Display menu: `none` / `lcd` (RGB subpixel grid) / `gbc` (4-shade quantised + palette) / `game-watch` (1-bit dither); each a uniform-gated branch in the frag shader | ⬜ |
+| 7 | **Glass UI panel** — same `edgeSample(uv, norm, str)` function as Step 3 but applied to the menu panel region (non-zero pixels beneath → displaced glass refraction); shares displacement function with border | ⬜ |
+
+**Shared displacement primitive** (Steps 3, 4, 7):
+```glsl
+vec4 glassShift(sampler2D tex, vec2 uv, vec2 norm, float str, vec2 px) {
+  float r = texture2D(tex, uv + norm * str * 1.5 * px).r;
+  float g = texture2D(tex, uv + norm * str * 1.0 * px).g;
+  float b = texture2D(tex, uv + norm * str * 0.5 * px).b;
+  return vec4(r, g, b, 1.0);
+}
+```
 
 ---
 
@@ -183,24 +222,24 @@ on the main thread with DOM access. Two-tier approach:
 > Replace this section at the start of each session.
 
 ### Goal
-Make the pond feel *interactive* and *complete enough to share* — the gap
-between "cool tech demo" and "thing I'd send to a friend."
+Refine movement feel; begin water surface layer.
 
 ### Sprint stories
 
 | Priority | ID | Story | Notes |
 |----------|----|-------|-------|
-| 🔴 High | E2-1 | Tap / touch → pixelated expanding ring ripple | No fluid sim needed yet — just a visual effect entity |
-| 🔴 High | E1-1 + E5-1 | PWA manifest + icons | Completes the nightstand use-case; small effort |
-| 🟠 Medium | E1-3 | Fish color controls in menu | Quick win — already have ColorConfig in GDD, just expose hue controls |
-| 🟠 Medium | E3-2 | Formalise render style as an enum/string in menu (outline / filled) | Replace the checkbox with a selector; sets up E3-3+ |
-| 🟡 Nice | E1-2 | iOS home-screen meta tags | 10-minute job, high visible polish |
+| 🔴 High | E7-2 | Water surface simple mode — CPU wave grid, fish inject energy, brightness tint overlay | Next render pipeline step; big payoff for little code |
+| 🔴 High | E1-1 + E5-1 | PWA manifest + icons | Completes nightstand use-case; small effort |
+| 🟠 Medium | E2-1 | Tap → visual ripple at tap point | Can inject into wave grid once E7-2 exists |
+| 🟠 Medium | E7-5 | `Boundary` class + soft-border mode | Hard-border toggle done; soft boundary + camera sub-region outstanding |
+| 🟡 Nice | E1-2 | iOS home-screen meta tags | 10-min job |
 
-### What to defer past 24h
-- Full fluid sim (E2-2+) — needs design time; don't rush it
-- Socializing state (E4-1) — fun, but not on the critical path to "shareable"
-- Creator Workshop (E6) — architectural; needs more planning before coding
+### What to defer
+- Display filters (E7-6) — fun, well-scoped, but not next
+- Glass UI panel (E7-7) — depends on Steps 3+4 being solid first
+- Socializing state (E4-1) — not on critical path to shareable
+- Creator Workshop (E6) — architectural; needs more planning
 
 ---
 
-*Updated: 2026-06-11*
+*Updated: 2026-06-14*
