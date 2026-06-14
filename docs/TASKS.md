@@ -571,6 +571,64 @@ This is a natural extension but deferred to when E9 is implemented.
 
 ---
 
+## Bug Fixes
+
+### B1 · iOS Fullscreen (bottom toolbar persists)
+
+**Platform:** iPhone — all browsers (Safari, Chrome, Firefox, etc.)
+
+**Symptoms:**
+- Tapping the fullscreen button in Safari removes the top URL bar but the bottom
+  navigation toolbar (Back / Share / Tabs) persists, eating ~50px of pond.
+- Other iOS browsers behave identically because they all use the WebKit engine and
+  Apple does not expose the Fullscreen API on iOS.
+- On iPad the Fullscreen API *does* work; this is an iPhone-only restriction.
+
+**Root cause:** Apple has never shipped `Element.requestFullscreen()` on iPhone
+(as of iOS 17). All browsers on iPhone inherit the same WebKit limitation. No
+JS call can dismiss the browser toolbar while running in a browser tab.
+
+**Recommended fix — two-tier approach:**
+
+*Tier 1 — PWA standalone mode (primary fix):*
+When the user adds the site to their iPhone Home Screen, it launches in
+`standalone` display mode — zero browser chrome, true edge-to-edge. The
+intersection with already-planned work is large:
+- **E1-1 / E5-1** — PWA manifest (`manifest.json`) with `"display": "standalone"`.
+  Delivers the standalone launch behavior.
+- **E1-2** — `<meta name="apple-mobile-web-app-capable" content="yes">` +
+  `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`.
+  Lets iOS know the home-screen launch should be fullscreen with a transparent
+  status bar overlay.
+- **B1-1 (new)** — `viewport-fit=cover` in the viewport meta + CSS
+  `env(safe-area-inset-*)` padding so the pond canvas fills under the notch /
+  Dynamic Island and home indicator without being obscured.
+
+*Tier 2 — In-browser prompt:*
+Users still in a browser tab can't get true fullscreen, but we can detect the
+situation and offer a "Add to Home Screen" nudge. Safari in browser tab:
+`window.navigator.standalone === false`; if also `iOS === true` and
+`window.matchMedia('(display-mode: browser)')` — show a one-time banner:
+"For the best experience, tap Share → Add to Home Screen."
+
+**Implementation plan (pending research confirmation):**
+
+| ID | Story | Status |
+|----|-------|--------|
+| B1-1 | `viewport-fit=cover` + `env(safe-area-inset-bottom)` — canvas expands under home indicator; bottom safe-area absorbed by UI chrome (menu button) | 🟦 |
+| B1-2 | PWA manifest (`manifest.json`) with `display: standalone`, linked in `index.html` — overlap with E1-1/E5-1; do together | 🟦 |
+| B1-3 | Apple PWA meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style: black-translucent`) — overlap with E1-2 | 🟦 |
+| B1-4 | "Add to Home Screen" prompt banner — shown once to iOS-in-browser users; dismissable; stored in localStorage | ⬜ |
+
+**Research notes (2026-06-14):**
+- Research in progress. Implementation plan will be updated once findings confirmed.
+- Key question: does `black-translucent` status bar + `viewport-fit=cover` cause
+  any layout issues with the current hamburger menu / fullscreen button position?
+- Related: the bottom toolbar that inspired the glass shapes — B1-1 may finally
+  remove the inspiration for E8, and that's poetic.
+
+---
+
 ## 24-Hour Sprint — current
 
 > Replace this section at the start of each session.
