@@ -611,21 +611,59 @@ situation and offer a "Add to Home Screen" nudge. Safari in browser tab:
 `window.matchMedia('(display-mode: browser)')` — show a one-time banner:
 "For the best experience, tap Share → Add to Home Screen."
 
-**Implementation plan (pending research confirmation):**
+**Implementation plan:**
 
 | ID | Story | Status |
 |----|-------|--------|
-| B1-1 | `viewport-fit=cover` + `env(safe-area-inset-bottom)` — canvas expands under home indicator; bottom safe-area absorbed by UI chrome (menu button) | 🟦 |
-| B1-2 | PWA manifest (`manifest.json`) with `display: standalone`, linked in `index.html` — overlap with E1-1/E5-1; do together | 🟦 |
-| B1-3 | Apple PWA meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style: black-translucent`) — overlap with E1-2 | 🟦 |
-| B1-4 | "Add to Home Screen" prompt banner — shown once to iOS-in-browser users; dismissable; stored in localStorage | ⬜ |
+| B1-1 | `viewport-fit=cover` added to viewport meta + `env(safe-area-inset-*)` CSS on hamburger button — expands canvas into notch / Dynamic Island area; prevents menu button rendering under the notch | 🟦 |
+| B1-2 | `manifest.json` with `display: "standalone"`, `theme_color: "#000000"`, `start_url: "/"`, icon refs — linked from `index.html`; overlaps E1-1/E5-1, do together | 🟦 |
+| B1-3 | Apple PWA meta tags in `index.html`: `apple-mobile-web-app-capable`, `apple-mobile-web-app-title`, `apple-mobile-web-app-status-bar-style: black-translucent`, `theme-color`, `apple-touch-icon` link — overlaps E1-2 | 🟦 |
+| B1-4 | App icons — design + export `192×192`, `512×512`, `180×180` PNGs to `/icons/`; black background; simple koi or pond motif; blocking for B1-2 | ⬜ |
+| B1-5 | iOS-aware fullscreen button — detect iOS in `menu.js` handler (`navigator.standalone !== undefined`); if in-browser (not standalone), replace click action with inline tip: "Tap Share → Add to Home Screen for fullscreen" | 🟦 |
+| B1-6 | "Add to Home Screen" one-time banner — shown automatically to iOS-in-browser users on first visit; dismissable; stored in localStorage; `beforeinstallprompt` is NOT available on iOS so this must be a custom instructional banner | ⬜ |
 
-**Research notes (2026-06-14):**
-- Research in progress. Implementation plan will be updated once findings confirmed.
-- Key question: does `black-translucent` status bar + `viewport-fit=cover` cause
-  any layout issues with the current hamburger menu / fullscreen button position?
-- Related: the bottom toolbar that inspired the glass shapes — B1-1 may finally
-  remove the inspiration for E8, and that's poetic.
+**Research findings (2026-06-14 — confirmed):**
+
+*Current fullscreen code (`src/ui/menu.js` ~line 1112):*
+```js
+(el.requestFullscreen ?? el.webkitRequestFullscreen)?.call(el);
+```
+Both `requestFullscreen` and `webkitRequestFullscreen` are `undefined` on iOS Safari.
+The `?.call(el)` silently no-ops. The button label never changes. Nothing happens.
+(`webkitRequestFullscreen` exists on *macOS* Safari but was never shipped on iOS.)
+
+*iOS Fullscreen API status:*
+Apple has never implemented the W3C Fullscreen API on iPhone. Every iOS browser
+(Safari, Chrome, Firefox) uses WebKit under Apple's mandate, so all share the same
+limitation. There is no JS call that can dismiss the bottom toolbar from within a
+browser tab. This cannot be worked around — only replaced.
+
+*What IS available:*
+- **Home-screen standalone mode** removes 100% of browser chrome (URL bar + bottom
+  toolbar). As of iOS 16.4+, `display: "fullscreen"` in the manifest also suppresses
+  the status bar. `display: "standalone"` keeps the status bar but removes all
+  browser chrome — safer for broad compatibility.
+- `window.navigator.standalone === true` (iOS Safari only) detects when the app is
+  running in standalone mode.
+- `beforeinstallprompt` does NOT exist on iOS — we can't trigger the native Add to
+  Home Screen prompt from JS; the user must do it manually via the Share sheet.
+
+*Existing tasks E1-1 + E1-2 cover ~60% of what's needed:*
+Missing from their current scope: `viewport-fit=cover` (one word in the viewport
+meta), safe-area CSS on the hamburger button, the iOS-aware fullscreen button
+behavior, and the app icons (design work — blocking; no icons exist in the repo yet).
+
+*Safe-area CSS impact:*
+- The canvases are `100vw`/`100vh` — they already fill the viewport and will extend
+  under the notch once `viewport-fit=cover` is set. No canvas changes needed.
+- The hamburger `#menu-btn` at `top: 8px; right: 8px` will render under the notch
+  on iPhone X+ without safe-area correction. Fix:
+  `top: max(8px, env(safe-area-inset-top));`
+  `right: max(8px, env(safe-area-inset-right));`
+- The panel top offset may also need `calc(env(safe-area-inset-top) + 40px)`.
+
+*Note:* the bottom toolbar that inspired the liquid glass shapes (E8) may finally
+disappear once B1 ships to home-screen users. Poetic.
 
 ---
 
