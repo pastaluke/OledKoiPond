@@ -226,7 +226,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge,
                borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
-               borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular },
+               borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular,
+               specularMode: compositor.specularMode, specularCurve: compositor.specularCurve },
     glassShapes: glassShapes.serialize(),
   });
 
@@ -286,10 +287,12 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (Number.isFinite(b.opacity))        grid.border.opacity  = clamp(b.opacity, 0,   1);
       if (typeof b.hardBorder === 'boolean') FishClass.HARD_BORDER = b.hardBorder;
       if (typeof b.glassEdge  === 'boolean') compositor.setGlassEdge(b.glassEdge, {
-        chromatic:  Number.isFinite(b.borderChromatic) ? b.borderChromatic : undefined,
-        refraction: Number.isFinite(b.borderRefr)      ? b.borderRefr      : undefined,
-        bevelDepth: Number.isFinite(b.borderBevel)     ? b.borderBevel     : undefined,
-        specular:   typeof b.borderSpecular === 'boolean' ? b.borderSpecular : undefined,
+        chromatic:    Number.isFinite(b.borderChromatic)      ? b.borderChromatic : undefined,
+        refraction:   Number.isFinite(b.borderRefr)           ? b.borderRefr      : undefined,
+        bevelDepth:   Number.isFinite(b.borderBevel)          ? b.borderBevel     : undefined,
+        specular:     typeof b.borderSpecular === 'boolean'   ? b.borderSpecular  : undefined,
+        specularMode: Number.isFinite(b.specularMode)         ? b.specularMode    : undefined,
+        specularCurve: Number.isFinite(b.specularCurve)       ? b.specularCurve   : undefined,
       });
     }
     if (persisted.shape && Array.isArray(persisted.shape.profile)) {
@@ -936,6 +939,26 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     save();
   });
   borderHost.appendChild(borderSpecularRow);
+
+  const specModeRow = document.createElement('label');
+  specModeRow.className = 'menu-row';
+  specModeRow.innerHTML = '<span>Spec mode</span><select class="menu-select"><option value="2">Static field</option><option value="1">Animated</option></select>';
+  const specModeSel = specModeRow.querySelector('select');
+  specModeSel.value = String(compositor.specularMode);
+  specModeSel.addEventListener('change', (e) => {
+    compositor.setGlassEdge(compositor.glassEdge, { specularMode: parseInt(e.target.value, 10) });
+    save();
+  });
+  borderHost.appendChild(specModeRow);
+
+  const { row: specCurveRow } = makeRow({
+    label: 'Spec curve', decimals: 3, valueStep: 0.005,
+    hasBounds: false,
+    getVal: () => compositor.specularCurve,
+    setVal: (v) => { compositor.setGlassEdge(compositor.glassEdge, { specularCurve: clamp(v, 0, 0.10) }); save(); },
+    getMin: () => 0, getMax: () => 0.10,
+  });
+  borderHost.appendChild(specCurveRow);
 
   // ── Glass shapes ─────────────────────────────────────────────────────────────
   // Draggable glass lenses on the render layer. The select + sliders drive the

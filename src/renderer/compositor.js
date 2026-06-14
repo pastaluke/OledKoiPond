@@ -37,6 +37,8 @@ uniform float uGlassStr;
 uniform float uBorderRefr;
 uniform float uBorderBevel;
 uniform bool  uBorderSpecular;
+uniform int   uSpecularMode;   // 0=off  1=animated  2=static-field
+uniform float uSpecularCurve;  // normal-warp strength; 0=flat ~0.035=glassy rim
 
 // Glass shapes — all geometry in height-fraction UV units (aspect-corrected in shader).
 // uShapeA: (cx, cy, radius, bevelWidthFrac)
@@ -78,6 +80,18 @@ vec4 borderShift(vec2 uv, vec2 dir, float t, float chromatic, float refraction, 
   return vec4(r, g, b, 1.0);
 }
 
+// Static light environment sampled by position, not time.
+// Three fixed soft sources at asymmetric positions — different areas of the
+// screen reveal different catches when the glass moves over them.
+// E7-4 hook: add uWaveTex sampling here when the wave sim lands.
+float envLight(vec2 fieldUV) {
+  float h = 0.0;
+  h += smoothstep(0.45, 0.0, distance(fieldUV, vec2(0.22, 0.25))) * 0.14;
+  h += smoothstep(0.55, 0.0, distance(fieldUV, vec2(0.75, 0.38))) * 0.10;
+  h += smoothstep(0.40, 0.0, distance(fieldUV, vec2(0.52, 0.72))) * 0.08;
+  return h;
+}
+
 void main() {
   vec2 uv  = vUv;
   vec2 px  = 1.0 / uRes;
@@ -98,12 +112,17 @@ void main() {
         1.0 / (dT + 0.5) - 1.0 / (dB + 0.5)
       ));
       c = borderShift(uv, norm, t, uGlassStr, uBorderRefr, uBorderBevel, px);
-      if (uBorderSpecular) {
-        vec2 lp1 = vec2(sin(uTime * 0.15), cos(uTime * 0.22)) * 0.45 + 0.5;
-        vec2 lp2 = vec2(sin(uTime * -0.28 + 2.1), cos(uTime * 0.18 - 0.8)) * 0.45 + 0.5;
-        float h = smoothstep(0.15, 0.0, distance(uv, lp1)) * 0.15 * t
-                + smoothstep(0.18, 0.0, distance(uv, lp2)) * 0.10 * t;
-        c.rgb += h;
+      if (uBorderSpecular && uSpecularMode > 0) {
+        if (uSpecularMode == 1) {
+          vec2 lp1 = vec2(sin(uTime * 0.15), cos(uTime * 0.22)) * 0.45 + 0.5;
+          vec2 lp2 = vec2(sin(uTime * -0.28 + 2.1), cos(uTime * 0.18 - 0.8)) * 0.45 + 0.5;
+          float h = smoothstep(0.15, 0.0, distance(uv, lp1)) * 0.15 * t
+                  + smoothstep(0.18, 0.0, distance(uv, lp2)) * 0.10 * t;
+          c.rgb += h;
+        } else {
+          vec2 fieldUV = uv - norm * t * uSpecularCurve;
+          c.rgb += envLight(fieldUV) * t;
+        }
       }
     }
   }
@@ -170,12 +189,18 @@ void main() {
     float antiHalo = (1.0 - centreBlend) * diff;
     c = mix(refracted, base, antiHalo);
 
-    if (specular > 0.5) {
-      vec2 lp1 = vec2(sin(uTime * 0.2 ), cos(uTime *  0.30      )) * 0.6 + 0.5;
-      vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
-      float h  = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
-               + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
-      c.rgb += h;
+    if (specular > 0.5 && uSpecularMode > 0) {
+      if (uSpecularMode == 1) {
+        vec2 lp1 = vec2(sin(uTime * 0.2 ), cos(uTime *  0.30      )) * 0.6 + 0.5;
+        vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
+        float h  = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
+                 + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
+        c.rgb += h;
+      } else {
+        // -normTC = outward surface normal; edgeFact peaks at rim → bends reflection there.
+        vec2 fieldUV = uv - normTC * edgeFact * uSpecularCurve;
+        c.rgb += envLight(fieldUV) * mix(1.0, centreBlend, 0.5);
+      }
     }
   }
 
@@ -231,6 +256,8 @@ export class Compositor {
     this._uBorderRefr     = loc('uBorderRefr');
     this._uBorderBevel    = loc('uBorderBevel');
     this._uBorderSpecular = loc('uBorderSpecular');
+    this._uSpecularMode   = loc('uSpecularMode');
+    this._uSpecularCurve  = loc('uSpecularCurve');
     this._uShapeCount = loc('uShapeCount');
     this._uShapeA     = loc('uShapeA[0]');
     this._uShapeB     = loc('uShapeB[0]');
@@ -244,10 +271,14 @@ export class Compositor {
     gl.uniform1f(this._uBorderRefr, 0);
     gl.uniform1f(this._uBorderBevel, 0);
     gl.uniform1i(this._uBorderSpecular, 0);
+    gl.uniform1i(this._uSpecularMode,   2);
+    gl.uniform1f(this._uSpecularCurve,  0.035);
     this._borderChromatic = 6;
-    this._borderRefr = 0;
-    this._borderBevel = 0;
-    this._borderSpecular = false;
+    this._borderRefr      = 0;
+    this._borderBevel     = 0;
+    this._borderSpecular  = false;
+    this._specularMode    = 2;
+    this._specularCurve   = 0.035;
     gl.uniform1i(this._uShapeCount, 0);
   }
 
@@ -285,25 +316,32 @@ export class Compositor {
    */
   setGlassEdge(enabled, opts = {}) {
     const { chromatic = this._borderChromatic, refraction = this._borderRefr,
-            bevelDepth = this._borderBevel, specular = this._borderSpecular } = opts;
+            bevelDepth = this._borderBevel, specular = this._borderSpecular,
+            specularMode = this._specularMode, specularCurve = this._specularCurve } = opts;
     const gl = this._gl;
     this._glassEdge       = enabled;
     this._borderChromatic = chromatic;
     this._borderRefr      = refraction;
     this._borderBevel     = bevelDepth;
     this._borderSpecular  = specular;
+    this._specularMode    = specularMode;
+    this._specularCurve   = specularCurve;
     gl.uniform1i(this._uGlassEdge,      enabled  ? 1 : 0);
     gl.uniform1f(this._uGlassStr,       chromatic);
     gl.uniform1f(this._uBorderRefr,     refraction);
     gl.uniform1f(this._uBorderBevel,    bevelDepth);
     gl.uniform1i(this._uBorderSpecular, specular ? 1 : 0);
+    gl.uniform1i(this._uSpecularMode,   specularMode);
+    gl.uniform1f(this._uSpecularCurve,  specularCurve);
   }
 
-  get glassEdge() { return this._glassEdge; }
-  get borderChromatic() { return this._borderChromatic; }
-  get borderRefr()      { return this._borderRefr; }
-  get borderBevel()     { return this._borderBevel; }
-  get borderSpecular()  { return this._borderSpecular; }
+  get glassEdge()      { return this._glassEdge; }
+  get borderChromatic(){ return this._borderChromatic; }
+  get borderRefr()     { return this._borderRefr; }
+  get borderBevel()    { return this._borderBevel; }
+  get borderSpecular() { return this._borderSpecular; }
+  get specularMode()   { return this._specularMode; }
+  get specularCurve()  { return this._specularCurve; }
 
   /**
    * Upload the active glass shapes as uniforms.
