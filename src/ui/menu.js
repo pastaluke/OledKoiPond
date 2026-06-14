@@ -909,21 +909,55 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const s = glassShapes.current;
     if (!s) return;
     const mk = (cfg) => glassSliderHost.appendChild(makeRow({ hasBounds: false, ...cfg }).row);
+
     mk({
       label: 'Radius', decimals: 2, valueStep: 0.01,
       getVal: () => s.radius, getMin: () => 0.02, getMax: () => 0.6,
       setVal: (v) => { s.radius = clamp(v, 0.02, 0.6); glassShapes.sync(); save(); },
     });
     mk({
-      label: 'Rim width', decimals: 2, valueStep: 0.01,
-      getVal: () => s.bandFrac, getMin: () => 0.02, getMax: () => 1,
-      setVal: (v) => { s.bandFrac = clamp(v, 0.02, 1); glassShapes.sync(); save(); },
+      label: 'Bevel width', decimals: 2, valueStep: 0.01,
+      getVal: () => s.bevelWidth, getMin: () => 0.05, getMax: () => 1.0,
+      setVal: (v) => { s.bevelWidth = clamp(v, 0.05, 1.0); glassShapes.sync(); save(); },
     });
     mk({
-      label: 'Distortion', decimals: 0, valueStep: 1,
-      getVal: () => s.strength, getMin: () => 0, getMax: () => 40,
-      setVal: (v) => { s.strength = clamp(v, 0, 40); glassShapes.sync(); save(); },
+      label: 'Refraction', decimals: 3, valueStep: 0.001,
+      getVal: () => s.refraction, getMin: () => 0, getMax: () => 0.05,
+      setVal: (v) => { s.refraction = clamp(v, 0, 0.05); glassShapes.sync(); save(); },
     });
+    mk({
+      label: 'Bevel depth', decimals: 3, valueStep: 0.001,
+      getVal: () => s.bevelDepth, getMin: () => 0, getMax: () => 0.10,
+      setVal: (v) => { s.bevelDepth = clamp(v, 0, 0.10); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Chromatic', decimals: 1, valueStep: 0.5,
+      getVal: () => s.chromatic, getMin: () => 0, getMax: () => 20,
+      setVal: (v) => { s.chromatic = clamp(v, 0, 20); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Frost', decimals: 1, valueStep: 0.5,
+      getVal: () => s.frost, getMin: () => 0, getMax: () => 8,
+      setVal: (v) => { s.frost = clamp(v, 0, 8); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Magnify', decimals: 2, valueStep: 0.05,
+      getVal: () => s.magnify, getMin: () => 0.5, getMax: () => 3.0,
+      setVal: (v) => { s.magnify = clamp(v, 0.5, 3.0); glassShapes.sync(); save(); },
+    });
+
+    // Specular toggle (checkbox, not a slider)
+    const specRow = document.createElement('label');
+    specRow.className = 'menu-row';
+    specRow.innerHTML = '<span>Specular</span><input type="checkbox">';
+    const specChk = specRow.querySelector('input');
+    specChk.checked = !!s.specular;
+    specChk.addEventListener('change', (e) => {
+      s.specular = e.target.checked;
+      glassShapes.sync();
+      save();
+    });
+    glassSliderHost.appendChild(specRow);
   }
 
   function refreshGlassUI() { refreshGlassSel(); buildGlassSliders(); }

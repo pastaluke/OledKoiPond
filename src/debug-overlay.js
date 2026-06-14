@@ -137,8 +137,8 @@ export class DebugOverlay {
     ctx.save();
     gs.list.forEach((s, i) => {
       const px = s.cx * W, py = s.cy * H;
-      const rOuter = s.radius * H;                       // radius is in height units
-      const rInner = Math.max(0, s.radius * (1 - s.bandFrac) * H);
+      const rOuter = s.radius * H;
+      const rInner = Math.max(0, s.radius * (1 - s.bevelWidth) * H);
       const sel = i === gs.selected;
       ctx.lineWidth = sel ? 1.5 : 1;
       ctx.strokeStyle = sel ? 'rgba(0,210,255,0.9)' : 'rgba(180,210,255,0.4)';

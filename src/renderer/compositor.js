@@ -3,10 +3,12 @@
 // draws a fullscreen quad. The Y-flip between Canvas2D (top-left origin)
 // and WebGL (bottom-left origin) is baked into the vertex shader UV output.
 //
-// Glass effects share one primitive — glassShift() — a chromatic edge
-// displacement: each color channel is sampled at an increasing offset along an
-// inward normal so the band refracts like curved glass. It drives both the
-// border edge (screen-rect band) and freeform glass shapes (circle rims).
+// Glass effects — border edge and freeform shapes — share a physically-based
+// displacement model inspired by liquidGL (MIT © NaughtyDuk):
+//   • SDF edge-factor drives smooth refraction + pow(edge,10) bevel at the rim
+//   • centreBlend keeps the lens centre as a clean passthrough window
+//   • Our chromatic R/G/B channel-split adds fringing on top of the displacement
+//   • Optional Poisson-disk frost blur, magnification, animated specular glints
 
 /** Max simultaneous glass shapes the fragment shader loops over. */
 export const MAX_SHAPES = 4;
@@ -24,6 +26,7 @@ precision highp float;
 varying vec2 vUv;
 uniform sampler2D uTex;
 uniform vec2  uRes;
+uniform float uTime;
 uniform bool  uChromaKey;
 uniform float uThreshold;
 
@@ -32,18 +35,35 @@ uniform bool  uGlassEdge;
 uniform float uBorderPx;
 uniform float uGlassStr;
 
-// Glass shapes (circles). CR = (centerX_uv, centerY_uv, radius_h);
-// BS = (band_h, strength_px). radius/band are in height-fraction units so
-// circles stay round regardless of aspect.
+// Glass shapes — all geometry in height-fraction UV units (aspect-corrected in shader).
+// uShapeA: (cx, cy, radius, bevelWidthFrac)
+// uShapeB: (refraction, bevelDepth, chromatic_px, frost_px)
+// uShapeC: (magnify, specular 0/1)
 const int MAX_SHAPES = ${MAX_SHAPES};
 uniform int  uShapeCount;
-uniform vec3 uShapeCR[MAX_SHAPES];
-uniform vec2 uShapeBS[MAX_SHAPES];
+uniform vec4 uShapeA[MAX_SHAPES];
+uniform vec4 uShapeB[MAX_SHAPES];
+uniform vec2 uShapeC[MAX_SHAPES];
 
-// Chromatic edge displacement shared by border + shapes. dir is a unit UV
-// vector pointing inward; t∈[0,1] is depth into the band (1 at the rim);
-// strength is in pixels; px = 1/uRes.
-vec4 glassShift(vec2 uv, vec2 dir, float t, float strength, vec2 px) {
+// ── Shared utilities ───────────────────────────────────────────────────────────
+
+float rand2(vec2 st) {
+  return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+// 16-sample Poisson disk frost blur.
+vec4 frostSample(vec2 uv, vec2 texel, float radius) {
+  vec4 sum = vec4(0.0);
+  for (int i = 0; i < 16; i++) {
+    float angle = rand2(uv + float(i)) * 6.2831853;
+    float dist  = sqrt(rand2(uv - float(i))) * radius;
+    sum += texture2D(uTex, uv + vec2(cos(angle), sin(angle)) * texel * dist);
+  }
+  return sum / 16.0;
+}
+
+// Border chromatic displacement (simple linear band, no bevel — screen edge look).
+vec4 borderShift(vec2 uv, vec2 dir, float t, float strength, vec2 px) {
   float disp = t * strength;
   float r = texture2D(uTex, uv + dir * disp * 1.5 * px).r;
   float g = texture2D(uTex, uv + dir * disp * 1.0 * px).g;
@@ -52,12 +72,12 @@ vec4 glassShift(vec2 uv, vec2 dir, float t, float strength, vec2 px) {
 }
 
 void main() {
-  vec2 uv = vUv;
-  vec2 px = 1.0 / uRes;
+  vec2 uv  = vUv;
+  vec2 px  = 1.0 / uRes;
   float aspect = uRes.x / uRes.y;
   vec4 c = texture2D(uTex, uv);
 
-  // ── Border glass edge — band hugging the screen rectangle ──────────────────
+  // ── Border glass edge — chromatic band hugging the screen rectangle ───────────
   if (uGlassEdge && uBorderPx > 0.0) {
     float dL = uv.x * uRes.x;
     float dR = (1.0 - uv.x) * uRes.x;
@@ -70,23 +90,86 @@ void main() {
         1.0 / (dL + 0.5) - 1.0 / (dR + 0.5),
         1.0 / (dT + 0.5) - 1.0 / (dB + 0.5)
       ));
-      c = glassShift(uv, norm, t, uGlassStr, px);
+      c = borderShift(uv, norm, t, uGlassStr, px);
     }
   }
 
-  // ── Glass shapes — chromatic rim band on each circle ───────────────────────
+  // ── Glass shapes ──────────────────────────────────────────────────────────────
   for (int i = 0; i < MAX_SHAPES; i++) {
     if (i >= uShapeCount) break;
-    vec3 cr = uShapeCR[i];
-    vec2 bs = uShapeBS[i];
-    float radius = cr.z;
-    float band   = bs.x;
-    vec2 toC = cr.xy - uv;                     // toward center, plain UV
-    vec2 ad  = vec2(toC.x * aspect, toC.y);    // aspect-corrected for round test
+
+    vec4 A = uShapeA[i];  // cx, cy, radius, bevelWidthFrac
+    vec4 B = uShapeB[i];  // refraction, bevelDepth, chromatic_px, frost_px
+    vec2 C = uShapeC[i];  // magnify, specular
+
+    vec2  center         = A.xy;
+    float radius         = A.z;
+    float bevelWidthFrac = A.w;
+    float refraction     = B.x;
+    float bevelDepth     = B.y;
+    float chromatic_px   = B.z;
+    float frost_px       = B.w;
+    float magnify        = max(C.x, 0.01);
+    float specular       = C.y;
+
+    // Aspect-corrected distance for a round test.
+    vec2 toC = center - uv;
+    vec2 ad  = vec2(toC.x * aspect, toC.y);
     float dist = length(ad);
-    if (band > 0.0 && dist < radius && dist > radius - band) {
-      float t = (dist - (radius - band)) / band;   // 0 inner edge → 1 at rim
-      c = glassShift(uv, normalize(toC), t, bs.y, px);
+
+    if (dist >= radius) continue;
+
+    vec2 normTC = normalize(toC);
+
+    // Edge factor: 1.0 at the rim, 0.0 inward over bevelWidthFrac*radius.
+    float bevelBand = max(bevelWidthFrac * radius, 0.001);
+    float edgeFact  = 1.0 - smoothstep(0.0, bevelBand, radius - dist);
+
+    // Centre blend: 0 at exact center → 1 at 40% radius outward.
+    // Keeps the lens centre as a clean passthrough window.
+    float centreBlend = smoothstep(0.0, radius * 0.4, dist);
+
+    // Displacement: smooth refraction + sharp bevel at rim (liquidGL formula).
+    float dispAmt = edgeFact * refraction + pow(edgeFact, 10.0) * bevelDepth;
+
+    // Magnification — zoom sample toward shape center.
+    vec2 magUV = (uv - center) / magnify + center;
+
+    // Final sample UV: magnified + displacement directed toward center.
+    vec2 sampleUV = clamp(magUV + normTC * dispAmt * centreBlend,
+                          vec2(0.001), vec2(0.999));
+
+    vec4 refracted;
+    if (frost_px > 0.0) {
+      // Frost blur: Poisson disk — chromatic skipped (invisible through blur).
+      refracted = frostSample(sampleUV, px, frost_px);
+    } else {
+      // Chromatic split: R/G/B sampled at ±offset along normTC, proportional to
+      // edgeFact so fringing concentrates at the rim and fades toward centre.
+      float cs = chromatic_px * edgeFact;
+      refracted = vec4(
+        texture2D(uTex, sampleUV + normTC * cs * 1.5 * px).r,
+        texture2D(uTex, sampleUV                          ).g,
+        texture2D(uTex, sampleUV - normTC * cs * 1.5 * px).b,
+        1.0
+      );
+    }
+
+    // Anti-halo: near the centre where centreBlend≈0, displacement is tiny but
+    // magnification can still shift the sample across a hard edge → blend back
+    // to the base pixel to avoid jarring seams.
+    vec4  base     = texture2D(uTex, uv);
+    float diff     = clamp(length(refracted.rgb - base.rgb) * 4.0, 0.0, 1.0);
+    float antiHalo = (1.0 - centreBlend) * diff;
+    c = mix(refracted, base, antiHalo);
+
+    // Specular: two animated light glints orbiting with sin/cos of uTime.
+    if (specular > 0.5) {
+      vec2 lp1 = vec2(sin(uTime * 0.2 ), cos(uTime *  0.30      )) * 0.6 + 0.5;
+      vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
+      float h  = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
+               + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
+      c.rgb += h;
     }
   }
 
@@ -102,8 +185,9 @@ export class Compositor {
    * @param {HTMLCanvasElement} glCanvas   - WebGL output canvas (visible).
    */
   constructor(pondCanvas, glCanvas) {
-    this._pond = pondCanvas;
+    this._pond      = pondCanvas;
     this._glassEdge = false;
+    this._startTime = performance.now();
 
     const gl = this._gl = glCanvas.getContext('webgl', {
       alpha: true,
@@ -129,16 +213,19 @@ export class Compositor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-    gl.uniform1i(gl.getUniformLocation(this._prog, 'uTex'), 0);
-    this._uChromaKey  = gl.getUniformLocation(this._prog, 'uChromaKey');
-    this._uThreshold  = gl.getUniformLocation(this._prog, 'uThreshold');
-    this._uRes        = gl.getUniformLocation(this._prog, 'uRes');
-    this._uGlassEdge  = gl.getUniformLocation(this._prog, 'uGlassEdge');
-    this._uBorderPx   = gl.getUniformLocation(this._prog, 'uBorderPx');
-    this._uGlassStr   = gl.getUniformLocation(this._prog, 'uGlassStr');
-    this._uShapeCount = gl.getUniformLocation(this._prog, 'uShapeCount');
-    this._uShapeCR    = gl.getUniformLocation(this._prog, 'uShapeCR[0]');
-    this._uShapeBS    = gl.getUniformLocation(this._prog, 'uShapeBS[0]');
+    const loc = (name) => gl.getUniformLocation(this._prog, name);
+    gl.uniform1i(loc('uTex'), 0);
+    this._uChromaKey  = loc('uChromaKey');
+    this._uThreshold  = loc('uThreshold');
+    this._uRes        = loc('uRes');
+    this._uTime       = loc('uTime');
+    this._uGlassEdge  = loc('uGlassEdge');
+    this._uBorderPx   = loc('uBorderPx');
+    this._uGlassStr   = loc('uGlassStr');
+    this._uShapeCount = loc('uShapeCount');
+    this._uShapeA     = loc('uShapeA[0]');
+    this._uShapeB     = loc('uShapeB[0]');
+    this._uShapeC     = loc('uShapeC[0]');
 
     gl.uniform1i(this._uChromaKey, 0);
     gl.uniform1f(this._uThreshold, 0.01);
@@ -162,6 +249,7 @@ export class Compositor {
     const gl = this._gl;
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.uniform2f(this._uRes, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.uniform1f(this._uTime, (performance.now() - this._startTime) / 1000);
     gl.uniform1f(this._uBorderPx, bandPx);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this._pond);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -189,26 +277,27 @@ export class Compositor {
   get glassEdge() { return this._glassEdge; }
 
   /**
-   * Upload the active glass shapes as uniforms. Extra slots past the count are
-   * ignored by the shader's count guard.
-   * @param {{cx:number, cy:number, radius:number, band:number, strength:number}[]} shapes
+   * Upload the active glass shapes as uniforms.
+   * @param {{cx,cy,radius,bevelWidth,refraction,bevelDepth,chromatic,frost,magnify,specular}[]} shapes
    */
   setShapes(shapes) {
     const gl = this._gl;
-    const n = Math.min(shapes.length, MAX_SHAPES);
-    const cr = new Float32Array(MAX_SHAPES * 3);
-    const bs = new Float32Array(MAX_SHAPES * 2);
+    const n  = Math.min(shapes.length, MAX_SHAPES);
+    const A  = new Float32Array(MAX_SHAPES * 4);
+    const B  = new Float32Array(MAX_SHAPES * 4);
+    const C  = new Float32Array(MAX_SHAPES * 2);
     for (let i = 0; i < n; i++) {
       const s = shapes[i];
-      cr[i * 3 + 0] = s.cx;
-      cr[i * 3 + 1] = s.cy;
-      cr[i * 3 + 2] = s.radius;
-      bs[i * 2 + 0] = s.band;
-      bs[i * 2 + 1] = s.strength;
+      A[i*4+0] = s.cx;         A[i*4+1] = s.cy;
+      A[i*4+2] = s.radius;     A[i*4+3] = s.bevelWidth;
+      B[i*4+0] = s.refraction; B[i*4+1] = s.bevelDepth;
+      B[i*4+2] = s.chromatic;  B[i*4+3] = s.frost;
+      C[i*2+0] = s.magnify;    C[i*2+1] = s.specular ? 1 : 0;
     }
     gl.uniform1i(this._uShapeCount, n);
-    gl.uniform3fv(this._uShapeCR, cr);
-    gl.uniform2fv(this._uShapeBS, bs);
+    gl.uniform4fv(this._uShapeA, A);
+    gl.uniform4fv(this._uShapeB, B);
+    gl.uniform2fv(this._uShapeC, C);
   }
 }
 
