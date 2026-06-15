@@ -13,6 +13,7 @@ const BASE_SPEED  = 0.15;   // UV/s at first press
 const FAST_SPEED  = 0.40;   // UV/s after ACCEL_DELAY of continuous hold
 const ACCEL_DELAY = 500;    // ms before fast speed kicks in
 const FISH_RADIUS = 0.08;   // UV distance to target a fish
+const IDLE_HIDE_MS = 4000;  // hide the cursor after this long with no key activity
 
 const FOCUS_SEL = 'summary, input[type="checkbox"], select, input[type="range"], button';
 
@@ -39,6 +40,10 @@ export class KeyNavManager {
     this._holdStart = {};           // key → timestamp of first keydown
     this._grabbed   = -1;           // grabbed glass shape index, or -1
     this._fishTarget = null;        // fish entity being followed, or null
+    // The cursor stays hidden until the first arrow press, so touch users (who
+    // never fire keydown) never see a stranded crosshair. Reset on idle.
+    this._active    = false;        // has keyboard nav been engaged?
+    this._lastKeyAt = 0;            // timestamp of last canvas nav keydown
 
     // ── Menu state ─────────────────────────────────────────────────────────────
     this.mode       = 'canvas';
@@ -87,6 +92,13 @@ export class KeyNavManager {
   frame(dt) {
     if (this.mode !== 'canvas') return;
 
+    // Idle hide: cursor disappears after inactivity, unless it's busy holding a
+    // key, dragging a shape, or following a fish.
+    if (this._active && this._held.size === 0 && this._grabbed < 0 && !this._fishTarget
+        && performance.now() - this._lastKeyAt > IDLE_HIDE_MS) {
+      this._active = false;
+    }
+
     // Fish follow: cursor tracks the fish each frame.
     if (this._fishTarget) {
       const g = this._sim.grid;
@@ -124,6 +136,7 @@ export class KeyNavManager {
 
   get grabbed()    { return this._grabbed; }
   get fishTarget() { return this._fishTarget; }
+  get active()     { return this._active; }
 
   // ── Key handlers ────────────────────────────────────────────────────────────
 
@@ -149,12 +162,17 @@ export class KeyNavManager {
     const arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
     if (arrows.includes(key)) {
       e.preventDefault();
+      this._active    = true;          // first arrow press reveals the cursor
+      this._lastKeyAt = performance.now();
       if (!this._held.has(key)) {
         this._held.add(key);
         this._holdStart[key] = performance.now();
       }
       return;
     }
+    // Action keys do nothing until the cursor has been revealed by an arrow.
+    if (!this._active) return;
+    this._lastKeyAt = performance.now();
     if (key === ' ' || key === 'Enter') { e.preventDefault(); this._activate(); }
     if (key === 'Escape') {
       if (this._fishTarget)   { this._fishTarget = null; return; }

@@ -499,7 +499,7 @@ export class DebugOverlay {
   // ─── Key-nav cursor — crosshair + optional fish-follow ring ─────────────────
   _drawKeyNavCursor() {
     const kn = this.keyNav;
-    if (!kn || kn.mode !== 'canvas') return;
+    if (!kn || kn.mode !== 'canvas' || !kn.active) return;
 
     const { ctx } = this;
     const W = this.canvas.width, H = this.canvas.height;
