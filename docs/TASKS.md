@@ -860,6 +860,317 @@ This is a natural extension but deferred to when E9 is implemented.
 
 | # | Question | Notes |
 |---|----------|-------|
+---
+
+### E11 · Fish Shader System 🫪
+Per-fish selectable render shaders — `vanilla` (current solid color), `glass` (liquid-glass
+refraction), and `rainbow` (palette-cycle). Each fish carries its own shader, rolled at
+spawn from the food bag's shader palette. A pond can have mixed shaders simultaneously.
+
+**Architecture decisions (captured 2026-06-15):**
+1. **Glass render approach** — GPU glass-mask layer: a separate mask render target is drawn
+   with the fish silhouette in white. The existing compositor is generalized to apply its
+   glass refraction effect to any masked region, not just circles. Fish-shaped, not circular.
+2. **Rainbow sub-modes** — both time-cycle (fish smoothly cycles through its assigned palette
+   over time) and field-driven (an animated 0→1 gradient field mapped through the palette, so
+   fish at different positions show different colors simultaneously).
+3. **Shader assignment** — per-fish, rolled at spawn from the food bag's shader palette, with
+   a menu selector for the pond-wide default for newly spawned / recolored fish.
+
+**Data model — per fish:**
+```js
+fish.shader = 'vanilla' | 'glass' | 'rainbow';   // persisted with color
+fish._rainbowPhase = 0;   // 0–1, only used when shader === 'rainbow'
+```
+
+**Food bag shader palette** (extends existing palette bag format):
+```js
+bag.shaderEnabled = false;   // independent toggle; color bag toggle unchanged
+bag.shaders = [
+  { type: 'vanilla', pct: 70 },
+  { type: 'glass',   pct: 20 },
+  { type: 'rainbow', pct: 10 },
+];
+// Like color pct: entries without pct split remainder equally; remainder → special
+```
+
+---
+
+#### E11-1 — Per-fish `shader` property + `vanilla` explicit default  ⬜
+
+Refactors `FishBase` to carry a `shader` field without changing any visible behavior.
+All fish start as `'vanilla'`; `draw()` dispatches on `this.shader`.
+
+**`fish-base.js` changes:**
+- Constructor: `this.shader = 'vanilla'; this._rainbowPhase = 0;`
+- `draw(ctx, scale, debug)` becomes a dispatcher:
+  ```js
+  draw(ctx, scale, debug) {
+    if (this.shader === 'vanilla' || !this.shader) {
+      this._drawVanilla(ctx, scale, debug);
+    } else if (this.shader === 'glass') {
+      this._drawGlassMask(ctx, scale, debug);
+    } else if (this.shader === 'rainbow') {
+      this._drawRainbow(ctx, scale, debug);
+    }
+  }
+  ```
+- Rename existing `draw()` body → `_drawVanilla()` (no logic change, pure rename).
+- Stub `_drawGlassMask()` and `_drawRainbow()` — just call `_drawVanilla()` as placeholder.
+- `update(dt)`: add `this._rainbowPhase = (this._rainbowPhase + dt * 0.15) % 1;`
+  (phase speed configurable later; updates unconditionally so the field is always fresh).
+
+**Affected files:** `src/entities/fish-base.js`
+
+---
+
+#### E11-2 — Menu shader selector (default for new fish)  ⬜
+
+Adds a **Shader** select row to the Fish section in the menu. Controls what shader newly
+spawned or recolored fish receive when no food-bag shader palette is active.
+
+**`menu.js` changes — inside the Fish `<details>` section:**
+```html
+<label class="menu-row">
+  <span>Default shader</span>
+  <select id="shader-default-sel" class="menu-select">
+    <option value="vanilla">Vanilla</option>
+    <option value="glass">Glass</option>
+    <option value="rainbow">Rainbow</option>
+  </select>
+</label>
+```
+
+- On change: update a module-level `defaultShader` variable; apply to all existing fish
+  that still have `shader === 'vanilla'` (i.e., haven't been individually assigned by a
+  food bag roll) if the user holds Shift when selecting — otherwise only affects new fish.
+- Recolor logic (`rollColor` call sites in `main.js`): after rolling a new color,
+  assign `fish.shader = getDefaultShader()` unless the food bag overrides it (E11-3).
+- Persist `defaultShader` in `save()`.
+
+**Affected files:** `src/ui/menu.js`, `src/main.js`
+
+---
+
+#### E11-3 — Food bag shader palette  ⬜
+
+Extends the food bag (palette) system so each bag can also roll a shader type at spawn.
+The shader roll is independent from the color roll (two separate weighted draws per fish).
+
+**Palette data model additions (`src/palettes/palette-manager.js` + `index.js`):**
+
+`rollShader(palette, defaultShader)`:
+```js
+export function rollShader(palette, defaultShader = 'vanilla') {
+  if (!palette?.shaderEnabled || !palette.shaders?.length) return defaultShader;
+  const hasPct = palette.shaders.some(s => s.pct != null);
+  const each   = hasPct ? null : Math.floor(100 / palette.shaders.length);
+  let cum = 0;
+  const buckets = palette.shaders.map(s => {
+    cum += hasPct ? (s.pct ?? 0) : each;
+    return { type: s.type, cum };
+  });
+  const roll = Math.floor(Math.random() * 100) + 1;
+  return buckets.find(b => roll <= b.cum)?.type ?? defaultShader;
+}
+```
+
+**Menu changes — inside the Palette Editor:**
+- **Shader toggle** checkbox: `shaderEnabled` (independent of color-palette toggle).
+- When enabled, show a **shader list** with up to 4 entries:
+  - Each entry: a `<select>` (Vanilla / Glass / Rainbow) + a `%` number input for pct.
+  - `+ Add shader` button (up to 4); `×` remove per entry.
+  - Percentage display mirrors the color-pct UX — omitted % means equal-split of remainder.
+- Persist `shaderEnabled` + `shaders` array alongside existing palette data in localStorage.
+
+**Spawn wiring (`main.js`):**
+- When a fish is spawned: `fish.shader = rollShader(getActivePalette(), getDefaultShader())`.
+- When a fish is recolored (food drop): re-roll both color and shader from the active bag.
+
+**Affected files:** `src/palettes/palette-manager.js`, `src/palettes/index.js`,
+`src/ui/menu.js`, `src/main.js`
+
+---
+
+#### E11-4 — `glass` shader — GPU fish-shaped mask layer  ⬜
+
+The most architecturally significant story. Generalizes the WebGL compositor to apply
+liquid-glass refraction to any masked region, not just circular `uShapeX` uniforms.
+
+**Overview:**
+1. A second hidden `<canvas id="fish-mask">` captures only the glass-fish silhouettes
+   in white on black each frame (same Canvas2D approach as the main pond canvas).
+2. The compositor samples this mask texture to know where glass fish live.
+3. Inside those pixels the same refraction + chromatic + frost + specular math applies,
+   using the fish's body as the lens boundary instead of a circle.
+
+**New canvas (`index.html` + `main.js`):**
+```html
+<canvas id="fish-mask" style="display:none"></canvas>
+```
+- Same logical dimensions as `#pond`.
+- Cleared to black each frame; glass fish paint their `_drawGlassMask()` outline in
+  solid white (opaque pixels = glass region).
+
+**`_drawGlassMask(ctx, scale, debug)` in `fish-base.js`:**
+- Identical spline path as `_drawVanilla`, but fills with `rgb(255,255,255)`.
+- `ctx` receives the mask canvas context, not the pond context; `main.js` passes it.
+- Uses `this.color` for nothing — mask is always white; color affects tint (see below).
+
+**Compositor changes (`compositor.js`):**
+
+*New texture binding:*
+```js
+this._maskTex  = createTexture(gl);   // unit 1
+this._uMaskTex = gl.getUniformLocation(prog, 'uMaskTex');
+this._uFishGlass = gl.getUniformLocation(prog, 'uFishGlass');  // bool
+this._uFishColor = gl.getUniformLocation(prog, 'uFishColor');  // vec3 tint
+```
+
+`frame()`:
+- Upload the mask canvas to `_maskTex` (same as `_tex` but from `fishMaskCanvas`).
+- `gl.uniform1i(this._uFishGlass, anyGlassFishExist ? 1 : 0)` — skip pass if no glass fish.
+
+*FRAG shader additions:*
+```glsl
+uniform sampler2D uMaskTex;
+uniform bool      uFishGlass;
+uniform vec3      uFishColor;   // average tint from the fish's assigned color
+
+// After shape loop, before final output:
+if (uFishGlass) {
+  float mask = texture2D(uMaskTex, vTexCoord).r;
+  if (mask > 0.5) {
+    // Reuse displacement helpers with fixed glass params for fish body.
+    // refraction=0.025, bevelDepth=0.04, chromatic=6.0, frost=0.0 (reasonable defaults).
+    // The fish body normal is approximated from the mask gradient (ddx/ddy of mask).
+    vec2 fishNorm = normalize(vec2(
+      dFdx(texture2D(uMaskTex, vTexCoord).r),
+      dFdy(texture2D(uMaskTex, vTexCoord).r)
+    ));
+    float fishEdge = 1.0 - texture2D(uMaskTex,
+                       vTexCoord + fishNorm * 0.004).r; // edge = neighbour outside mask
+    // Apply refraction (same glassShift helper):
+    vec4 displaced = glassShift(uTex, vTexCoord, -fishNorm, 0.025 * fishEdge, uPxSize);
+    // Blend with fish color tint at low opacity so you can still see the glass:
+    displaced.rgb = mix(displaced.rgb, uFishColor, 0.15);
+    c = mix(c, displaced, mask);
+  }
+}
+```
+
+**Fish color tint uniform** — `main.js` computes average `{r,g,b}` across all glass fish
+each frame (or just passes the first glass fish color) and calls `compositor.setFishGlass(true, avgColor)`.
+
+**Per-fish glass params (future refinement, not scope for this story):**
+The initial ship uses pond-wide fixed glass params for all glass fish. Per-fish params
+(different refraction per fish) require packing another parallel uniform array and are
+deferred to E11-4b if users request it.
+
+**Affected files:** `index.html`, `src/entities/fish-base.js`, `src/renderer/compositor.js`,
+`src/main.js`
+
+---
+
+#### E11-5 — `rainbow` shader — time-cycle sub-mode  ⬜
+
+The simplest rainbow mode: each fish cycles through the colors of its assigned palette
+as a smooth time-based animation. No GPU changes — pure Canvas2D per-frame color math.
+
+**`_drawRainbow(ctx, scale, debug)` in `fish-base.js`:**
+- `this._rainbowPhase` is already incremented by `update()` (E11-1).
+- The fish's assigned palette has `N` colors. Map `_rainbowPhase * N` → two adjacent
+  palette colors + interpolation fraction.
+- Compute `lerpColor(c0, c1, frac)` → `{r, g, b}`.
+- Temporarily store in a local variable; call `_drawVanilla()` with that color
+  substituted for `this.color`, or pass the color directly.
+- Actual: override `this.color` before calling `_drawVanilla()`, restore after — or use
+  an optional `colorOverride` parameter added to `_drawVanilla(ctx, scale, debug, colorOverride?)`.
+
+**Palette reference per fish:**
+Fish needs to know which palette it came from to cycle through its colors.
+- Add `fish._paletteId = getActivePaletteId()` at spawn time.
+- `_drawRainbow()` resolves the palette via `getPaletteById(this._paletteId)?.colors ?? []`.
+- Fallback: `this.color` (no visible change if palette was deleted).
+
+**`palette-manager.js`:** add `export function getPaletteById(id)` — `_registry.find(p => p.id === id)`.
+
+**Palette index export (`palettes/index.js`):** re-export `getPaletteById`.
+
+**Affected files:** `src/entities/fish-base.js`, `src/palettes/palette-manager.js`,
+`src/palettes/index.js`, `src/main.js`
+
+---
+
+#### E11-6 — `rainbow` shader — field-driven sub-mode  ⬜
+
+A spatially-varying rainbow effect: an animated gradient field flows across the pond
+(matching the existing `envLight()` pattern). Each fish samples the field at its
+center position to determine its current palette index — fish at different positions
+show different colors, and the field animates slowly so colors wash across the pond.
+
+**Field definition (CSS UV space, 0–1 in both axes):**
+```js
+// `t` = elapsed seconds
+function rainbowField(x, y, t) {
+  // Diagonal gradient + slow time drift
+  return ((x * 0.6 + y * 0.4 + t * 0.05) % 1 + 1) % 1;  // 0–1
+}
+```
+The function returns a value 0–1. Mapped through the palette the same way as time-cycle:
+multiply by `N` → floor → two adjacent colors → lerp.
+
+**Sub-mode toggle:**
+- `fish._rainbowMode = 'time' | 'field'` — assigned at spawn based on a new
+  `shaders` entry in the bag: `{ type: 'rainbow', mode: 'field', pct: 5 }` vs
+  `{ type: 'rainbow', mode: 'time', pct: 5 }`.
+- Fallback (no mode specified): `'time'`.
+- Menu default shader selector gains a secondary **Rainbow mode** radio/select
+  (`Time | Field`) that appears only when Rainbow is the selected default.
+
+**`_drawRainbow()` update:**
+```js
+if (this._rainbowMode === 'field') {
+  const phase = rainbowField(this.x / grid.logicalW, this.y / grid.logicalH, this._age);
+  // use phase instead of this._rainbowPhase
+}
+```
+`this._age` is incremented in `update()` (already exists in `FishBase` or trivial to add).
+
+**`rainbowField` export:**
+A named export from `fish-base.js` (or a new `src/utils/rainbow-field.js`) so menu
+and simulation can share the same function without duplication.
+
+**`main.js`:** pass `grid.logicalW`, `grid.logicalH` to wherever fish draw() is called —
+already available via the existing grid reference.
+
+**Affected files:** `src/entities/fish-base.js`, `src/ui/menu.js`, `src/palettes/palette-manager.js`
+
+---
+
+**Full affected-file summary for E11:**
+
+| File | Stories | Change |
+|------|---------|--------|
+| `src/entities/fish-base.js` | 1,4,5,6 | `shader` + `_rainbowPhase` + dispatcher + `_drawVanilla/GlassMask/Rainbow` |
+| `src/renderer/compositor.js` | 4 | Fish-mask texture + FRAG glass pass |
+| `src/ui/menu.js` | 2,3,6 | Default shader select; shader palette editor; rainbow mode select |
+| `src/palettes/palette-manager.js` | 3,5 | `rollShader()`, `getPaletteById()` |
+| `src/palettes/index.js` | 3,5 | Re-export new functions |
+| `src/main.js` | 1,2,3,4,5 | Spawn wiring; mask canvas; compositor tint uniform |
+| `index.html` | 4 | `<canvas id="fish-mask">` element |
+
+| ID | Story | Status |
+|----|-------|--------|
+| E11-1 | Per-fish `shader` + `vanilla` explicit default; dispatcher + `_drawVanilla` rename | ⬜ |
+| E11-2 | Menu default-shader selector; persist; apply to new fish at spawn/recolor | ⬜ |
+| E11-3 | Food bag shader palette — `shaderEnabled`, `shaders[]`, `rollShader()`; editor UI | ⬜ |
+| E11-4 | `glass` shader — fish-mask canvas; compositor fish-glass pass; tint uniform | ⬜ |
+| E11-5 | `rainbow` shader — time-cycle sub-mode; palette cycle in Canvas2D | ⬜ |
+| E11-6 | `rainbow` shader — field-driven sub-mode; `rainbowField()` fn; mode selector in menu | ⬜ |
+
+---
+
 | A1 | Fluid sim on CPU or GPU? | CPU is simpler; GPU fragment shader is faster at scale. Decide when E2-2 is picked up. |
 | A2 | Entity plugin format: ES module, JSON + behavior keys, or WASM? | ES module is ergonomic; WASM is more sandbox-friendly. |
 | A3 | Shader DSL vs. restricted GLSL? | Restricted GLSL reuses existing knowledge; a custom DSL is safer but a bigger build. |
