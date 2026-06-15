@@ -44,11 +44,13 @@ uniform float uSpecularCurve;  // normal-warp strength; 0=flat ~0.035=glassy rim
 // uShapeA: (cx, cy, radius, bevelWidthFrac)
 // uShapeB: (refraction, bevelDepth, chromatic_px, frost_px)
 // uShapeC: (magnify, specular 0/1)
+// uShapeD: (specularStr, specInner fraction, specOuter fraction, unused)
 const int MAX_SHAPES = ${MAX_SHAPES};
 uniform int  uShapeCount;
 uniform vec4 uShapeA[MAX_SHAPES];
 uniform vec4 uShapeB[MAX_SHAPES];
 uniform vec2 uShapeC[MAX_SHAPES];
+uniform vec4 uShapeD[MAX_SHAPES];
 
 // ── Shared utilities ───────────────────────────────────────────────────────────
 
@@ -134,6 +136,7 @@ void main() {
     vec4 A = uShapeA[i];  // cx, cy, radius, bevelWidthFrac
     vec4 B = uShapeB[i];  // refraction, bevelDepth, chromatic_px, frost_px
     vec2 C = uShapeC[i];  // magnify, specular
+    vec4 D = uShapeD[i];  // specStr, specInner frac, specOuter frac, unused
 
     vec2  center         = A.xy;
     float radius         = A.z;
@@ -144,6 +147,9 @@ void main() {
     float frost_px       = B.w;
     float magnify        = max(C.x, 0.01);
     float specular       = C.y;
+    float specStr        = D.x;
+    float specInner      = D.y;
+    float specOuter      = D.z;
 
     // Aspect-corrected distance for a round test.
     vec2 toC = center - uv;
@@ -189,17 +195,21 @@ void main() {
     float antiHalo = (1.0 - centreBlend) * diff;
     c = mix(refracted, base, antiHalo);
 
-    if (specular > 0.5 && uSpecularMode > 0) {
+    if (specular > 0.5 && uSpecularMode > 0 && specStr > 0.0) {
+      // Radial band mask: specular only within [specInner, specOuter] of radius.
+      float radialFrac = dist / radius;
+      float specMask = smoothstep(specInner, specInner + 0.04, radialFrac)
+                     * smoothstep(specOuter, specOuter - 0.04, radialFrac);
       if (uSpecularMode == 1) {
         vec2 lp1 = vec2(sin(uTime * 0.2 ), cos(uTime *  0.30      )) * 0.6 + 0.5;
         vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
         float h  = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
                  + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
-        c.rgb += h;
+        c.rgb += h * specStr * specMask;
       } else {
         // -normTC = outward surface normal; edgeFact peaks at rim → bends reflection there.
         vec2 fieldUV = uv - normTC * edgeFact * uSpecularCurve;
-        c.rgb += envLight(fieldUV) * mix(1.0, centreBlend, 0.5);
+        c.rgb += envLight(fieldUV) * mix(1.0, centreBlend, 0.5) * specStr * specMask;
       }
     }
   }
@@ -262,6 +272,7 @@ export class Compositor {
     this._uShapeA     = loc('uShapeA[0]');
     this._uShapeB     = loc('uShapeB[0]');
     this._uShapeC     = loc('uShapeC[0]');
+    this._uShapeD     = loc('uShapeD[0]');
 
     gl.uniform1i(this._uChromaKey, 0);
     gl.uniform1f(this._uThreshold, 0.01);
@@ -353,6 +364,7 @@ export class Compositor {
     const A  = new Float32Array(MAX_SHAPES * 4);
     const B  = new Float32Array(MAX_SHAPES * 4);
     const C  = new Float32Array(MAX_SHAPES * 2);
+    const D  = new Float32Array(MAX_SHAPES * 4);
     for (let i = 0; i < n; i++) {
       const s = shapes[i];
       A[i*4+0] = s.cx;         A[i*4+1] = s.cy;
@@ -360,11 +372,16 @@ export class Compositor {
       B[i*4+0] = s.refraction; B[i*4+1] = s.bevelDepth;
       B[i*4+2] = s.chromatic;  B[i*4+3] = s.frost;
       C[i*2+0] = s.magnify;    C[i*2+1] = s.specular ? 1 : 0;
+      D[i*4+0] = s.specularStr ?? 1.0;
+      D[i*4+1] = s.specInner   ?? 0.0;
+      D[i*4+2] = s.specOuter   ?? 1.0;
+      D[i*4+3] = 0;
     }
     gl.uniform1i(this._uShapeCount, n);
     gl.uniform4fv(this._uShapeA, A);
     gl.uniform4fv(this._uShapeB, B);
     gl.uniform2fv(this._uShapeC, C);
+    gl.uniform4fv(this._uShapeD, D);
   }
 }
 

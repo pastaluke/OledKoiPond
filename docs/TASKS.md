@@ -426,6 +426,161 @@ absorbs the wave texture naturally.
 
 ---
 
+#### E8-5 — Per-shape specular strength + radial band + Copy/Paste shader params  ⬜
+
+**Goal:** Give each glass shape its own specular intensity knob and a radial
+mask — so the highlight can be constrained to just the rim, just the body, or
+anywhere in between — then add Copy/Paste buttons so a tuned shape can be saved
+as a code preset or shared back to the developer.
+
+---
+
+**Three new per-shape params:**
+
+| Param | Default | Range | Meaning |
+|-------|---------|-------|---------|
+| `specularStr` | 1.0 | 0 – 2.0 | Multiplies the envLight() result; 0 = off, 2 = double intensity |
+| `specInner` | 0.0 | 0 – 1 (fraction of radius) | Specular fade-in starts here; 0 = from center |
+| `specOuter` | 1.0 | specInner – 1 | Specular fade-out ends here; 1 = full lens |
+
+The radial mask uses two `smoothstep` calls so the band edges are soft (±0.04 of
+radius). When `specInner ≥ specOuter` the mask is always 0 (a safe degenerate case).
+
+---
+
+**GLSL changes (`compositor.js`):**
+
+*New uniform array (add after `uShapeC` declaration):*
+```glsl
+// uShapeD: (specStr, specInner fraction, specOuter fraction, unused)
+uniform vec4 uShapeD[MAX_SHAPES];
+```
+
+*In the shape loop, after reading `C`:*
+```glsl
+vec4 D = uShapeD[i];
+float specStr   = D.x;
+float specInner = D.y;
+float specOuter = D.z;
+```
+
+*Replace the shape specular block:*
+```glsl
+if (specular > 0.5 && uSpecularMode > 0 && specStr > 0.0) {
+  float radialFrac = dist / radius;
+  float specMask = smoothstep(specInner, specInner + 0.04, radialFrac)
+                 * smoothstep(specOuter, specOuter - 0.04, radialFrac);
+  if (uSpecularMode == 1) {
+    vec2 lp1 = vec2(sin(uTime * 0.2), cos(uTime * 0.30)) * 0.6 + 0.5;
+    vec2 lp2 = vec2(sin(uTime * -0.4 + 1.5), cos(uTime * 0.25 - 0.5)) * 0.6 + 0.5;
+    float h = smoothstep(0.4, 0.0, distance(uv, lp1)) * 0.10
+            + smoothstep(0.5, 0.0, distance(uv, lp2)) * 0.08;
+    c.rgb += h * specStr * specMask;
+  } else {
+    vec2 fieldUV = uv - normTC * edgeFact * uSpecularCurve;
+    c.rgb += envLight(fieldUV) * mix(1.0, centreBlend, 0.5) * specStr * specMask;
+  }
+}
+```
+
+---
+
+**JS changes (`compositor.js`):**
+
+`setShapes()` packs `uShapeD`:
+```js
+const D = new Float32Array(MAX_SHAPES * 4);
+for (let i = 0; i < n; i++) {
+  const s = shapes[i];
+  D[i*4+0] = s.specularStr ?? 1.0;
+  D[i*4+1] = s.specInner   ?? 0.0;
+  D[i*4+2] = s.specOuter   ?? 1.0;
+  D[i*4+3] = 0;
+}
+gl.uniform4fv(this._uShapeD, D);
+```
+
+---
+
+**`glass-shapes.js` changes:**
+
+`defaultShape()` adds `specularStr: 1.0, specInner: 0.0, specOuter: 1.0`.
+`_sanitize()` fills missing values with those defaults.
+
+---
+
+**Menu changes (`menu.js` — inside `buildGlassSliders()`):**
+
+After the Specular checkbox, add three sliders:
+
+- **Strength** — range 0–2.0, step 0.05, decimals 2;
+  setVal clamps to [0, 2] and calls `glassShapes.sync(); save()`.
+- **Spec inner** — range 0–1.0, step 0.01, decimals 2;
+  setVal clamps to `[0, s.specOuter - 0.02]` to keep inner < outer.
+- **Spec outer** — range 0–1.0, step 0.01, decimals 2;
+  setVal clamps to `[s.specInner + 0.02, 1.0]` to keep outer > inner.
+
+After the Wander/Speed rows, add a `menu-btn-row` with two buttons:
+
+**Copy params** — writes to clipboard:
+```js
+const COPY_KEYS = ['radius','bevelWidth','refraction','bevelDepth','chromatic',
+                   'frost','magnify','specular','specularStr','specInner','specOuter'];
+const out = {};
+for (const k of COPY_KEYS) out[k] = s[k];
+navigator.clipboard.writeText(JSON.stringify(out, null, 2));
+```
+
+**Paste params** — reads from clipboard:
+```js
+navigator.clipboard.readText().then(text => {
+  try {
+    const p = JSON.parse(text);
+    const bounds = {
+      radius:[0.02,0.6], bevelWidth:[0.05,1], refraction:[0,0.05],
+      bevelDepth:[0,0.10], chromatic:[0,20], frost:[0,8], magnify:[0.5,3],
+      specularStr:[0,2], specInner:[0,1], specOuter:[0,1],
+    };
+    for (const [k,[lo,hi]] of Object.entries(bounds)) {
+      if (Number.isFinite(p[k])) s[k] = clamp(p[k], lo, hi);
+    }
+    if (typeof p.specular === 'boolean') s.specular = p.specular;
+    s.specInner = Math.min(s.specInner, s.specOuter - 0.02);
+    glassShapes.sync();
+    buildGlassSliders();
+    save();
+  } catch (_) {}
+});
+```
+
+---
+
+**Preset workflow this enables:**
+
+1. User creates a glass shape and tunes it live.
+2. Taps "Copy params" → clipboard has a clean JSON blob.
+3. Developer (or AI) receives that blob and can encode it as a named preset in
+   `glass-shapes.js`:
+   ```js
+   export const PRESETS = {
+     'Water drop': { radius:0.12, bevelWidth:0.4, refraction:0.02, ... },
+     'Portal':     { radius:0.28, bevelWidth:0.15, specularStr:1.8, specInner:0.7, ... },
+   };
+   ```
+4. Later, a Preset dropdown in the menu lets users pick from named shapes.
+
+---
+
+**Affected files:**
+
+| File | Change |
+|------|--------|
+| `src/renderer/compositor.js` | `uShapeD` uniform; pack specStr/specInner/specOuter in `setShapes()`; radial-mask + strength in shape specular block |
+| `src/renderer/glass-shapes.js` | `defaultShape()` + `_sanitize()` get 3 new fields |
+| `src/ui/menu.js` | 3 sliders + Copy/Paste button row in `buildGlassSliders()` |
+
+---
+
 ### E9 · TV Remote / Keyboard-Only Navigation
 Full keyboard parity with mouse and touch. Every interaction reachable with Arrow
 keys + Spacebar only — no mouse, no trackpad, no touch required. Designed around the

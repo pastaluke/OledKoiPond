@@ -24,6 +24,9 @@ export function defaultShape() {
     frost:        0,
     magnify:      1.0,
     specular:     false,
+    specularStr:  1.0,
+    specInner:    0.0,
+    specOuter:    1.0,
     wander:       false,
     wanderSpeed:  0.02,
   };
@@ -42,6 +45,9 @@ function _sanitize(s) {
     frost:        num(s.frost,       0,    8,    0),
     magnify:      num(s.magnify,     0.5,  3.0,  1.0),
     specular:     typeof s.specular     === 'boolean' ? s.specular     : false,
+    specularStr:  num(s.specularStr, 0,    2.0,  1.0),
+    specInner:    num(s.specInner,   0,    1.0,  0.0),
+    specOuter:    num(s.specOuter,   0,    1.0,  1.0),
     wander:       typeof s.wander       === 'boolean' ? s.wander       : false,
     wanderSpeed:  num(s.wanderSpeed, 0.005, 0.05, 0.02),
   };

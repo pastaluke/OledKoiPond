@@ -1027,6 +1027,22 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     });
     glassSliderHost.appendChild(specRow);
 
+    mk({
+      label: 'Spec strength', decimals: 2, valueStep: 0.05,
+      getVal: () => s.specularStr, getMin: () => 0, getMax: () => 2.0,
+      setVal: (v) => { s.specularStr = clamp(v, 0, 2.0); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Spec inner', decimals: 2, valueStep: 0.01,
+      getVal: () => s.specInner, getMin: () => 0, getMax: () => 1.0,
+      setVal: (v) => { s.specInner = clamp(v, 0, s.specOuter - 0.02); glassShapes.sync(); save(); },
+    });
+    mk({
+      label: 'Spec outer', decimals: 2, valueStep: 0.01,
+      getVal: () => s.specOuter, getMin: () => 0, getMax: () => 1.0,
+      setVal: (v) => { s.specOuter = clamp(v, s.specInner + 0.02, 1.0); glassShapes.sync(); save(); },
+    });
+
     // Wander toggle
     const wanderRow = document.createElement('label');
     wanderRow.className = 'menu-row';
@@ -1053,6 +1069,49 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       getVal: () => s.wanderSpeed, getMin: () => 0.005, getMax: () => 0.05,
       setVal: (v) => { s.wanderSpeed = clamp(v, 0.005, 0.05); save(); },
     });
+
+    // Copy / Paste shader params
+    const COPY_KEYS = ['radius','bevelWidth','refraction','bevelDepth','chromatic',
+                       'frost','magnify','specular','specularStr','specInner','specOuter'];
+    const cpRow = document.createElement('div');
+    cpRow.className = 'menu-btn-row';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'menu-action';
+    copyBtn.textContent = 'Copy params';
+    copyBtn.addEventListener('click', () => {
+      const out = {};
+      for (const k of COPY_KEYS) out[k] = s[k];
+      navigator.clipboard.writeText(JSON.stringify(out, null, 2)).catch(() => {});
+    });
+
+    const pasteBtn = document.createElement('button');
+    pasteBtn.className = 'menu-action';
+    pasteBtn.textContent = 'Paste params';
+    pasteBtn.addEventListener('click', () => {
+      navigator.clipboard.readText().then(text => {
+        try {
+          const p = JSON.parse(text);
+          const bounds = {
+            radius:[0.02,0.6], bevelWidth:[0.05,1], refraction:[0,0.05],
+            bevelDepth:[0,0.10], chromatic:[0,20], frost:[0,8], magnify:[0.5,3],
+            specularStr:[0,2], specInner:[0,1], specOuter:[0,1],
+          };
+          for (const [k,[lo,hi]] of Object.entries(bounds)) {
+            if (Number.isFinite(p[k])) s[k] = clamp(p[k], lo, hi);
+          }
+          if (typeof p.specular === 'boolean') s.specular = p.specular;
+          s.specInner = Math.min(s.specInner, s.specOuter - 0.02);
+          glassShapes.sync();
+          buildGlassSliders();
+          save();
+        } catch (_) {}
+      }).catch(() => {});
+    });
+
+    cpRow.appendChild(copyBtn);
+    cpRow.appendChild(pasteBtn);
+    glassSliderHost.appendChild(cpRow);
   }
 
   function refreshGlassUI() { refreshGlassSel(); buildGlassSliders(); }
