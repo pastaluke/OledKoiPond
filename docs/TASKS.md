@@ -863,24 +863,32 @@ This is a natural extension but deferred to when E9 is implemented.
 ---
 
 ### E11 · Fish Shader System 🫪
-Per-fish selectable render shaders — `vanilla` (current solid color), `glass` (liquid-glass
-refraction), and `rainbow` (palette-cycle). Each fish carries its own shader, rolled at
-spawn from the food bag's shader palette. A pond can have mixed shaders simultaneously.
+Per-fish selectable render shaders — `vanilla` (current solid color) and `glass`
+(liquid-glass refraction). Rainbow is a **stackable effect modifier** that sits on top
+of either shader, not an exclusive shader of its own. A glass fish can also be a rainbow
+fish. A pond can have any mix simultaneously.
 
-**Architecture decisions (captured 2026-06-15):**
+**Architecture decisions (captured 2026-06-15, revised 2026-06-15):**
 1. **Glass render approach** — GPU glass-mask layer: a separate mask render target is drawn
    with the fish silhouette in white. The existing compositor is generalized to apply its
    glass refraction effect to any masked region, not just circles. Fish-shaped, not circular.
-2. **Rainbow sub-modes** — both time-cycle (fish smoothly cycles through its assigned palette
-   over time) and field-driven (an animated 0→1 gradient field mapped through the palette, so
-   fish at different positions show different colors simultaneously).
+2. **Rainbow as a modifier** — `rainbowEffect = null | 'time'` is a separate per-fish flag
+   that can be set alongside any shader. When active it replaces `this.color` each frame with
+   a lerped value from the fish's assigned palette, cycling over time. Glass fish use this
+   cycled color as their compositor tint. Field-driven rainbow is parked (see E11-6).
 3. **Shader assignment** — per-fish, rolled at spawn from the food bag's shader palette, with
-   a menu selector for the pond-wide default for newly spawned / recolored fish.
+   a menu selector for the pond-wide default for newly spawned fish.
+4. **Special pellet repurpose** — the existing `rollColor` remainder probability (old
+   "special bag" mechanic) is repurposed in E12: instead of drawing from a separate color
+   bag, the remainder triggers a special rainbow pellet that, when eaten, sets the fish's
+   `rainbowEffect = 'time'`. The special color bag data structure is removed.
 
 **Data model — per fish:**
 ```js
-fish.shader = 'vanilla' | 'glass' | 'rainbow';   // persisted with color
-fish._rainbowPhase = 0;   // 0–1, only used when shader === 'rainbow'
+fish.shader       = 'vanilla' | 'glass';  // render type; persisted with color
+fish.rainbowEffect = null | 'time';       // stackable modifier; null = solid color
+fish._paletteId   = string | null;        // palette to cycle through for rainbow
+fish._rainbowPhase = 0;                   // 0–1, updated every frame unconditionally
 ```
 
 **Food bag shader palette** (extends existing palette bag format):
@@ -889,45 +897,73 @@ bag.shaderEnabled = false;   // independent toggle; color bag toggle unchanged
 bag.shaders = [
   { type: 'vanilla', pct: 70 },
   { type: 'glass',   pct: 20 },
-  { type: 'rainbow', pct: 10 },
+  // remainder (≥0%) → special rainbow pellet, handled by E12 rollColor logic
 ];
-// Like color pct: entries without pct split remainder equally; remainder → special
+// rainbow is NOT an entry here — it is applied via the special-pellet path in E12
 ```
 
 ---
 
-#### E11-1 — Per-fish `shader` property + `vanilla` explicit default  ⬜
+#### E11-1 — Per-fish `shader` + `rainbowEffect` properties + `vanilla` explicit default  ⬜
 
-Refactors `FishBase` to carry a `shader` field without changing any visible behavior.
-All fish start as `'vanilla'`; `draw()` dispatches on `this.shader`.
+Refactors `FishBase` to carry `shader` and `rainbowEffect` fields without changing any
+visible behavior. All fish start vanilla with no rainbow effect; `draw()` dispatches on
+`this.shader` and applies the rainbow modifier if active.
 
 **`fish-base.js` changes:**
-- Constructor: `this.shader = 'vanilla'; this._rainbowPhase = 0;`
+- Constructor:
+  ```js
+  this.shader        = 'vanilla';
+  this.rainbowEffect = null;        // null | 'time'
+  this._paletteId    = null;        // set at spawn; used by rainbow cycling
+  this._rainbowPhase = 0;           // 0–1
+  ```
+- `_computeEffectiveColor()` helper — returns the color to use when drawing:
+  ```js
+  _computeEffectiveColor() {
+    if (this.rainbowEffect !== 'time') return this.color;
+    const palette = getPaletteById(this._paletteId);
+    const colors  = palette?.colors;
+    if (!colors?.length) return this.color;
+    const t   = this._rainbowPhase * colors.length;
+    const i0  = Math.floor(t) % colors.length;
+    const i1  = (i0 + 1) % colors.length;
+    const f   = t - Math.floor(t);
+    const c0  = colors[i0], c1 = colors[i1];
+    return {
+      r: c0.r + (c1.r - c0.r) * f,
+      g: c0.g + (c1.g - c0.g) * f,
+      b: c0.b + (c1.b - c0.b) * f,
+    };
+  }
+  ```
 - `draw(ctx, scale, debug)` becomes a dispatcher:
   ```js
   draw(ctx, scale, debug) {
-    if (this.shader === 'vanilla' || !this.shader) {
-      this._drawVanilla(ctx, scale, debug);
-    } else if (this.shader === 'glass') {
-      this._drawGlassMask(ctx, scale, debug);
-    } else if (this.shader === 'rainbow') {
-      this._drawRainbow(ctx, scale, debug);
+    const color = this._computeEffectiveColor();  // replaces this.color throughout
+    if (this.shader === 'glass') {
+      this._drawGlassMask(ctx, scale, debug, color);
+    } else {
+      this._drawVanilla(ctx, scale, debug, color);
     }
   }
   ```
-- Rename existing `draw()` body → `_drawVanilla()` (no logic change, pure rename).
-- Stub `_drawGlassMask()` and `_drawRainbow()` — just call `_drawVanilla()` as placeholder.
+- Rename existing `draw()` body → `_drawVanilla(ctx, scale, debug, color)` — replaces
+  internal `this.color` references with the `color` parameter. No other logic change.
+- Stub `_drawGlassMask(ctx, scale, debug, color)` — just calls `_drawVanilla()` as placeholder.
 - `update(dt)`: add `this._rainbowPhase = (this._rainbowPhase + dt * 0.15) % 1;`
-  (phase speed configurable later; updates unconditionally so the field is always fresh).
+  (unconditional so the phase is always fresh when rainbow is enabled mid-life).
 
-**Affected files:** `src/entities/fish-base.js`
+**Affected files:** `src/entities/fish-base.js`, `src/palettes/palette-manager.js` (needs
+`getPaletteById` export, also used in E11-5)
 
 ---
 
 #### E11-2 — Menu shader selector (default for new fish)  ⬜
 
 Adds a **Shader** select row to the Fish section in the menu. Controls what shader newly
-spawned or recolored fish receive when no food-bag shader palette is active.
+spawned fish receive when no food-bag shader palette is active. `rainbow` is not an option
+here — rainbow is applied via the special pellet path (E12-5), not as a pond default.
 
 **`menu.js` changes — inside the Fish `<details>` section:**
 ```html
@@ -936,16 +972,14 @@ spawned or recolored fish receive when no food-bag shader palette is active.
   <select id="shader-default-sel" class="menu-select">
     <option value="vanilla">Vanilla</option>
     <option value="glass">Glass</option>
-    <option value="rainbow">Rainbow</option>
   </select>
 </label>
 ```
 
-- On change: update a module-level `defaultShader` variable; apply to all existing fish
-  that still have `shader === 'vanilla'` (i.e., haven't been individually assigned by a
-  food bag roll) if the user holds Shift when selecting — otherwise only affects new fish.
-- Recolor logic (`rollColor` call sites in `main.js`): after rolling a new color,
-  assign `fish.shader = getDefaultShader()` unless the food bag overrides it (E11-3).
+- On change: update a module-level `defaultShader` variable; only affects newly spawned
+  fish (existing fish are not changed — shader is set once at spawn or when a pellet is eaten).
+- Spawn wiring (`main.js`): assign `fish.shader = rollShader(getActivePalette(), getDefaultShader())`
+  and `fish._paletteId = getActivePaletteId()` at spawn. `rollShader` is added in E11-3.
 - Persist `defaultShader` in `save()`.
 
 **Affected files:** `src/ui/menu.js`, `src/main.js`
@@ -954,8 +988,10 @@ spawned or recolored fish receive when no food-bag shader palette is active.
 
 #### E11-3 — Food bag shader palette  ⬜
 
-Extends the food bag (palette) system so each bag can also roll a shader type at spawn.
+Extends the food bag (palette) system so each bag can also roll a render shader at spawn.
 The shader roll is independent from the color roll (two separate weighted draws per fish).
+Only `vanilla` and `glass` appear in the shader list — rainbow is applied via the
+special-pellet path (E12-5), not as an explicit shader entry.
 
 **Palette data model additions (`src/palettes/palette-manager.js` + `index.js`):**
 
@@ -971,21 +1007,31 @@ export function rollShader(palette, defaultShader = 'vanilla') {
     return { type: s.type, cum };
   });
   const roll = Math.floor(Math.random() * 100) + 1;
+  // If roll lands in remainder (above all entries), return defaultShader.
+  // The E12 special-pellet logic handles the remainder separately for rainbow.
   return buckets.find(b => roll <= b.cum)?.type ?? defaultShader;
 }
 ```
 
+`getPaletteById(id)`:
+```js
+export function getPaletteById(id) { return _registry.find(p => p.id === id) ?? null; }
+```
+
 **Menu changes — inside the Palette Editor:**
 - **Shader toggle** checkbox: `shaderEnabled` (independent of color-palette toggle).
-- When enabled, show a **shader list** with up to 4 entries:
-  - Each entry: a `<select>` (Vanilla / Glass / Rainbow) + a `%` number input for pct.
-  - `+ Add shader` button (up to 4); `×` remove per entry.
-  - Percentage display mirrors the color-pct UX — omitted % means equal-split of remainder.
+- When enabled, show a **shader list** with up to 3 entries (vanilla/glass only):
+  - Each entry: a `<select>` (Vanilla | Glass) + a `%` number input for pct.
+  - `+ Add shader` button (up to 3, since rainbow is not user-selectable here);
+    `×` remove per entry.
+  - A read-only info line: _"Remainder % → shimmer pellet (rainbow)"_ — explains that
+    the unaccounted probability becomes a rainbow special pellet.
+  - Percentage display mirrors the color-pct UX — omitted % means equal-split of
+    the non-remainder entries; the remainder always routes to special.
 - Persist `shaderEnabled` + `shaders` array alongside existing palette data in localStorage.
 
 **Spawn wiring (`main.js`):**
-- When a fish is spawned: `fish.shader = rollShader(getActivePalette(), getDefaultShader())`.
-- When a fish is recolored (food drop): re-roll both color and shader from the active bag.
+- At spawn: `fish.shader = rollShader(palette, defaultShader); fish._paletteId = palette.id`.
 
 **Affected files:** `src/palettes/palette-manager.js`, `src/palettes/index.js`,
 `src/ui/menu.js`, `src/main.js`
@@ -1060,7 +1106,9 @@ if (uFishGlass) {
 ```
 
 **Fish color tint uniform** — `main.js` computes average `{r,g,b}` across all glass fish
-each frame (or just passes the first glass fish color) and calls `compositor.setFishGlass(true, avgColor)`.
+each frame using `fish._computeEffectiveColor()` (not `fish.color` directly — this ensures
+glass fish with `rainbowEffect = 'time'` show a cycling tint rather than a frozen one)
+and calls `compositor.setFishGlass(true, avgColor)`.
 
 **Per-fish glass params (future refinement, not scope for this story):**
 The initial ship uses pond-wide fixed glass params for all glass fish. Per-fish params
@@ -1072,79 +1120,54 @@ deferred to E11-4b if users request it.
 
 ---
 
-#### E11-5 — `rainbow` shader — time-cycle sub-mode  ⬜
+#### E11-5 — `rainbowEffect` time-cycle modifier  ⬜
 
-The simplest rainbow mode: each fish cycles through the colors of its assigned palette
-as a smooth time-based animation. No GPU changes — pure Canvas2D per-frame color math.
+Implements `rainbowEffect = 'time'` as a per-fish color modifier that stacks on top of
+any shader. No GPU changes — pure Canvas2D math via `_computeEffectiveColor()`.
 
-**`_drawRainbow(ctx, scale, debug)` in `fish-base.js`:**
-- `this._rainbowPhase` is already incremented by `update()` (E11-1).
-- The fish's assigned palette has `N` colors. Map `_rainbowPhase * N` → two adjacent
-  palette colors + interpolation fraction.
-- Compute `lerpColor(c0, c1, frac)` → `{r, g, b}`.
-- Temporarily store in a local variable; call `_drawVanilla()` with that color
-  substituted for `this.color`, or pass the color directly.
-- Actual: override `this.color` before calling `_drawVanilla()`, restore after — or use
-  an optional `colorOverride` parameter added to `_drawVanilla(ctx, scale, debug, colorOverride?)`.
+The core logic lives entirely in `_computeEffectiveColor()` (already designed in E11-1):
+- When `rainbowEffect === 'time'`, look up `_paletteId` → get palette colors → lerp
+  between adjacent colors using `_rainbowPhase` → return the cycled color.
+- When `rainbowEffect === null`, return `this.color` unchanged.
+- `_rainbowPhase` is incremented in `update()` unconditionally (added in E11-1).
 
-**Palette reference per fish:**
-Fish needs to know which palette it came from to cycle through its colors.
-- Add `fish._paletteId = getActivePaletteId()` at spawn time.
-- `_drawRainbow()` resolves the palette via `getPaletteById(this._paletteId)?.colors ?? []`.
-- Fallback: `this.color` (no visible change if palette was deleted).
+The result feeds into `_drawVanilla(... color)` and `_drawGlassMask(... color)` via the
+`draw()` dispatcher — both shaders already accept a color argument. Rainbow is composable
+with glass because both shaders call `_computeEffectiveColor()` through the same path.
 
-**`palette-manager.js`:** add `export function getPaletteById(id)` — `_registry.find(p => p.id === id)`.
+`getPaletteById` is added to `palette-manager.js` in E11-3 and is already available here.
 
-**Palette index export (`palettes/index.js`):** re-export `getPaletteById`.
-
-**Affected files:** `src/entities/fish-base.js`, `src/palettes/palette-manager.js`,
-`src/palettes/index.js`, `src/main.js`
+**Affected files:** `src/entities/fish-base.js` (E11-1 already contains all the logic;
+this story is a verification + integration test story — confirm rainbow cycles correctly
+on vanilla fish and as a tint on glass fish before E11-6 is considered)
 
 ---
 
-#### E11-6 — `rainbow` shader — field-driven sub-mode  ⬜
+#### E11-6 — `rainbowEffect` field-driven sub-mode  ⬛ Parked
 
-A spatially-varying rainbow effect: an animated gradient field flows across the pond
-(matching the existing `envLight()` pattern). Each fish samples the field at its
-center position to determine its current palette index — fish at different positions
-show different colors, and the field animates slowly so colors wash across the pond.
+> **Parked** — implementation deferred until after E12 ships and the rainbow time-cycle
+> modifier is confirmed to feel good in practice.
 
-**Field definition (CSS UV space, 0–1 in both axes):**
+**Concept:** an animated gradient field flows across the pond. Each fish samples the field
+at its `(x, y)` position to determine its current palette phase — fish at different
+positions show different colors simultaneously, and the field drifts so the wash moves
+across the pond over time. Works as `rainbowEffect = 'field'` alongside `rainbowEffect = 'time'`.
+
+**Rough data model when this is eventually picked up:**
 ```js
-// `t` = elapsed seconds
-function rainbowField(x, y, t) {
-  // Diagonal gradient + slow time drift
-  return ((x * 0.6 + y * 0.4 + t * 0.05) % 1 + 1) % 1;  // 0–1
+fish.rainbowEffect = null | 'time' | 'field';
+
+function rainbowField(normX, normY, elapsedS) {
+  return ((normX * 0.6 + normY * 0.4 + elapsedS * 0.05) % 1 + 1) % 1;  // 0–1
 }
+// In _computeEffectiveColor():
+const phase = this.rainbowEffect === 'field'
+  ? rainbowField(this.x / grid.logicalW, this.y / grid.logicalH, this._age)
+  : this._rainbowPhase;
 ```
-The function returns a value 0–1. Mapped through the palette the same way as time-cycle:
-multiply by `N` → floor → two adjacent colors → lerp.
 
-**Sub-mode toggle:**
-- `fish._rainbowMode = 'time' | 'field'` — assigned at spawn based on a new
-  `shaders` entry in the bag: `{ type: 'rainbow', mode: 'field', pct: 5 }` vs
-  `{ type: 'rainbow', mode: 'time', pct: 5 }`.
-- Fallback (no mode specified): `'time'`.
-- Menu default shader selector gains a secondary **Rainbow mode** radio/select
-  (`Time | Field`) that appears only when Rainbow is the selected default.
-
-**`_drawRainbow()` update:**
-```js
-if (this._rainbowMode === 'field') {
-  const phase = rainbowField(this.x / grid.logicalW, this.y / grid.logicalH, this._age);
-  // use phase instead of this._rainbowPhase
-}
-```
-`this._age` is incremented in `update()` (already exists in `FishBase` or trivial to add).
-
-**`rainbowField` export:**
-A named export from `fish-base.js` (or a new `src/utils/rainbow-field.js`) so menu
-and simulation can share the same function without duplication.
-
-**`main.js`:** pass `grid.logicalW`, `grid.logicalH` to wherever fish draw() is called —
-already available via the existing grid reference.
-
-**Affected files:** `src/entities/fish-base.js`, `src/ui/menu.js`, `src/palettes/palette-manager.js`
+No food-bag entry needed — this would be set via a special pellet variant or a menu
+option; design deferred. `this._age` tracks lifetime in seconds (add to `update()`).
 
 ---
 
@@ -1152,22 +1175,330 @@ already available via the existing grid reference.
 
 | File | Stories | Change |
 |------|---------|--------|
-| `src/entities/fish-base.js` | 1,4,5,6 | `shader` + `_rainbowPhase` + dispatcher + `_drawVanilla/GlassMask/Rainbow` |
-| `src/renderer/compositor.js` | 4 | Fish-mask texture + FRAG glass pass |
-| `src/ui/menu.js` | 2,3,6 | Default shader select; shader palette editor; rainbow mode select |
-| `src/palettes/palette-manager.js` | 3,5 | `rollShader()`, `getPaletteById()` |
-| `src/palettes/index.js` | 3,5 | Re-export new functions |
-| `src/main.js` | 1,2,3,4,5 | Spawn wiring; mask canvas; compositor tint uniform |
+| `src/entities/fish-base.js` | 1,4,5 | `shader` + `rainbowEffect` + `_paletteId` + `_rainbowPhase`; dispatcher; `_drawVanilla/GlassMask`; `_computeEffectiveColor()` |
+| `src/renderer/compositor.js` | 4 | Fish-mask texture + FRAG glass pass; tint via `_computeEffectiveColor` |
+| `src/ui/menu.js` | 2,3 | Default shader select (vanilla/glass only); shader palette editor |
+| `src/palettes/palette-manager.js` | 3 | `rollShader()`, `getPaletteById()` |
+| `src/palettes/index.js` | 3 | Re-export new functions |
+| `src/main.js` | 1,2,3,4 | Spawn wiring; mask canvas; compositor tint using `_computeEffectiveColor` |
 | `index.html` | 4 | `<canvas id="fish-mask">` element |
 
 | ID | Story | Status |
 |----|-------|--------|
-| E11-1 | Per-fish `shader` + `vanilla` explicit default; dispatcher + `_drawVanilla` rename | ⬜ |
-| E11-2 | Menu default-shader selector; persist; apply to new fish at spawn/recolor | ⬜ |
-| E11-3 | Food bag shader palette — `shaderEnabled`, `shaders[]`, `rollShader()`; editor UI | ⬜ |
-| E11-4 | `glass` shader — fish-mask canvas; compositor fish-glass pass; tint uniform | ⬜ |
-| E11-5 | `rainbow` shader — time-cycle sub-mode; palette cycle in Canvas2D | ⬜ |
-| E11-6 | `rainbow` shader — field-driven sub-mode; `rainbowField()` fn; mode selector in menu | ⬜ |
+| E11-1 | Per-fish `shader` + `rainbowEffect` + `_paletteId`; dispatcher + `_drawVanilla` rename; `_computeEffectiveColor()` | ⬜ |
+| E11-2 | Menu default-shader selector (vanilla/glass); persist; wired at spawn | ⬜ |
+| E11-3 | Food bag shader palette — `shaderEnabled`, `shaders[]` (vanilla/glass only), `rollShader()`, `getPaletteById()`; editor UI; remainder info line | ⬜ |
+| E11-4 | `glass` shader — fish-mask canvas; compositor fish-glass FRAG pass; tint via `_computeEffectiveColor` | ⬜ |
+| E11-5 | `rainbowEffect = 'time'` modifier — verify cycles on vanilla + glass; integration test | ⬜ |
+| E11-6 | `rainbowEffect = 'field'` — **parked**; concept documented above | ⬛ |
+
+---
+
+---
+
+### E12 · Fish Food System 🐟🍡
+Makes feeding a physical, animated interaction. Clicking the pond spawns a food pellet
+entity that swims toward nearby fish; when eaten, the fish's color and shader fade
+gradually to their new values rather than snapping. The "special" color-bag remainder
+probability is repurposed: instead of drawing from a separate bag, it spawns a shimmer
+pellet that gives the eating fish a rainbow time-cycle effect.
+
+**Current state:** feeding is `nearest.color = rollColor()` — instantaneous, no pellet
+entity, no animation, no transition.
+
+**Key data structures:**
+
+*FoodPellet entity:*
+```js
+class FoodPellet {
+  constructor(lx, ly, targetColor, targetShader, targetRainbow, paletteId) {
+    this.x = lx; this.y = ly;           // logical coords
+    this.targetColor   = targetColor;    // {r,g,b} the fish will transition to
+    this.targetShader  = targetShader;   // 'vanilla' | 'glass'
+    this.targetRainbow = targetRainbow;  // null | 'time'
+    this.paletteId     = paletteId;      // which palette to cycle (for rainbow)
+    this.eaten         = false;
+    this.isSpecial     = targetRainbow === 'time';
+  }
+}
+```
+
+*Per-fish transition state (added in E12-3/4):*
+```js
+// Color transition
+fish._colorFrom     = null;   // {r,g,b} | null
+fish._colorTo       = null;   // {r,g,b} | null
+fish._colorT        = 0;      // 0→1 progress
+fish._colorDuration = 0;      // seconds; ∝ color distance
+
+// Shader transition
+fish._shaderFrom     = null;  // 'vanilla' | 'glass' | null
+fish._shaderTo       = null;  // 'vanilla' | 'glass' | null
+fish._shaderT        = 0;     // 0→1 progress
+fish._shaderDuration = 1.5;   // fixed duration (seconds) for all shader transitions
+```
+
+**Color distance formula (used in E12-3):**
+```js
+function colorDist(a, b) {
+  const dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b;
+  return Math.sqrt(dr*dr + dg*dg + db*db) / (Math.sqrt(3) * 255);  // 0–1
+}
+const MIN_TRANSITION_S = 0.5;
+const MAX_TRANSITION_S = 4.0;
+const duration = MIN_TRANSITION_S + colorDist(current, target) * (MAX_TRANSITION_S - MIN_TRANSITION_S);
+```
+
+---
+
+#### E12-1 — Food pellet entity  ⬜
+
+A `FoodPellet` class that renders as a small colored dot at a logical position. Exists
+in a `sim.pellets = []` array managed by the simulation.
+
+**Visual:**
+- Radius ~2.5 logical units; filled circle.
+- Color = `targetColor` for vanilla/glass pellets; a soft white/gold shimmer animation for
+  special (rainbow) pellets — cycle through a short gold→white→gold loop using `Date.now()`.
+- Slight sink animation: `y += 0.3 * dt` (pellets settle slowly downward, feel physical).
+- Despawn after 8 s with no fish eating them (no food waste forever).
+
+**Spawn wiring (`main.js`):**
+- Quick tap currently calls `_recolorNearest()`. Replace with:
+  ```js
+  function _spawnPellet(lx, ly) {
+    const palette = getActivePalette();
+    const special = getSpecialPalette();
+    const color   = rollColor(palette, special);      // may hit remainder → special path
+    const isSpecial = /* rollColor returned from special path */ ...;
+    const shader  = rollShader(palette, getDefaultShader());
+    sim.pellets.push(new FoodPellet(
+      lx, ly, color,
+      isSpecial ? fish.shader : shader,   // rainbow pellet keeps fish's current shader
+      isSpecial ? 'time' : null,
+      palette.id,
+    ));
+  }
+  ```
+  > *Note: `rollColor` needs to signal whether the special path was taken.* The cleanest
+  > approach: `rollColor` returns `{ color, special: bool }` (a small breaking change to
+  > a two-field object) so the caller can branch. Alternatively, a separate
+  > `rollColorResult(palette, special) → { r,g,b, isSpecial }` function.
+
+**`sim.pellets` lifecycle:**
+- `simulation.update()` does not update pellets (they are passive sinking entities).
+- `main.js` update loop calls `pellet.update(dt)` for each pellet, removes `eaten` and
+  `expired` entries.
+
+**Affected files:** `src/entities/food-pellet.js` (new), `src/simulation.js`,
+`src/palettes/palette-manager.js` (rollColor signal), `src/main.js`
+
+---
+
+#### E12-2 — Fish seek-and-eat behavior  ⬜
+
+Fish detect and swim toward the nearest pellet within a sensing radius; eating happens
+on contact. Integrates with the existing state-machine in `states.js`.
+
+**Sensing:** each fish, in `update()`, checks `sim.pellets` for the nearest uneaten pellet
+within `senseRadius = fish.length * 8`. If found, fish switches to a `'seek'` state and
+stores `fish._targetPellet`.
+
+**Seek steering:** a new behavior `seekPellet(fish, ctx)` in `behaviors.js`:
+- Returns a force toward `ctx.targetPellet.{x,y}`.
+- Weight high enough to override wander/alignment but not separation.
+- When `dist(fish, pellet) < fish.length * 0.6` (contact threshold): mark pellet eaten,
+  call `fish.eatPellet(pellet)` (defined in E12-3), clear `_targetPellet`, return to `'swim'`.
+
+**Priority with E10 (hold-to-attract):** pellet seek takes priority over attraction point
+if a pellet is within sensing range.
+
+**Multiple fish, one pellet:** whichever fish reaches contact first claims it. No
+reservation needed — first-come first-served; `pellet.eaten = true` prevents double-eat.
+
+**Affected files:** `src/movement/behaviors.js`, `src/movement/states.js`,
+`src/entities/fish-base.js`, `src/simulation.js`
+
+---
+
+#### E12-3 — Gradual color transition  ⬜
+
+When a fish eats a pellet, its color fades smoothly from the current displayed color to
+the pellet's target color. Duration scales with color distance: white→black takes longer
+than light-pink→red.
+
+**`fish.eatPellet(pellet)` in `fish-base.js`:**
+```js
+eatPellet(pellet) {
+  const current = this._computeEffectiveColor();  // snapshot mid-rainbow-cycle if active
+  const dist    = colorDist(current, pellet.targetColor);
+  this._colorFrom     = { ...current };
+  this._colorTo       = { ...pellet.targetColor };
+  this._colorT        = 0;
+  this._colorDuration = MIN_TRANSITION_S + dist * (MAX_TRANSITION_S - MIN_TRANSITION_S);
+  // shader + rainbow handled in E12-4 and E12-5
+}
+```
+
+**`update(dt)` addition:**
+```js
+if (this._colorT < 1 && this._colorFrom) {
+  this._colorT = Math.min(1, this._colorT + dt / this._colorDuration);
+  const t = this._colorT;
+  this.color = {
+    r: this._colorFrom.r + (this._colorTo.r - this._colorFrom.r) * t,
+    g: this._colorFrom.g + (this._colorTo.g - this._colorFrom.g) * t,
+    b: this._colorFrom.b + (this._colorTo.b - this._colorFrom.b) * t,
+  };
+  if (this._colorT >= 1) { this._colorFrom = null; this._colorTo = null; }
+}
+```
+
+**`_computeEffectiveColor()` priority:**
+- Rainbow effect (`rainbowEffect === 'time'`) overrides `this.color` normally.
+- During a color transition, `this.color` is mid-lerp. Rainbow cycling of a mid-lerp
+  color is fine — the `_rainbowPhase` still advances, so the fish gets a rainbow effect
+  *after* arriving at the target color naturally. No special case needed.
+
+**Affected files:** `src/entities/fish-base.js`
+
+---
+
+#### E12-4 — Shader cross-fade transition  ⬜
+
+When a pellet changes a fish's shader (e.g., vanilla → glass), the body cross-fades
+between the two render modes rather than snapping. Uses `globalAlpha` on Canvas2D.
+
+**`eatPellet(pellet)` extension:**
+```js
+if (pellet.targetShader !== this.shader) {
+  this._shaderFrom     = this.shader;
+  this._shaderTo       = pellet.targetShader;
+  this._shaderT        = 0;
+  this._shaderDuration = 1.5;   // fixed; feels independent of how different the shaders are
+  this.shader = pellet.targetShader;  // update immediately for logic; visual cross-fades
+}
+```
+
+**`draw()` dispatcher update:**
+```js
+draw(ctx, scale, debug) {
+  const color = this._computeEffectiveColor();
+  if (this._shaderT < 1 && this._shaderFrom !== null) {
+    // Cross-fade: draw outgoing at decreasing alpha, incoming at increasing alpha
+    ctx.save(); ctx.globalAlpha = 1 - this._shaderT;
+    this._drawByShader(this._shaderFrom, ctx, scale, debug, color);
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = this._shaderT;
+    this._drawByShader(this._shaderTo,   ctx, scale, debug, color);
+    ctx.restore();
+  } else {
+    this._drawByShader(this.shader, ctx, scale, debug, color);
+  }
+}
+
+_drawByShader(shader, ctx, scale, debug, color) {
+  if (shader === 'glass') this._drawGlassMask(ctx, scale, debug, color);
+  else                    this._drawVanilla(ctx, scale, debug, color);
+}
+```
+
+**`update(dt)` addition:**
+```js
+if (this._shaderT < 1 && this._shaderFrom !== null) {
+  this._shaderT = Math.min(1, this._shaderT + dt / this._shaderDuration);
+  if (this._shaderT >= 1) this._shaderFrom = null;
+}
+```
+
+**Affected files:** `src/entities/fish-base.js`
+
+---
+
+#### E12-5 — Special shimmer pellet → rainbow time-cycle  ⬜
+
+Repurposes the `rollColor` "special bag" remainder mechanic. When the probability roll
+lands in the remainder (below all color entries), instead of drawing from a special
+color bag, the system spawns a special shimmer pellet. Eating it sets
+`fish.rainbowEffect = 'time'` and assigns `fish._paletteId`.
+
+**`rollColor` signal change (`palette-manager.js`):**
+
+`rollColor` currently returns `{r,g,b}`. Change to return a result object:
+```js
+// New signature:
+export function rollColor(palette, special) {
+  // ... existing logic ...
+  if (!hit) {
+    // Remainder: signal special rather than drawing from special bag
+    return { r: 0, g: 0, b: 0, isSpecial: true };
+    // color values are ignored for special pellets; caller checks isSpecial
+  }
+  return { r: hit.color.r, g: hit.color.g, b: hit.color.b, isSpecial: false };
+}
+```
+
+> Backward-compatibility note: all call sites that currently do
+> `fish.color = rollColor(...)` must be updated to destructure the result.
+> The fish-base.js constructor and main.js click handler are the two sites.
+> `isSpecial` on existing call sites just gets ignored (falsy) until E12 wires it.
+
+**Special pellet spawn (`main.js` `_spawnPellet`):**
+```js
+const result = rollColor(palette, special);
+if (result.isSpecial) {
+  // No color target — fish keeps current color and gains rainbow effect
+  sim.pellets.push(new FoodPellet(
+    lx, ly,
+    null,            // targetColor = null (no color change)
+    fish?.shader ?? getDefaultShader(),  // targetShader = fish's current shader
+    'time',          // targetRainbow
+    palette.id,
+  ));
+} else {
+  sim.pellets.push(new FoodPellet(lx, ly, result, rollShader(palette, defaultShader), null, palette.id));
+}
+```
+
+**`fish.eatPellet(pellet)` rainbow branch:**
+```js
+if (pellet.targetRainbow === 'time') {
+  this.rainbowEffect = 'time';
+  this._paletteId    = pellet.paletteId;
+  this._rainbowPhase = 0;   // restart cycle from beginning for clean entry
+  // No color transition (fish color stays as-is; rainbow takes over dynamically)
+}
+```
+
+**Special palette data structure:** the existing `special` bag in `palette-manager.js`
+and `src/palettes/builtin/special.js` can be removed once E12-5 ships. The
+`getSpecialPalette()` function and `special` palette file become dead code.
+Mark for deletion when cleaning up.
+
+**Affected files:** `src/palettes/palette-manager.js`, `src/palettes/index.js`,
+`src/entities/food-pellet.js`, `src/entities/fish-base.js`, `src/main.js`
+
+---
+
+**Full affected-file summary for E12:**
+
+| File | Stories | Change |
+|------|---------|--------|
+| `src/entities/food-pellet.js` | 1,5 | New — FoodPellet class; visual; sink animation; despawn timer |
+| `src/entities/fish-base.js` | 2,3,4,5 | `eatPellet()`; `_colorFrom/To/T/Duration`; `_shaderFrom/To/T`; `_drawByShader()`; cross-fade `draw()` |
+| `src/movement/behaviors.js` | 2 | `seekPellet()` behavior |
+| `src/movement/states.js` | 2 | `'seek'` state + pellet targeting |
+| `src/simulation.js` | 1,2 | `sim.pellets = []`; expose to fish update |
+| `src/palettes/palette-manager.js` | 5 | `rollColor` returns `{...color, isSpecial}`; remove special-bag draw path |
+| `src/main.js` | 1,5 | Replace `_recolorNearest` with `_spawnPellet`; update `rollColor` call sites |
+
+| ID | Story | Status |
+|----|-------|--------|
+| E12-1 | FoodPellet entity — visual, sink, despawn; `sim.pellets[]`; spawn on tap | ⬜ |
+| E12-2 | Fish seek-and-eat — sense radius, `seekPellet` behavior, contact eat | ⬜ |
+| E12-3 | Gradual color transition — `_colorFrom/To/T/Duration`; duration ∝ color distance | ⬜ |
+| E12-4 | Shader cross-fade — `_shaderFrom/To/T`; globalAlpha cross-fade in `draw()` | ⬜ |
+| E12-5 | Special shimmer pellet — `rollColor` isSpecial signal; rainbow effect on eat; retire special bag | ⬜ |
 
 ---
 
