@@ -23,7 +23,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../grid.js').Grid} refs.grid
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes }) {
+export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav }) {
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
@@ -1130,6 +1130,15 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (glassShapes.selected >= 0) { glassShapes.remove(glassShapes.selected); save(); }
   });
 
+  // ── Key-nav: rebuild focus list whenever a <details> section opens/closes ────
+  if (keyNav) {
+    panel.querySelectorAll('details').forEach(det => {
+      det.addEventListener('toggle', () => {
+        if (keyNav.mode === 'menu') keyNav.buildFocusList();
+      });
+    });
+  }
+
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
   const copyBtn = panel.querySelector('#btn-copy-tuning');
   copyBtn.addEventListener('click', async () => {
@@ -1175,8 +1184,21 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (panel.hidden) {
       hideInfo();
       scheduleHide();
+      if (keyNav) keyNav.setMode('canvas');
     } else {
       clearTimeout(hideTimer);   // stay visible while panel is open
+      if (keyNav) {
+        keyNav.setPanel(panel);
+        keyNav.buildFocusList();
+        keyNav.focusFirst();
+        keyNav.setMode('menu');
+        keyNav.onMenuClose = () => {
+          panel.hidden = true;
+          hideInfo();
+          scheduleHide();
+          keyNav.setMode('canvas');
+        };
+      }
     }
   });
 
@@ -1187,6 +1209,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
       panel.hidden = true;
       hideInfo();
+      if (keyNav) keyNav.setMode('canvas');
     }
   });
 
@@ -1204,6 +1227,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     }
     panel.hidden = true;
     hideInfo();
+    if (keyNav) keyNav.setMode('canvas');
   });
   document.addEventListener('fullscreenchange', updateFsLabel);
   document.addEventListener('webkitfullscreenchange', updateFsLabel);

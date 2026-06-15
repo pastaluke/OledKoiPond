@@ -11,6 +11,7 @@ import { initMenu     } from './ui/menu.js';
 import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index.js';
 import { Compositor } from './renderer/compositor.js';
 import { GlassShapes } from './renderer/glass-shapes.js';
+import { KeyNavManager } from './ui/key-nav.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -30,6 +31,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
   overlay.glassShapes = glassShapes;
+
+  const keyNav = new KeyNavManager({
+    glassShapes,
+    overlay,
+    sim,
+    recolorFn: () => rollColor(getActivePalette(), getSpecialPalette()),
+  });
+  overlay.keyNav = keyNav;
+  const ariaLive = document.getElementById('aria-live');
+  if (ariaLive) keyNav.setAriaLive(ariaLive);
 
   // ── Spawn koi ────────────────────────────────────────────────────────────
   for (let i = 0; i < KOI_COUNT; i++) sim.add(new Koi(grid));
@@ -147,7 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes });
+  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
@@ -160,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sim.update(deltaMs);
     sim.draw();
     grid.drawBorder();
+    keyNav.frame(deltaMs / 1000);
     overlay.draw(sim.entities);
     glassShapes.update(deltaMs, compositor.aspect);
     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);

@@ -449,12 +449,21 @@
       border-radius: 4px;
       margin-bottom: 4px;
     }
+
+    /* ── Keyboard / TV-remote focus ring (E9) ───────────────────────────────── */
+    #menu-panel :focus-visible {
+      outline: 2px solid rgb(0, 210, 255);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
   </style>
 </head>
 <body>
   <canvas id="pond"></canvas>
-  <canvas id="webgl"></canvas>
+  <canvas id="webgl" role="application" aria-label="Koi pond — arrow keys move cursor, Space/Enter interact, Escape releases"></canvas>
   <canvas id="debug"></canvas>
+  <div id="aria-live" role="status" aria-live="polite" aria-atomic="true"
+       style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap"></div>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

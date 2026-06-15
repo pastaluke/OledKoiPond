@@ -92,6 +92,8 @@ export class DebugOverlay {
     this.glassShapes       = null;
     /** Active attract point in logical coords, or null. Set by main.js. */
     this.attractPoint      = null;
+    /** KeyNavManager instance, or null. Set by main.js. */
+    this.keyNav            = null;
     this.sync();
   }
 
@@ -130,6 +132,7 @@ export class DebugOverlay {
     if (this.glassShapes) this._drawGlassShapes();
 
     if (this.attractPoint) this._drawAttractPoint();
+    if (this.keyNav)       this._drawKeyNavCursor();
   }
 
   // ─── Glass shape handles — faint outer (rim) + inner (band) rings ─────────────
@@ -493,6 +496,56 @@ export class DebugOverlay {
    * @param {number} bottomY  - box bottom edge (physical px)
    * @param {string} borderColor
    */
+  // ─── Key-nav cursor — crosshair + optional fish-follow ring ─────────────────
+  _drawKeyNavCursor() {
+    const kn = this.keyNav;
+    if (!kn || kn.mode !== 'canvas') return;
+
+    const { ctx } = this;
+    const W = this.canvas.width, H = this.canvas.height;
+    const px = kn.cursorX * W, py = kn.cursorY * H;
+
+    ctx.save();
+
+    // Fish-follow: dashed gold ring around the tracked fish.
+    if (kn.fishTarget) {
+      const ft  = kn.fishTarget;
+      const g   = this.grid;
+      const fx  = (ft.x / g.logicalW) * W;
+      const fy  = (ft.y / g.logicalH) * H;
+      const t   = performance.now() * 0.003;
+      ctx.strokeStyle  = 'rgba(255,200,0,0.80)';
+      ctx.lineWidth    = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.lineDashOffset = -(t * 8);
+      ctx.beginPath();
+      ctx.arc(fx, fy, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Crosshair arms with a gap around the center dot.
+    const ARM = 8, GAP = 4;
+    const grabbed = kn.grabbed >= 0;
+    const color = grabbed ? 'rgba(255,160,0,0.90)' : 'rgba(0,210,255,0.85)';
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(px - ARM - GAP, py); ctx.lineTo(px - GAP, py);
+    ctx.moveTo(px + GAP,       py); ctx.lineTo(px + ARM + GAP, py);
+    ctx.moveTo(px, py - ARM - GAP); ctx.lineTo(px, py - GAP);
+    ctx.moveTo(px, py + GAP);       ctx.lineTo(px, py + ARM + GAP);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
   _drawStatsBox(lines, cx, bottomY, borderColor) {
     const { ctx, grid } = this;
     const fontSize = Math.max(8, Math.floor(grid.scale * 2));
