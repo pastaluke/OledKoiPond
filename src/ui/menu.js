@@ -1027,21 +1027,63 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     });
     glassSliderHost.appendChild(specRow);
 
-    mk({
-      label: 'Spec strength', decimals: 2, valueStep: 0.05,
-      getVal: () => s.specularStr, getMin: () => 0, getMax: () => 2.0,
-      setVal: (v) => { s.specularStr = clamp(v, 0, 2.0); glassShapes.sync(); save(); },
-    });
-    mk({
-      label: 'Spec inner', decimals: 2, valueStep: 0.01,
-      getVal: () => s.specInner, getMin: () => 0, getMax: () => 1.0,
-      setVal: (v) => { s.specInner = clamp(v, 0, s.specOuter - 0.02); glassShapes.sync(); save(); },
-    });
-    mk({
-      label: 'Spec outer', decimals: 2, valueStep: 0.01,
-      getVal: () => s.specOuter, getMin: () => 0, getMax: () => 1.0,
-      setVal: (v) => { s.specOuter = clamp(v, s.specInner + 0.02, 1.0); glassShapes.sync(); save(); },
-    });
+    // Specular rings — up to 2, each with inner %, outer %, and strength.
+    const ringsHost = document.createElement('div');
+    ringsHost.className = 'spec-rings';
+    glassSliderHost.appendChild(ringsHost);
+
+    function buildRingSliders() {
+      ringsHost.innerHTML = '';
+      const rings = s.specRings ?? [];
+      rings.forEach((ring, ri) => {
+        const block = document.createElement('div');
+        block.className = 'spec-ring-block';
+        const header = document.createElement('div');
+        header.className = 'spec-ring-header';
+        const lbl = document.createElement('span');
+        lbl.textContent = `Ring ${ri + 1}`;
+        const delBtn = document.createElement('button');
+        delBtn.className = 'spec-ring-del';
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', () => {
+          s.specRings = rings.filter((_, j) => j !== ri);
+          glassShapes.sync(); save(); buildRingSliders();
+        });
+        header.appendChild(lbl);
+        header.appendChild(delBtn);
+        block.appendChild(header);
+        const rmk = cfg => block.appendChild(makeRow({ hasBounds: false, ...cfg }).row);
+        rmk({
+          label: 'Strength', decimals: 2, valueStep: 0.05,
+          getVal: () => ring.strength, getMin: () => 0, getMax: () => 2.0,
+          setVal: v => { ring.strength = clamp(v, 0, 2.0); glassShapes.sync(); save(); },
+        });
+        rmk({
+          label: 'Inner %', decimals: 2, valueStep: 0.01,
+          getVal: () => ring.inner, getMin: () => 0, getMax: () => 1.0,
+          setVal: v => { ring.inner = clamp(v, 0, ring.outer - 0.05); glassShapes.sync(); save(); },
+        });
+        rmk({
+          label: 'Outer %', decimals: 2, valueStep: 0.01,
+          getVal: () => ring.outer, getMin: () => 0, getMax: () => 1.0,
+          setVal: v => { ring.outer = clamp(v, ring.inner + 0.05, 1.0); glassShapes.sync(); save(); },
+        });
+        ringsHost.appendChild(block);
+      });
+      if (rings.length < 2) {
+        const addBtn = document.createElement('button');
+        addBtn.className = 'menu-action';
+        addBtn.style.marginTop = '4px';
+        addBtn.textContent = '+ Add ring';
+        addBtn.addEventListener('click', () => {
+          if (!s.specRings) s.specRings = [];
+          s.specRings.push({ inner: 0.0, outer: 0.6, strength: 0.5 });
+          glassShapes.sync(); save(); buildRingSliders();
+        });
+        ringsHost.appendChild(addBtn);
+      }
+    }
+    buildRingSliders();
 
     // Wander toggle
     const wanderRow = document.createElement('label');
@@ -1071,8 +1113,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     });
 
     // Copy / Paste shader params
-    const COPY_KEYS = ['radius','bevelWidth','refraction','bevelDepth','chromatic',
-                       'frost','magnify','specular','specularStr','specInner','specOuter'];
+    const COPY_SCALAR_KEYS = ['radius','bevelWidth','refraction','bevelDepth',
+                              'chromatic','frost','magnify','specular'];
     const cpRow = document.createElement('div');
     cpRow.className = 'menu-btn-row';
 
@@ -1081,7 +1123,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     copyBtn.textContent = 'Copy params';
     copyBtn.addEventListener('click', () => {
       const out = {};
-      for (const k of COPY_KEYS) out[k] = s[k];
+      for (const k of COPY_SCALAR_KEYS) out[k] = s[k];
+      out.specRings = JSON.parse(JSON.stringify(s.specRings ?? []));
       navigator.clipboard.writeText(JSON.stringify(out, null, 2)).catch(() => {});
     });
 
@@ -1095,13 +1138,18 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
           const bounds = {
             radius:[0.02,0.6], bevelWidth:[0.05,1], refraction:[0,0.05],
             bevelDepth:[0,0.10], chromatic:[0,20], frost:[0,8], magnify:[0.5,3],
-            specularStr:[0,2], specInner:[0,1], specOuter:[0,1],
           };
           for (const [k,[lo,hi]] of Object.entries(bounds)) {
             if (Number.isFinite(p[k])) s[k] = clamp(p[k], lo, hi);
           }
           if (typeof p.specular === 'boolean') s.specular = p.specular;
-          s.specInner = Math.min(s.specInner, s.specOuter - 0.02);
+          if (Array.isArray(p.specRings)) {
+            s.specRings = p.specRings.slice(0, 2).map(r => ({
+              inner:    clamp(Number.isFinite(r?.inner)    ? r.inner    : 0.7, 0, 1),
+              outer:    clamp(Number.isFinite(r?.outer)    ? r.outer    : 1.0, 0, 1),
+              strength: clamp(Number.isFinite(r?.strength) ? r.strength : 1.0, 0, 2),
+            }));
+          }
           glassShapes.sync();
           buildGlassSliders();
           save();

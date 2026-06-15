@@ -24,12 +24,29 @@ export function defaultShape() {
     frost:        0,
     magnify:      1.0,
     specular:     false,
-    specularStr:  1.0,
-    specInner:    0.0,
-    specOuter:    1.0,
+    specRings:    [{ inner: 0.70, outer: 1.0, strength: 1.0 }],
     wander:       false,
     wanderSpeed:  0.02,
   };
+}
+
+function _sanitizeRing(r) {
+  return {
+    inner:    num(r?.inner,    0, 1.0, 0.7),
+    outer:    num(r?.outer,    0, 1.0, 1.0),
+    strength: num(r?.strength, 0, 2.0, 1.0),
+  };
+}
+
+function _sanitizeSpecRings(s) {
+  if (Array.isArray(s.specRings) && s.specRings.length > 0) {
+    return s.specRings.slice(0, 2).map(_sanitizeRing);
+  }
+  // Migrate from old single-band format (specularStr / specInner / specOuter).
+  if (s.specularStr != null || s.specInner != null || s.specOuter != null) {
+    return [{ inner: num(s.specInner, 0, 1.0, 0.0), outer: num(s.specOuter, 0, 1.0, 1.0), strength: num(s.specularStr, 0, 2.0, 1.0) }];
+  }
+  return [{ inner: 0.70, outer: 1.0, strength: 1.0 }];
 }
 
 function _sanitize(s) {
@@ -44,11 +61,9 @@ function _sanitize(s) {
     chromatic:    num(s.chromatic    ?? s.strength,  0,    20,   6),
     frost:        num(s.frost,       0,    8,    0),
     magnify:      num(s.magnify,     0.5,  3.0,  1.0),
-    specular:     typeof s.specular     === 'boolean' ? s.specular     : false,
-    specularStr:  num(s.specularStr, 0,    2.0,  1.0),
-    specInner:    num(s.specInner,   0,    1.0,  0.0),
-    specOuter:    num(s.specOuter,   0,    1.0,  1.0),
-    wander:       typeof s.wander       === 'boolean' ? s.wander       : false,
+    specular:     typeof s.specular  === 'boolean' ? s.specular : false,
+    specRings:    _sanitizeSpecRings(s),
+    wander:       typeof s.wander    === 'boolean' ? s.wander   : false,
     wanderSpeed:  num(s.wanderSpeed, 0.005, 0.05, 0.02),
   };
 }
@@ -117,6 +132,7 @@ export class GlassShapes {
       frost:      s.frost,
       magnify:    s.magnify,
       specular:   s.specular,
+      specRings:  s.specRings,
     })));
   }
 

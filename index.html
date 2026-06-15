@@ -450,6 +450,36 @@
       margin-bottom: 4px;
     }
 
+    /* ── Specular ring blocks ────────────────────────────────────────────────── */
+    .spec-rings { margin-top: 2px; }
+    .spec-ring-block {
+      border-left: 2px solid rgba(0,210,255,0.2);
+      padding-left: 8px;
+      margin: 6px 0 2px;
+    }
+    .spec-ring-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 9.5px;
+      color: rgba(0,210,255,0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 0 1px;
+    }
+    .spec-ring-del {
+      appearance: none;
+      -webkit-appearance: none;
+      padding: 0 5px;
+      line-height: 16px;
+      font-size: 14px;
+      background: none;
+      border: none;
+      color: rgba(255,60,60,0.65);
+      cursor: pointer;
+    }
+    .spec-ring-del:hover { color: rgba(255,80,80,1); }
+
     /* ── Keyboard / TV-remote focus ring (E9) ───────────────────────────────── */
     #menu-panel :focus-visible {
       outline: 2px solid rgb(0, 210, 255);
