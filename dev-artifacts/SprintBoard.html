@@ -242,12 +242,20 @@
   <h1>🐟 OledKoiPond — SprintBoard</h1>
   <div id="controls">
     <button class="filter-btn active" data-epic="all">All</button>
-    <button class="filter-btn" data-epic="E1" style="color:#00d2ff;border-color:#00d2ff33">E1 Polish</button>
-    <button class="filter-btn" data-epic="E2" style="color:#4488ff;border-color:#4488ff33">E2 Water</button>
-    <button class="filter-btn" data-epic="E3" style="color:#aa66ff;border-color:#aa66ff33">E3 Visual</button>
-    <button class="filter-btn" data-epic="E4" style="color:#44cc88;border-color:#44cc8833">E4 Entities</button>
-    <button class="filter-btn" data-epic="E5" style="color:#ff9944;border-color:#ff994433">E5 Deploy</button>
-    <button class="filter-btn" data-epic="E6" style="color:#ff5599;border-color:#ff559933">E6 Creator</button>
+    <button class="filter-btn" data-epic="E1"  style="color:#00d2ff;border-color:#00d2ff33">E1 Polish</button>
+    <button class="filter-btn" data-epic="E2"  style="color:#4488ff;border-color:#4488ff33">E2 Water</button>
+    <button class="filter-btn" data-epic="E3"  style="color:#aa66ff;border-color:#aa66ff33">E3 Visual</button>
+    <button class="filter-btn" data-epic="E4"  style="color:#44cc88;border-color:#44cc8833">E4 Entities</button>
+    <button class="filter-btn" data-epic="E5"  style="color:#ff9944;border-color:#ff994433">E5 Deploy</button>
+    <button class="filter-btn" data-epic="E6"  style="color:#ff5599;border-color:#ff559933">E6 Creator</button>
+    <button class="filter-btn" data-epic="E7"  style="color:#00c8a0;border-color:#00c8a033">E7 Render</button>
+    <button class="filter-btn" data-epic="E8"  style="color:#88d8ff;border-color:#88d8ff33">E8 Glass</button>
+    <button class="filter-btn" data-epic="E9"  style="color:#ffcc44;border-color:#ffcc4433">E9 KeyNav</button>
+    <button class="filter-btn" data-epic="E10" style="color:#66ee88;border-color:#66ee8833">E10 Attract</button>
+    <button class="filter-btn" data-epic="E11" style="color:#cc88ff;border-color:#cc88ff33">E11 Shaders</button>
+    <button class="filter-btn" data-epic="E12" style="color:#ff8866;border-color:#ff886633">E12 Food</button>
+    <span class="sep"></span>
+    <button class="filter-btn" data-epic="B1"  style="color:#ff5555;border-color:#ff555533">B1 iOS</button>
     <span class="sep"></span>
     <button class="action-btn" id="copy-btn">Copy JSON</button>
     <button class="action-btn" id="reset-btn">Reset</button>
@@ -260,352 +268,97 @@
 <script>
 // Edit tickets.json, then run: node dev-artifacts/build-board.js
 const BAKED_DATA = /* BEGIN_TICKETS */ [
-  {
-    "id": "E1-1",
-    "epic": "E1",
-    "title": "PWA manifest + icons",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "manifest.json + icons so Add to Home Screen shows a proper icon and name instead of a screenshot"
-  },
-  {
-    "id": "E1-2",
-    "epic": "E1",
-    "title": "iOS home-screen meta tags",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "meta theme-color and apple-mobile-web-app-capable tags so the status bar goes black on home-screen launch"
-  },
-  {
-    "id": "E1-3",
-    "epic": "E1",
-    "title": "Fish color controls in menu",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "Hue / saturation sliders or a color picker per species in the Fish menu"
-  },
-  {
-    "id": "E1-4",
-    "epic": "E1",
-    "title": "Koi color palette variety",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Currently a fixed list; expose palette selection in menu"
-  },
-  {
-    "id": "E1-5",
-    "epic": "E1",
-    "title": "Performance profiling pass",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Measure frame time on mid-range Android; identify bottlenecks"
-  },
-  {
-    "id": "E1-6",
-    "epic": "E1",
-    "title": "Edge-factor debug stat",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Add edge-factor to Entity Stats box (how deep the fish is in the wall-avoidance band)"
-  },
-  {
-    "id": "E2-1",
-    "epic": "E2",
-    "title": "Tap/touch → pixelated ripple",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "Visual ripple at tap point — simple expanding ring, pixelated, no full fluid sim yet"
-  },
-  {
-    "id": "E2-2",
-    "epic": "E2",
-    "title": "2D wave-propagation fluid grid",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "CPU, discrete wave equation from GDD §8"
-  },
-  {
-    "id": "E2-3",
-    "epic": "E2",
-    "title": "Ripple injection from fish movement",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Body displacement → fluid grid"
-  },
-  {
-    "id": "E2-4",
-    "epic": "E2",
-    "title": "Ripple overlay renderer",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Fluid grid values → semi-transparent pixel overlay"
-  },
-  {
-    "id": "E2-5",
-    "epic": "E2",
-    "title": "Tap → inject ripple into fluid grid",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Replaces/extends E2-1 once the full fluid sim is in place"
-  },
-  {
-    "id": "E2-6",
-    "epic": "E2",
-    "title": "Ripple-driven pixel brightness",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Overlay values brighten fish outline pixels beneath"
-  },
-  {
-    "id": "E2-7",
-    "epic": "E2",
-    "title": "Rainbow ripple type",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Special ripple → rainbow color pass over fish outline pixels"
-  },
-  {
-    "id": "E3-1",
-    "epic": "E3",
-    "title": "ColorConfig struct on entities",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Mode (solid/rainbow/pulse), base RGB, speed — attached to each entity"
-  },
-  {
-    "id": "E3-2",
-    "epic": "E3",
-    "title": "Formalise render style enum",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "outline and filled are the first two entries; replace the checkbox with a selector"
-  },
-  {
-    "id": "E3-3",
-    "epic": "E3",
-    "title": "gradient render style",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Fill uses a per-row brightness gradient (lighter belly, darker back)"
-  },
-  {
-    "id": "E3-4",
-    "epic": "E3",
-    "title": "glow render style",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Soft halo of dim pixels around the outline (offset copies at lower opacity)"
-  },
-  {
-    "id": "E3-5",
-    "epic": "E3",
-    "title": "Directional highlight pass",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Configurable light-source angle; compute highlight/shadow side of each entity"
-  },
-  {
-    "id": "E3-6",
-    "epic": "E3",
-    "title": "Style + color controls in Fish menu",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Integrate render style and color settings into the Fish section of the menu"
-  },
-  {
-    "id": "E3-7",
-    "epic": "E3",
-    "title": "Border color control",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Border is currently hardcoded white; add a color picker or hue control"
-  },
-  {
-    "id": "E3-8",
-    "epic": "E3",
-    "title": "5.5-second breathing circle",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Ambient pulsing circle overlay — slow inhale/exhale rhythm from GDD"
-  },
-  {
-    "id": "E3-9",
-    "epic": "E3",
-    "title": "Ambient clock",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Thematically consistent clock display from GDD"
-  },
-  {
-    "id": "E4-1",
-    "epic": "E4",
-    "title": "Fish socializing state machine",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Approach, face, kiss / follow outcomes — see GDD"
-  },
-  {
-    "id": "E4-2",
-    "epic": "E4",
-    "title": "_neighborCount → socialize trigger",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Low neighbor count → seek company; high count → peel off"
-  },
-  {
-    "id": "E4-3",
-    "epic": "E4",
-    "title": "bubble entity",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Rising circle that pops at the top with a ripple event"
-  },
-  {
-    "id": "E4-4",
-    "epic": "E4",
-    "title": "lily_pad entity",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Static entity with very slow drift"
-  },
-  {
-    "id": "E4-5",
-    "epic": "E4",
-    "title": "Entity config file",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Register new entity types without code changes"
-  },
-  {
-    "id": "E4-6",
-    "epic": "E4",
-    "title": "Fish naming UI + Easter eggs",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Tap a fish → name input; special names in a list trigger different effects"
-  },
-  {
-    "id": "E4-7",
-    "epic": "E4",
-    "title": "Gyroscope / tilt controls",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Fish react to device orientation"
-  },
-  {
-    "id": "E5-1",
-    "epic": "E5",
-    "title": "PWA manifest + icons (deployment)",
-    "status": "ready-for-design",
-    "sprint": "Sprint 1",
-    "notes": "Overlaps E1-1 and E1-2 — do together; completes the nightstand use-case"
-  },
-  {
-    "id": "E5-2",
-    "epic": "E5",
-    "title": "itch.io HTML5 export",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Zip dist/ and upload; confirm it plays correctly"
-  },
-  {
-    "id": "E5-3",
-    "epic": "E5",
-    "title": "itch.io page copy and screenshots",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Write store page copy and capture screenshots for the itch.io listing"
-  },
-  {
-    "id": "E5-4",
-    "epic": "E5",
-    "title": "Orientation-change handling",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Gracefully reflow canvas and UI when phone rotates"
-  },
-  {
-    "id": "E5-5",
-    "epic": "E5",
-    "title": "Google Play wrapper",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Long-term: Trusted Web Activity or similar"
-  },
-  {
-    "id": "E5-6",
-    "epic": "E5",
-    "title": "Steam / Electron wrapper",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Long-term: desktop distribution via Electron"
-  },
-  {
-    "id": "E6-1",
-    "epic": "E6",
-    "title": "Entity plugin API contract",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Define what a third-party entity class is allowed to read and write"
-  },
-  {
-    "id": "E6-2",
-    "epic": "E6",
-    "title": "Worker-based entity sandbox",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Proof of concept: run one entity type inside a Web Worker"
-  },
-  {
-    "id": "E6-3",
-    "epic": "E6",
-    "title": "Import whitelist static analyser",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Check import graph at load time before running plugin code"
-  },
-  {
-    "id": "E6-4",
-    "epic": "E6",
-    "title": "Fragment shader / visual pass DSL",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "Design a restricted GLSL DSL or custom DSL for untrusted visual passes"
-  },
-  {
-    "id": "E6-5",
-    "epic": "E6",
-    "title": "Shader sandbox",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "OffscreenCanvas / WebGL isolation for untrusted visual passes"
-  },
-  {
-    "id": "E6-6",
-    "epic": "E6",
-    "title": "Preset bundle format",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "JSON: entity config + tuning + render style bundled together"
-  },
-  {
-    "id": "E6-7",
-    "epic": "E6",
-    "title": "In-app preset browser / importer",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "UI for browsing and importing community preset bundles"
-  },
-  {
-    "id": "E6-8",
-    "epic": "E6",
-    "title": "Companion sharing site",
-    "status": "backlog",
-    "sprint": "",
-    "notes": "itch.io community page or self-hosted site for sharing presets"
-  }
+  { "id":"E1-1",  "epic":"E1",  "title":"PWA manifest + icons",                    "status":"ready-for-design", "sprint":"Sprint 2", "notes":"manifest.json + icons; overlaps E5-1 and B1-2 — do all three together" },
+  { "id":"E1-2",  "epic":"E1",  "title":"iOS home-screen meta tags",               "status":"ready-for-design", "sprint":"Sprint 2", "notes":"apple-mobile-web-app-capable + theme-color; overlaps B1-3 — do together" },
+  { "id":"E1-3",  "epic":"E1",  "title":"Fish color controls in menu",             "status":"ready-for-design", "sprint":"",         "notes":"Hue/saturation sliders or color picker per species in the Fish menu" },
+  { "id":"E1-4",  "epic":"E1",  "title":"Koi palette variety",                     "status":"backlog",          "sprint":"",         "notes":"Currently a fixed list; expose palette selection in menu" },
+  { "id":"E1-5",  "epic":"E1",  "title":"Performance profiling pass",              "status":"backlog",          "sprint":"",         "notes":"Measure frame time on mid-range Android; identify bottlenecks" },
+  { "id":"E1-6",  "epic":"E1",  "title":"Edge-factor debug stat",                  "status":"backlog",          "sprint":"",         "notes":"Add edge-factor to Entity Stats box (depth into wall-avoidance band)" },
+
+  { "id":"E2-1",  "epic":"E2",  "title":"Tap → pixelated ripple",                  "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Visual expanding ring at tap point; pixelated; no fluid sim yet" },
+  { "id":"E2-2",  "epic":"E2",  "title":"2D wave fluid grid (CPU)",                "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Discrete wave equation from GDD §8; fish inject energy; brightness tint" },
+  { "id":"E2-3",  "epic":"E2",  "title":"Ripple injection from fish",              "status":"backlog",          "sprint":"",         "notes":"Body displacement → fluid grid; depends on E2-2" },
+  { "id":"E2-4",  "epic":"E2",  "title":"Ripple overlay renderer",                 "status":"backlog",          "sprint":"",         "notes":"Fluid grid → semi-transparent pixel overlay; depends on E2-2" },
+  { "id":"E2-5",  "epic":"E2",  "title":"Tap → inject into wave grid",             "status":"backlog",          "sprint":"",         "notes":"Replaces E2-1 once fluid sim is in place; depends on E2-2" },
+  { "id":"E2-6",  "epic":"E2",  "title":"Ripple-driven pixel brightness",          "status":"backlog",          "sprint":"",         "notes":"Overlay values brighten fish outline pixels beneath; depends on E2-4" },
+  { "id":"E2-7",  "epic":"E2",  "title":"Rainbow ripple pass",                     "status":"backlog",          "sprint":"",         "notes":"Special ripple → rainbow color on fish outline pixels; depends on E2-6" },
+
+  { "id":"E3-1",  "epic":"E3",  "title":"ColorConfig struct on entities",          "status":"idea-pond",        "sprint":"",         "notes":"Mode (solid/rainbow/pulse), base RGB, speed — needs design first" },
+  { "id":"E3-2",  "epic":"E3",  "title":"Render style enum",                       "status":"ready-for-design", "sprint":"",         "notes":"Formalise outline/filled as enum; replace toggle with selector" },
+  { "id":"E3-3",  "epic":"E3",  "title":"gradient render style",                   "status":"backlog",          "sprint":"",         "notes":"Per-row brightness gradient (lighter belly, darker back)" },
+  { "id":"E3-4",  "epic":"E3",  "title":"glow render style",                       "status":"backlog",          "sprint":"",         "notes":"Soft halo of dim pixels around the outline" },
+  { "id":"E3-5",  "epic":"E3",  "title":"Directional highlight pass",              "status":"backlog",          "sprint":"",         "notes":"Configurable light-source angle; highlight/shadow per entity" },
+  { "id":"E3-6",  "epic":"E3",  "title":"Style + color controls in Fish menu",     "status":"backlog",          "sprint":"",         "notes":"Integrate render style + color settings into Fish section; depends on E3-2" },
+  { "id":"E3-7",  "epic":"E3",  "title":"Border color control",                    "status":"ready-for-design", "sprint":"",         "notes":"Border currently hardcoded white; add color picker or hue control" },
+  { "id":"E3-8",  "epic":"E3",  "title":"5.5-second breathing circle",             "status":"idea-pond",        "sprint":"",         "notes":"Ambient pulsing circle overlay — needs design for feel and timing" },
+  { "id":"E3-9",  "epic":"E3",  "title":"Ambient clock",                           "status":"idea-pond",        "sprint":"",         "notes":"Thematically consistent drifting clock display; needs design" },
+
+  { "id":"E4-1",  "epic":"E4",  "title":"Fish socializing state machine",          "status":"idea-pond",        "sprint":"",         "notes":"Approach, face, kiss / follow outcomes — see GDD; needs design" },
+  { "id":"E4-2",  "epic":"E4",  "title":"neighborCount → socialize trigger",       "status":"backlog",          "sprint":"",         "notes":"Low count → seek company; high count → peel off; depends on E4-1" },
+  { "id":"E4-3",  "epic":"E4",  "title":"bubble entity",                           "status":"backlog",          "sprint":"",         "notes":"Rising circle that pops at the top with a ripple event" },
+  { "id":"E4-4",  "epic":"E4",  "title":"lily_pad entity",                         "status":"backlog",          "sprint":"",         "notes":"Static entity with very slow drift" },
+  { "id":"E4-5",  "epic":"E4",  "title":"Entity config file",                      "status":"idea-pond",        "sprint":"",         "notes":"Register new entity types without code changes; needs design" },
+  { "id":"E4-6",  "epic":"E4",  "title":"Fish naming UI + Easter eggs",            "status":"idea-pond",        "sprint":"",         "notes":"Tap a fish → name input; special names trigger hidden effects; needs design" },
+  { "id":"E4-7",  "epic":"E4",  "title":"Gyroscope / tilt controls",               "status":"idea-pond",        "sprint":"",         "notes":"Fish react to device orientation; needs design" },
+
+  { "id":"E5-1",  "epic":"E5",  "title":"PWA manifest + icons (deployment)",       "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Overlaps E1-1 and B1-2 — do all three together; completes nightstand use-case" },
+  { "id":"E5-2",  "epic":"E5",  "title":"itch.io HTML5 export",                    "status":"backlog",          "sprint":"",         "notes":"Zip dist/ and upload; confirm it plays correctly; depends on E5-1" },
+  { "id":"E5-3",  "epic":"E5",  "title":"itch.io page copy + screenshots",         "status":"backlog",          "sprint":"",         "notes":"Write store page copy and capture screenshots; depends on E5-2" },
+  { "id":"E5-4",  "epic":"E5",  "title":"Orientation-change handling",             "status":"backlog",          "sprint":"",         "notes":"Gracefully reflow canvas and UI when phone rotates" },
+  { "id":"E5-5",  "epic":"E5",  "title":"Google Play wrapper",                     "status":"idea-pond",        "sprint":"",         "notes":"Long-term: Trusted Web Activity or similar" },
+  { "id":"E5-6",  "epic":"E5",  "title":"Electron desktop roaming",                "status":"idea-pond",        "sprint":"",         "notes":"Transparent always-on-top window; fish swim across the full desktop surface. Also the Steam distribution path. See TASKS E5-6 for full design notes." },
+
+  { "id":"E6-1",  "epic":"E6",  "title":"Entity plugin API contract",              "status":"idea-pond",        "sprint":"",         "notes":"Define what a third-party entity class is allowed to read and write" },
+  { "id":"E6-2",  "epic":"E6",  "title":"Worker-based entity sandbox",             "status":"idea-pond",        "sprint":"",         "notes":"Proof of concept: run one entity type inside a Web Worker; depends on E6-1" },
+  { "id":"E6-3",  "epic":"E6",  "title":"Import whitelist static analyser",        "status":"idea-pond",        "sprint":"",         "notes":"Check import graph at load time before running plugin code; depends on E6-1" },
+  { "id":"E6-4",  "epic":"E6",  "title":"Fragment shader / visual pass DSL",       "status":"idea-pond",        "sprint":"",         "notes":"Design a restricted DSL for untrusted visual passes" },
+  { "id":"E6-5",  "epic":"E6",  "title":"Shader sandbox",                          "status":"idea-pond",        "sprint":"",         "notes":"OffscreenCanvas / WebGL isolation for untrusted passes; depends on E6-4" },
+  { "id":"E6-6",  "epic":"E6",  "title":"Preset bundle format",                    "status":"idea-pond",        "sprint":"",         "notes":"JSON: entity config + tuning + render style bundled together" },
+  { "id":"E6-7",  "epic":"E6",  "title":"In-app preset browser / importer",        "status":"idea-pond",        "sprint":"",         "notes":"UI for browsing and importing community preset bundles; depends on E6-6" },
+  { "id":"E6-8",  "epic":"E6",  "title":"Companion sharing site",                  "status":"idea-pond",        "sprint":"",         "notes":"itch.io community page or self-hosted site for sharing presets; long-term" },
+
+  { "id":"E7-1",  "epic":"E7",  "title":"WebGL compositor",                        "status":"live",             "sprint":"",         "notes":"Canvas2D pond as texture; fullscreen quad; chroma-key black→transparent; Y-flip" },
+  { "id":"E7-2",  "epic":"E7",  "title":"Water surface — simple mode",             "status":"ready-for-design", "sprint":"Sprint 2", "notes":"CPU wave grid; fish inject energy proportional to speed; brightness tint overlay" },
+  { "id":"E7-3",  "epic":"E7",  "title":"Glass edge shader",                       "status":"live",             "sprint":"",         "notes":"Chromatic aberration in border band; R/G/B displaced along inward edge normal" },
+  { "id":"E7-4",  "epic":"E7",  "title":"Water refractive mode",                   "status":"backlog",          "sprint":"",         "notes":"Wave normals → UV displacement in fragment shader; depends on E7-2" },
+  { "id":"E7-5",  "epic":"E7",  "title":"Boundary class + camera",                 "status":"implementation",   "sprint":"",         "notes":"Hard-border toggle done; soft Boundary class + camera sub-region outstanding" },
+  { "id":"E7-6",  "epic":"E7",  "title":"Display filter shaders",                  "status":"ready-for-design", "sprint":"",         "notes":"Named presets: none / lcd / gbc / game-watch; uniform-gated branches in frag shader" },
+  { "id":"E7-7",  "epic":"E7",  "title":"Glass UI panel",                          "status":"backlog",          "sprint":"",         "notes":"Glass refraction applied to the menu panel region; depends on E7-3/4" },
+
+  { "id":"E8-1",  "epic":"E8",  "title":"Guide ring fade on inactivity",           "status":"live",             "sprint":"",         "notes":"Grab-handle rings fade out after 3s of no pointer activity; reappear on hover" },
+  { "id":"E8-2",  "epic":"E8",  "title":"Diegetic border glass",                   "status":"live",             "sprint":"",         "notes":"Border chromatic shift upgraded to physically-based displacement + bevel model" },
+  { "id":"E8-3",  "epic":"E8",  "title":"Shape wander + wall bounce",              "status":"live",             "sprint":"",         "notes":"Glass shapes drift autonomously; bounce off pond walls with angle-of-reflection" },
+  { "id":"E8-4",  "epic":"E8",  "title":"Static specular env field",               "status":"live",             "sprint":"",         "notes":"Static light field replaces time-driven blobs; normal warping; E7-4 upgrade hook" },
+  { "id":"E8-5",  "epic":"E8",  "title":"Specular rings + Copy/Paste",             "status":"live",             "sprint":"",         "notes":"Up to 2 independent specular rings per shape with Strength/Inner%/Outer% sliders; Copy/Paste params" },
+
+  { "id":"E9-1",  "epic":"E9",  "title":"KeyNavManager + canvas cursor",           "status":"live",             "sprint":"",         "notes":"Arrow-key cursor on canvas; grab/drop glass shapes; hidden until first arrow press" },
+  { "id":"E9-2",  "epic":"E9",  "title":"Menu roving-focus navigation",            "status":"live",             "sprint":"",         "notes":"Up/Down arrows navigate all menu controls; details expand/collapse via arrows" },
+  { "id":"E9-3",  "epic":"E9",  "title":"Fish targeting via cursor",               "status":"live",             "sprint":"",         "notes":"Space on empty canvas targets nearest fish; gold tracking ring; feed on second Space" },
+  { "id":"E9-4",  "epic":"E9",  "title":"TV remote compat + polish",               "status":"live",             "sprint":"",         "notes":"GoBack → Escape; aria-live announcements; role=application on canvas" },
+
+  { "id":"E10",   "epic":"E10", "title":"Hold-to-Attract Fish",                    "status":"live",             "sprint":"",         "notes":"Hold anywhere → fish draw toward point and orbit; per-fish chirality; pointerup clears" },
+
+  { "id":"E11-1", "epic":"E11", "title":"Per-fish shader + rainbowEffect",         "status":"ready-for-design", "sprint":"",         "notes":"shader='vanilla'|'glass'; rainbowEffect=null|'time'; _computeEffectiveColor(); dispatcher; _drawVanilla rename. Unblocks all of E11 and E12." },
+  { "id":"E11-2", "epic":"E11", "title":"Menu default-shader selector",            "status":"backlog",          "sprint":"",         "notes":"Vanilla / Glass select in Fish menu; wired to new fish spawns; depends on E11-1" },
+  { "id":"E11-3", "epic":"E11", "title":"Food bag shader palette",                 "status":"backlog",          "sprint":"",         "notes":"shaderEnabled toggle; shaders[] (vanilla/glass only); rollShader(); editor UI; remainder info line" },
+  { "id":"E11-4", "epic":"E11", "title":"glass shader — GPU mask layer",           "status":"backlog",          "sprint":"",         "notes":"fish-mask canvas; compositor fish-glass FRAG pass; tint via _computeEffectiveColor; depends on E11-1" },
+  { "id":"E11-5", "epic":"E11", "title":"rainbowEffect time-cycle (verify)",       "status":"backlog",          "sprint":"",         "notes":"Verify rainbow cycles on vanilla + glass fish after E11-1; integration story" },
+  { "id":"E11-6", "epic":"E11", "title":"rainbowEffect field-driven",              "status":"idea-pond",        "sprint":"",         "notes":"PARKED — spatial gradient field; fish at different positions show different palette colors simultaneously" },
+
+  { "id":"E12-1", "epic":"E12", "title":"FoodPellet entity + spawn on tap",        "status":"backlog",          "sprint":"",         "notes":"Colored dot at click point; sinks slowly; despawns after 8s; replaces instant recolor; depends on E11-1" },
+  { "id":"E12-2", "epic":"E12", "title":"Fish seek-and-eat behavior",              "status":"backlog",          "sprint":"",         "notes":"seekPellet() behavior; sense radius fish.length×8; contact eat; depends on E12-1" },
+  { "id":"E12-3", "epic":"E12", "title":"Gradual color transition",                "status":"backlog",          "sprint":"",         "notes":"Duration ∝ color distance (0.5–4.0s); lerp in update(); white→black longer than pink→red" },
+  { "id":"E12-4", "epic":"E12", "title":"Shader cross-fade",                       "status":"backlog",          "sprint":"",         "notes":"globalAlpha cross-fade between shaderFrom and shaderTo over fixed 1.5s; depends on E12-3" },
+  { "id":"E12-5", "epic":"E12", "title":"Special shimmer pellet → rainbow",        "status":"backlog",          "sprint":"",         "notes":"rollColor isSpecial signal; eating sets rainbowEffect='time'; retires the special color bag" },
+
+  { "id":"B1-1",  "epic":"B1",  "title":"viewport-fit=cover + safe-area CSS",     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"viewport meta + env(safe-area-inset-*) on hamburger and panel; canvas fills under notch" },
+  { "id":"B1-2",  "epic":"B1",  "title":"manifest.json (standalone PWA)",          "status":"ready-for-design", "sprint":"Sprint 2", "notes":"display:standalone, theme_color:#000000; overlaps E1-1/E5-1 — do all together" },
+  { "id":"B1-3",  "epic":"B1",  "title":"Apple PWA meta tags",                     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"apple-mobile-web-app-capable/title/status-bar-style; overlaps E1-2 — do together" },
+  { "id":"B1-4",  "epic":"B1",  "title":"App icons 192/512/180px",                 "status":"idea-pond",        "sprint":"",         "notes":"Design work — black bg koi/pond motif PNG; blocks B1-2; no icons exist yet" },
+  { "id":"B1-5",  "epic":"B1",  "title":"iOS-aware fullscreen button",             "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Detect iOS + not-standalone; replace tap with Add to Home Screen tip inline" },
+  { "id":"B1-6",  "epic":"B1",  "title":"Add-to-Home-Screen banner",               "status":"backlog",          "sprint":"",         "notes":"One-time iOS-in-browser instructional banner; dismissable via localStorage" }
 ]
- /* END_TICKETS */;
+/* END_TICKETS */;
 
 const COLUMNS = [
   { id: 'idea-pond',        label: 'Idea Pond',         emoji: '💡' },
@@ -617,14 +370,21 @@ const COLUMNS = [
 ];
 
 const EPIC_COLORS = {
-  E1: '#00d2ff', E2: '#4488ff', E3: '#aa66ff',
-  E4: '#44cc88', E5: '#ff9944', E6: '#ff5599',
+  E1:  '#00d2ff', E2:  '#4488ff', E3:  '#aa66ff',
+  E4:  '#44cc88', E5:  '#ff9944', E6:  '#ff5599',
+  E7:  '#00c8a0', E8:  '#88d8ff', E9:  '#ffcc44',
+  E10: '#66ee88', E11: '#cc88ff', E12: '#ff8866',
+  B1:  '#ff5555',
 };
 
 const EPIC_NAMES = {
-  E1: 'Core Polish',       E2: 'Water & Interaction',
-  E3: 'Visual System',     E4: 'Entity Ecosystem',
-  E5: 'Deployment',        E6: 'Creator Workshop',
+  E1:  'Core Polish',        E2:  'Water & Interaction',
+  E3:  'Visual System',      E4:  'Entity Ecosystem',
+  E5:  'Deployment',         E6:  'Creator Workshop',
+  E7:  'Render Pipeline',    E8:  'Glass Polish',
+  E9:  'TV Remote / KeyNav', E10: 'Hold-to-Attract',
+  E11: 'Fish Shaders',       E12: 'Fish Food',
+  B1:  'iOS Fullscreen Bug',
 };
 
 let tickets = [];
