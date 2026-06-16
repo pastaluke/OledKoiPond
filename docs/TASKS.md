@@ -156,7 +156,63 @@ Make it shippable and playable outside the dev loop.
 | E5-3 | itch.io page copy and screenshots | ⬜ |
 | E5-4 | Orientation-change handling — gracefully reflow when phone rotates | ⬜ |
 | E5-5 | Google Play wrapper (long-term) | ⬜ |
-| E5-6 | Steam / Electron wrapper (long-term) | ⬜ |
+| E5-6 | Electron desktop app — transparent always-on-top window; fish roam across the full desktop surface (long-term) | ⬜ |
+
+**E5-6 design notes — Desktop Roaming:**
+
+The core idea: the app runs in an Electron `BrowserWindow` configured so its background
+is transparent and it sits above all other OS windows. The black pond background becomes
+invisible against the desktop, leaving only the glowing fish visible — swimming across
+the taskbar, over open documents, whatever is on screen.
+
+**Electron window config:**
+```js
+new BrowserWindow({
+  transparent:    true,
+  frame:          false,
+  alwaysOnTop:    true,
+  skipTaskbar:    true,
+  width:  screen.getPrimaryDisplay().size.width,
+  height: screen.getPrimaryDisplay().size.height,
+  webPreferences: { nodeIntegration: false, contextIsolation: true },
+});
+win.setIgnoreMouseEvents(true, { forward: true });
+// Selectively re-enable mouse events over fish hit areas:
+// ipcRenderer sends hit-test results → main calls win.setIgnoreMouseEvents(false)
+```
+
+**Fish interaction in click-through mode:**
+- Default: `setIgnoreMouseEvents(true, { forward: true })` — all clicks pass through
+  to whatever app is beneath the pond.
+- On each `mousemove`, renderer sends the cursor UV to main via IPC; main checks if
+  the cursor is over a fish or glass shape. If yes: `setIgnoreMouseEvents(false)` so
+  the next click is captured. If no: restore ignore. This creates a selective
+  "fish is clickable, empty space is transparent" behavior.
+- Feeding: click on empty desktop spawns a pellet at that position; fish swim to it.
+  (The click is captured only when the cursor happens to be over a fish at that moment
+  — on empty desktop, the click falls through to the app below as expected.)
+
+**Pond bounds in roaming mode:**
+- Hard walls at the monitor edges (fish bounce off screen boundaries).
+- Optional: treat visible OS window rectangles (queried via Electron's `screen` API
+  or a native addon) as soft obstacles — fish gently arc around app windows.
+  This is a stretch goal; flat screen-edge walls ship first.
+
+**Multi-monitor:**
+- V1: primary display only.
+- V2: fish can swim off one screen edge and reappear on the adjacent monitor
+  (requires enumerating `screen.getAllDisplays()` and spawning one window per display).
+
+**Steam distribution:**
+Once the Electron shell exists, wrapping it in a Steam build (via `electron-builder`
+or Greenworks) is straightforward. The Electron shell IS the Steam wrapper.
+
+**Affected files (when picked up):**
+- `electron/main.js` (new) — BrowserWindow config, IPC hit-test handler
+- `electron/preload.js` (new) — IPC bridge
+- `src/main.js` — detect `window.__ELECTRON__` flag; expand canvas to `screen.*` size;
+  send cursor position to main process each frame
+- `package.json` — add `electron`, `electron-builder` dev deps
 
 ---
 
