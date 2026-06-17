@@ -80,9 +80,9 @@ uniforms. One shader program; uniforms gate each effect on/off.
 | Step | Story | Status |
 |------|-------|--------|
 | 1 | **WebGL compositor** — Canvas2D pond as texture; fullscreen quad; chroma-key black→transparent; Y-flip in vertex shader | ✅ Done |
-| 2 | **Water surface — simple mode** — CPU wave equation (2D discrete, damping ≈ 0.97); fish inject energy proportional to speed; output: per-cell brightness tint drawn over pond canvas before compositor upload | ⬜ |
+| 2 | **Water surface — FluidSim + tint overlay** — CPU wave equation, double-buffered; V-wake fish injection; tint drawn on Canvas2D; wave data simultaneously available for GPU pass. See E7-2 below. | ⬜ |
 | 3 | **Glass edge shader** — chromatic aberration in border band; R/G/B displaced along inward edge normal at 1.5×/1.0×/0.5×; `uBorderPx` driven by `border.width × scale` | ✅ Done |
-| 4 | **Water refractive mode** — wave normals → UV displacement function in fragment shader; replaces simple tint with actual texture distortion; shares displacement math with Step 3/7 | ⬜ |
+| 4 | **Water refractive mode** — upload wave heights as GPU texture; surface-normal-derived UV displacement in frag shader; wave crests contribute to `envLight()` specular. See E7-4 below. | ⬜ |
 | 5 | **Boundary object + camera** — separate soft-border `Boundary` class; hard/soft toggle in menu; optional camera/viewport sub-region (pond smaller than full screen) | 🔶 Partial — hard-border toggle done; Boundary class + camera not yet |
 | 6 | **Display filter shaders** — named filter presets selectable in Display menu: `none` / `lcd` (RGB subpixel grid) / `gbc` (4-shade quantised + palette) / `game-watch` (1-bit dither); each a uniform-gated branch in the frag shader | ⬜ |
 | 7 | **Glass UI panel** — same `edgeSample(uv, norm, str)` function as Step 3 but applied to the menu panel region (non-zero pixels beneath → displaced glass refraction); shares displacement function with border | ⬜ |
@@ -98,6 +98,313 @@ vec4 glassShift(sampler2D tex, vec2 uv, vec2 norm, float str, vec2 px) {
 ```
 
 ---
+
+#### E7-2 — Water surface: FluidSim + tint overlay  ⬜
+
+**Architecture decisions (2026-06-16):**
+- Both visual modes (Canvas2D tint + GPU refraction) built together and made independently toggleable. Wave data is always computed so both can run simultaneously.
+- V-wake directional injection behind each fish (not simple point injection).
+- Grid resolution configurable at runtime via menu (world-unit or display-cell).
+- Edge mode user-selectable: reflect / absorb / mostly-absorb-slight-reflect.
+- No hardcoded constants — all tuning parameters exposed in a Water section in the menu.
+
+---
+
+**New file: `src/fluid/fluid-sim.js`**
+
+```js
+export class FluidSim {
+  constructor(grid) {
+    this.grid = grid;
+    // All fields are menu-tunable — no magic numbers.
+    this.enabled       = true;
+    this.damping       = 0.97;          // 0.90–0.99; lower = faster decay
+    this.edgeMode      = 'partial';     // 'reflect' | 'absorb' | 'partial'
+    this.partialCoeff  = 0.10;          // 0.0–0.50; how much energy reflects back
+    this.resolution    = 'world';       // 'world' | 'display'
+    this.tapStrength   = 0.9;           // 0.0–1.0
+    this.wakeStrength  = 0.4;           // 0.0–1.0
+    this.wakeAngleDeg  = 19.5;          // 10–30; Kelvin default is 19.5°
+    this.wakePoints    = 4;             // points per arm; 2–6
+    this.wakeLengthMul = 2.0;           // wake arm length in fish.length multiples
+
+    // Tint overlay (Canvas2D)
+    this.tintEnabled   = true;
+    this.tintR = 180; this.tintG = 210; this.tintB = 255;
+    this.tintMaxAlpha  = 5;             // 0–255; ~2% at 5 on OLED
+    this.tintThreshold = 0.02;          // cells below this are not drawn
+
+    this._curr = null; this._prev = null;
+    this._w = 0; this._h = 0; this._mult = 1;
+    this._allocate();
+  }
+
+  _allocate() {
+    this._mult = this.resolution === 'display' ? this.grid.density : 1;
+    this._w    = Math.ceil(this.grid.logicalW * this._mult);
+    this._h    = Math.ceil(this.grid.logicalH * this._mult);
+    this._curr = new Float32Array(this._w * this._h);
+    this._prev = new Float32Array(this._w * this._h);
+  }
+
+  _idx(x, y) { return y * this._w + x; }
+
+  inject(lx, ly, strength) {
+    const gx = Math.round(lx * this._mult);
+    const gy = Math.round(ly * this._mult);
+    if (gx < 0 || gx >= this._w || gy < 0 || gy >= this._h) return;
+    const i = this._idx(gx, gy);
+    this._curr[i] = Math.min(1, this._curr[i] + strength);
+    // Spread to cardinal neighbors at half strength for softer injection point:
+    for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nx = gx + dx, ny = gy + dy;
+      if (nx >= 0 && nx < this._w && ny >= 0 && ny < this._h)
+        this._curr[this._idx(nx, ny)] = Math.min(1, this._curr[this._idx(nx, ny)] + strength * 0.5);
+    }
+  }
+
+  injectVWake(fish) {
+    const vx = fish.vx ?? 0, vy = fish.vy ?? 0;
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed < 0.05) return;
+    const angle     = Math.atan2(vy, vx);
+    const wakeRad   = this.wakeAngleDeg * Math.PI / 180;
+    const wakeLen   = (fish.length ?? 8) * this.wakeLengthMul;
+    const str       = Math.min(speed / 5.0, 1.0) * this.wakeStrength;
+    for (let i = 1; i <= this.wakePoints; i++) {
+      const t    = i / this.wakePoints;
+      const dist = wakeLen * t;
+      const fade = 1 - t * 0.6;    // strength tapers toward wake tips
+      for (const sign of [-1, 1]) { // left and right arms
+        const a = angle + Math.PI + sign * wakeRad;
+        this.inject(fish.x + Math.cos(a) * dist, fish.y + Math.sin(a) * dist, str * fade);
+      }
+    }
+  }
+
+  update(deltaMs, entities) {
+    if (!this.enabled) return;
+    const { _w: W, _h: H, damping } = this;
+    const curr = this._curr, prev = this._prev;
+    const next = new Float32Array(W * H);
+
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        next[i] = Math.max(-1, Math.min(1,
+          2 * curr[i] - prev[i] + damping * (
+            curr[(y-1)*W+x] + curr[(y+1)*W+x] +
+            curr[y*W+(x-1)] + curr[y*W+(x+1)] - 4 * curr[i]
+          )
+        ));
+      }
+    }
+
+    // Edge handling
+    const coeff = this.edgeMode === 'reflect' ? -1.0
+                : this.edgeMode === 'absorb'  ?  0.0
+                :                           -this.partialCoeff;  // 'partial'
+    for (let x = 0; x < W; x++) {
+      next[0 * W + x]       = next[1 * W + x] * -coeff;     // top
+      next[(H-1) * W + x]   = next[(H-2) * W + x] * -coeff; // bottom
+    }
+    for (let y = 0; y < H; y++) {
+      next[y * W + 0]       = next[y * W + 1] * -coeff;     // left
+      next[y * W + (W-1)]   = next[y * W + (W-2)] * -coeff; // right
+    }
+
+    // Inject fish V-wakes
+    for (const entity of entities) this.injectVWake(entity);
+
+    this._prev = curr;
+    this._curr = next;
+  }
+
+  drawTint(grid) {
+    if (!this.tintEnabled || !this.enabled) return;
+    const { _curr: curr, _w: W, _h: H, _mult: mult } = this;
+    const cellPx = grid.cellScale / mult;
+    const { tintR: r, tintG: g, tintB: b, tintThreshold, tintMaxAlpha } = this;
+    const ctx = grid.ctx;
+    ctx.save();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const v = Math.abs(curr[y * W + x]);
+        if (v < tintThreshold) continue;
+        const alpha = Math.min(v, 1) * tintMaxAlpha / 255;
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.fillRect(x * cellPx, y * cellPx, Math.ceil(cellPx), Math.ceil(cellPx));
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Returns the current wave buffer for GPU upload (E7-4). */
+  getBuffer() { return this._curr; }
+  get width()  { return this._w; }
+  get height() { return this._h; }
+
+  /** Reallocate when grid is resized or resolution setting changes. */
+  onResize() { this._allocate(); }
+}
+```
+
+---
+
+**`main.js` integration:**
+
+```js
+import { FluidSim } from './fluid/fluid-sim.js';
+// ...
+const fluidSim = new FluidSim(grid);
+
+// In frame():
+fluidSim.update(deltaMs, sim.entities);
+sim.draw();
+fluidSim.drawTint(grid);   // after sim.draw, before WebGL upload
+grid.drawBorder();
+compositor.frame(...);     // compositor.frame also uploads wave texture (E7-4)
+```
+
+**Tap injection (`main.js` tap handler):**
+```js
+// In the quick-tap branch (currently calls _recolorNearest):
+fluidSim.inject(lx, ly, fluidSim.tapStrength);
+```
+
+---
+
+**Menu additions — new `<details>` section "Water":**
+
+| Slider / Control | Property | Range | Default |
+|-----------------|----------|-------|---------|
+| Water sim toggle | `fluidSim.enabled` | bool | true |
+| Resolution | `fluidSim.resolution` | world / display | world |
+| Damping | `fluidSim.damping` | 0.90–0.99 step 0.005 | 0.97 |
+| Edge mode | `fluidSim.edgeMode` | reflect / absorb / partial | partial |
+| Partial reflect | `fluidSim.partialCoeff` | 0.0–0.50 step 0.01 | 0.10 |
+| Tap strength | `fluidSim.tapStrength` | 0.0–1.0 step 0.05 | 0.90 |
+| Fish wake strength | `fluidSim.wakeStrength` | 0.0–1.0 step 0.05 | 0.40 |
+| Wake angle | `fluidSim.wakeAngleDeg` | 10–30 step 0.5 | 19.5 |
+| **— Tint overlay —** | | | |
+| Tint toggle | `fluidSim.tintEnabled` | bool | true |
+| Tint color | `fluidSim.tintR/G/B` | color picker | 180,210,255 |
+| Tint max alpha | `fluidSim.tintMaxAlpha` | 1–20 step 1 | 5 |
+| Tint threshold | `fluidSim.tintThreshold` | 0.01–0.10 step 0.01 | 0.02 |
+| **— Refraction (GPU) —** | | | |
+| Refraction toggle | `compositor.waterEnabled` | bool | false (until E7-4) |
+| Wave strength | `compositor.waterRefr` | 0.001–0.020 step 0.001 | 0.006 |
+| Wave specular | `compositor.waveSpecStr` | 0.0–0.20 step 0.01 | 0.05 |
+
+*Persist all in a `water` blob in `save()`. `fluidSim` receives it via `applySettings()`.*
+
+---
+
+**E2 cross-reference:** `E2-2` in the interaction epic describes the same `FluidSim` class — implement once here (E7-2). `E2-3` (fish ripple injection) is the V-wake above, already included. `E2-4` (tint overlay renderer) is `drawTint()` above. `E2-5` (tap injection) is the tap handler above.
+
+**Affected files:**
+`src/fluid/fluid-sim.js` (new), `src/main.js`, `src/ui/menu.js`, `index.html` (Water section CSS)
+
+---
+
+#### E7-4 — Water refractive mode  ⬜
+
+Uploads the `FluidSim` wave buffer as a WebGL texture each frame. The fragment shader derives
+surface normals from the wave height gradient and displaces UV sampling — so the scene beneath
+the water physically bends. Wave crests also feed into `envLight()` so glass shapes sparkle
+brighter over choppy water.
+
+**Note:** `FluidSim` (E7-2) must ship first. `compositor.waterEnabled` starts as `false`; this
+story enables it and adds the frag shader branch.
+
+---
+
+**New compositor uniforms:**
+```js
+// In constructor:
+this._uWaterEnabled  = loc('uWaterEnabled');
+this._uWaterRefr     = loc('uWaterRefr');
+this._uWaveSpecStr   = loc('uWaveSpecStr');
+this._uWaveTex       = loc('uWaveTex');
+gl.uniform1i(this._uWaveTex, 1);           // texture unit 1
+gl.uniform1i(this._uWaterEnabled, 0);
+gl.uniform1f(this._uWaterRefr, 0.006);
+gl.uniform1f(this._uWaveSpecStr, 0.05);
+
+// New wave texture:
+this._waveTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, this._waveTex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+```
+
+**`frame()` — upload wave texture:**
+```js
+frame(bandPx = 0, fluidSim = null) {
+  const gl = this._gl;
+  // ... existing pond texture upload on unit 0 ...
+
+  if (fluidSim && this._waterEnabled) {
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this._waveTex);
+    // Upload Float32 wave buffer as luminance texture:
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, fluidSim.width, fluidSim.height,
+                  0, gl.LUMINANCE, gl.FLOAT, fluidSim.getBuffer());
+    gl.activeTexture(gl.TEXTURE0);
+  }
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+```
+> WebGL 1 requires `OES_texture_float` extension for float textures. Fallback: quantise the
+> buffer to `Uint8Array` (multiply by 127 + 128) and upload as `gl.UNSIGNED_BYTE` — loses
+> sub-pixel precision but runs on every device. Detect on startup; use float if available.
+
+**FRAG shader additions:**
+```glsl
+uniform sampler2D uWaveTex;
+uniform bool      uWaterEnabled;
+uniform float     uWaterRefr;
+uniform float     uWaveSpecStr;
+```
+
+After the pond texture sample `vec4 c = texture2D(uTex, uv)` and before the border block:
+```glsl
+if (uWaterEnabled) {
+  float h  = texture2D(uWaveTex, uv).r * 2.0 - 1.0;  // 0..1 → -1..1
+  float hR = texture2D(uWaveTex, uv + vec2(px.x, 0.0)).r * 2.0 - 1.0;
+  float hD = texture2D(uWaveTex, uv + vec2(0.0, px.y)).r * 2.0 - 1.0;
+  vec2 wNorm = vec2(h - hR, h - hD);  // surface gradient → normal approx
+  vec2 dispUV = clamp(uv + wNorm * abs(h) * uWaterRefr, vec2(0.001), vec2(0.999));
+  c = texture2D(uTex, dispUV);
+}
+```
+
+Uncomment the E7-4 hook already present in `envLight()`:
+```glsl
+float envLight(vec2 fieldUV) {
+  float h = 0.0;
+  h += smoothstep(0.45, 0.0, distance(fieldUV, vec2(0.22, 0.25))) * 0.14;
+  h += smoothstep(0.55, 0.0, distance(fieldUV, vec2(0.75, 0.38))) * 0.10;
+  h += smoothstep(0.40, 0.0, distance(fieldUV, vec2(0.52, 0.72))) * 0.08;
+  h += texture2D(uWaveTex, fieldUV).r * uWaveSpecStr;  // ← uncomment this line
+  return h;
+}
+```
+This makes every glass shape specular respond to wave crests — fish swim past →
+waves propagate → glass shapes sparkle brighter over the disturbed water.
+
+> **`OES_texture_float` fallback path:** if the extension is unavailable, upload the wave
+> buffer as `UNSIGNED_BYTE` (scale `float → 0..255`, unpack in shader with `/127.0 - 1.0`).
+> Both paths should produce identical visual results. Check once at startup; store a flag.
+
+**`main.js` — pass `fluidSim` to compositor:**
+```js
+compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0, fluidSim);
+```
+
+**Affected files:** `src/renderer/compositor.js`, `src/main.js`
 
 ### E2 · Water & Interaction Layer
 The fluid simulation and tap/touch feedback that make the pond feel alive.
