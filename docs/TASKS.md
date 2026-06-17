@@ -80,9 +80,9 @@ uniforms. One shader program; uniforms gate each effect on/off.
 | Step | Story | Status |
 |------|-------|--------|
 | 1 | **WebGL compositor** — Canvas2D pond as texture; fullscreen quad; chroma-key black→transparent; Y-flip in vertex shader | ✅ Done |
-| 2 | **Water surface — FluidSim + tint overlay** — CPU wave equation, double-buffered; V-wake fish injection; tint drawn on Canvas2D; wave data simultaneously available for GPU pass. See E7-2 below. | ⬜ |
+| 2 | **Water surface — FluidSim + tint overlay** — CPU wave equation, double-buffered; V-wake fish injection; tint drawn on Canvas2D; wave data simultaneously available for GPU pass. See E7-2 below. | 🔶 Implemented, parked for tuning |
 | 3 | **Glass edge shader** — chromatic aberration in border band; R/G/B displaced along inward edge normal at 1.5×/1.0×/0.5×; `uBorderPx` driven by `border.width × scale` | ✅ Done |
-| 4 | **Water refractive mode** — upload wave heights as GPU texture; surface-normal-derived UV displacement in frag shader; wave crests contribute to `envLight()` specular. See E7-4 below. | ⬜ |
+| 4 | **Water refractive mode** — upload wave heights as GPU texture; surface-normal-derived UV displacement in frag shader; wave crests contribute to `envLight()` specular. See E7-4 below. | 🔶 Implemented, parked for tuning |
 | 5 | **Boundary object + camera** — separate soft-border `Boundary` class; hard/soft toggle in menu; optional camera/viewport sub-region (pond smaller than full screen) | 🔶 Partial — hard-border toggle done; Boundary class + camera not yet |
 | 6 | **Display filter shaders** — named filter presets selectable in Display menu: `none` / `lcd` (RGB subpixel grid) / `gbc` (4-shade quantised + palette) / `game-watch` (1-bit dither); each a uniform-gated branch in the frag shader | ⬜ |
 | 7 | **Glass UI panel** — same `edgeSample(uv, norm, str)` function as Step 3 but applied to the menu panel region (non-zero pixels beneath → displaced glass refraction); shares displacement function with border | ⬜ |
@@ -99,7 +99,9 @@ vec4 glassShift(sampler2D tex, vec2 uv, vec2 norm, float str, vec2 px) {
 
 ---
 
-#### E7-2 — Water surface: FluidSim + tint overlay  ⬜
+#### E7-2 — Water surface: FluidSim + tint overlay  🔶 Parked
+
+> **Status (2026-06-17):** First implementation shipped. Wave equation, V-wakes, Canvas2D tint, and GPU refraction pass all live. Parked for now — needs visual tuning pass before being considered done. Resume when water is re-prioritised.
 
 **Architecture decisions (2026-06-16):**
 - Both visual modes (Canvas2D tint + GPU refraction) built together and made independently toggleable. Wave data is always computed so both can run simultaneously.
@@ -307,7 +309,9 @@ fluidSim.inject(lx, ly, fluidSim.tapStrength);
 
 ---
 
-#### E7-4 — Water refractive mode  ⬜
+#### E7-4 — Water refractive mode  🔶 Parked
+
+> **Status (2026-06-17):** Implemented alongside E7-2. GPU wave texture upload (OES_texture_float with Uint8 fallback), UV displacement in fragment shader, wave-crest specular in `envLight()`. Parked with E7-2 — needs tuning pass.
 
 Uploads the `FluidSim` wave buffer as a WebGL texture each frame. The fragment shader derives
 surface normals from the wave height gradient and displaces UV sampling — so the scene beneath
