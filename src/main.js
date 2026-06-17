@@ -12,6 +12,7 @@ import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index
 import { Compositor } from './renderer/compositor.js';
 import { GlassShapes } from './renderer/glass-shapes.js';
 import { KeyNavManager } from './ui/key-nav.js';
+import { FluidSim   } from './fluid/fluid-sim.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -26,8 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const grid    = new Grid(canvas, { density: DISPLAY_DENSITY });
   grid.setWebglCanvas(glCanvas);
-  const compositor = new Compositor(canvas, glCanvas);
+  const compositor  = new Compositor(canvas, glCanvas);
   const glassShapes = new GlassShapes(compositor);
+  const fluidSim    = new FluidSim(grid);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
   overlay.glassShapes = glassShapes;
@@ -58,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
       entity.x *= scaleX;
       entity.y *= scaleY;
     }
+    fluidSim.resize();
     overlay.sync();
     prevW = grid.logicalW;
     prevH = grid.logicalH;
@@ -103,6 +106,9 @@ document.addEventListener('DOMContentLoaded', () => {
       glCanvas.setPointerCapture(e.pointerId);
       return;
     }
+
+    // Tap injects a water disturbance at the touch point.
+    fluidSim.inject(lx, ly, fluidSim.tapStrength);
 
     // Hold-to-attract: capture pointer and start 200ms timer.
     _attractPos.x = lx;
@@ -158,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav });
+  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, fluidSim });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
@@ -169,11 +175,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     grid.clear();
     sim.update(deltaMs);
+    fluidSim.update(deltaMs, sim.entities);
     sim.draw();
+    fluidSim.drawTint(grid);
     grid.drawBorder();
     keyNav.frame(deltaMs / 1000);
     overlay.draw(sim.entities);
     glassShapes.update(deltaMs, compositor.aspect);
+    if (fluidSim.refrEnabled) {
+      const { w, h } = fluidSim.getDimensions();
+      compositor.uploadWave(fluidSim.getBuffer(), w, h);
+    }
     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);
 
     requestAnimationFrame(frame);

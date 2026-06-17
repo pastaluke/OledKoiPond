@@ -23,7 +23,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../grid.js').Grid} refs.grid
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav }) {
+export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav, fluidSim }) {
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
@@ -110,6 +110,36 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       <summary>Display</summary>
       <div class="menu-rows">
         <div id="display-sliders"></div>
+      </div>
+    </details>
+    <details>
+      <summary>Water</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Tint overlay</span>
+          <input type="checkbox" id="toggle-water-tint">
+        </label>
+        <label class="menu-row">
+          <span>GPU refraction</span>
+          <input type="checkbox" id="toggle-water-refr">
+        </label>
+        <label class="menu-row">
+          <span>Edge mode</span>
+          <select id="water-edge-sel" class="menu-select">
+            <option value="partial">Mostly absorb</option>
+            <option value="absorb">Full absorb</option>
+            <option value="reflect">Full reflect</option>
+          </select>
+        </label>
+        <label class="menu-row">
+          <span>Resolution</span>
+          <select id="water-res-sel" class="menu-select">
+            <option value="world">Full</option>
+            <option value="half">Half</option>
+            <option value="quarter">Quarter</option>
+          </select>
+        </label>
+        <div id="water-sliders"></div>
       </div>
     </details>
     <details>
@@ -229,6 +259,17 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
                borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular,
                specularMode: compositor.specularMode, specularCurve: compositor.specularCurve },
     glassShapes: glassShapes.serialize(),
+    water: fluidSim ? {
+      tintEnabled: fluidSim.tintEnabled, refrEnabled: fluidSim.refrEnabled,
+      damping: fluidSim.damping, edgeMode: fluidSim.edgeMode,
+      partialCoeff: fluidSim.partialCoeff, resolution: fluidSim.resolution,
+      tapStrength: fluidSim.tapStrength, wakeStrength: fluidSim.wakeStrength,
+      wakeAngleDeg: fluidSim.wakeAngleDeg, wakePoints: fluidSim.wakePoints,
+      wakeLengthMul: fluidSim.wakeLengthMul,
+      tintR: fluidSim.tintR, tintG: fluidSim.tintG, tintB: fluidSim.tintB,
+      tintMaxAlpha: fluidSim.tintMaxAlpha, tintThreshold: fluidSim.tintThreshold,
+      refrStrength: fluidSim.refrStrength, specStrength: fluidSim.specStrength,
+    } : undefined,
   });
 
   function setFishCount(n) {
@@ -300,6 +341,31 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       FishClass.SHAPE = liveShape;
     }
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
+    if (persisted.water && fluidSim) {
+      const wv = persisted.water;
+      if (typeof wv.tintEnabled   === 'boolean')  fluidSim.tintEnabled   = wv.tintEnabled;
+      if (typeof wv.refrEnabled   === 'boolean')  fluidSim.refrEnabled   = wv.refrEnabled;
+      if (Number.isFinite(wv.damping))            fluidSim.damping        = clamp(wv.damping, 0.80, 0.999);
+      if (typeof wv.edgeMode      === 'string')   fluidSim.edgeMode       = wv.edgeMode;
+      if (Number.isFinite(wv.partialCoeff))       fluidSim.partialCoeff   = clamp(wv.partialCoeff, 0, 0.5);
+      if (typeof wv.resolution    === 'string')   fluidSim.resolution     = wv.resolution;
+      if (Number.isFinite(wv.tapStrength))        fluidSim.tapStrength    = clamp(wv.tapStrength, 0, 2);
+      if (Number.isFinite(wv.wakeStrength))       fluidSim.wakeStrength   = clamp(wv.wakeStrength, 0, 1);
+      if (Number.isFinite(wv.wakeAngleDeg))       fluidSim.wakeAngleDeg   = clamp(wv.wakeAngleDeg, 1, 60);
+      if (Number.isFinite(wv.wakePoints))         fluidSim.wakePoints     = clamp(Math.round(wv.wakePoints), 1, 8);
+      if (Number.isFinite(wv.wakeLengthMul))      fluidSim.wakeLengthMul  = clamp(wv.wakeLengthMul, 0.5, 5);
+      if (Number.isFinite(wv.tintR))             fluidSim.tintR           = clamp(Math.round(wv.tintR), 0, 255);
+      if (Number.isFinite(wv.tintG))             fluidSim.tintG           = clamp(Math.round(wv.tintG), 0, 255);
+      if (Number.isFinite(wv.tintB))             fluidSim.tintB           = clamp(Math.round(wv.tintB), 0, 255);
+      if (Number.isFinite(wv.tintMaxAlpha))       fluidSim.tintMaxAlpha   = clamp(wv.tintMaxAlpha, 0, 20);
+      if (Number.isFinite(wv.tintThreshold))      fluidSim.tintThreshold  = clamp(wv.tintThreshold, 0.001, 0.5);
+      if (Number.isFinite(wv.refrStrength))       fluidSim.refrStrength   = clamp(wv.refrStrength, 0, 0.05);
+      if (Number.isFinite(wv.specStrength))       fluidSim.specStrength   = clamp(wv.specStrength, 0, 0.5);
+      fluidSim.resize();
+      if (fluidSim.refrEnabled) {
+        compositor.setWater(true, { refrStrength: fluidSim.refrStrength, specStrength: fluidSim.specStrength });
+      }
+    }
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -861,6 +927,110 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     getMax: () => ZOOM_BASE / WORLD_RANGE.min,
   });
   displayHost.appendChild(worldRow);
+
+  // ── Water controls ───────────────────────────────────────────────────────────
+  if (fluidSim) {
+    const waterSliderHost = panel.querySelector('#water-sliders');
+    const waterTintToggle = panel.querySelector('#toggle-water-tint');
+    const waterRefrToggle = panel.querySelector('#toggle-water-refr');
+    const waterEdgeSel    = panel.querySelector('#water-edge-sel');
+    const waterResSel     = panel.querySelector('#water-res-sel');
+
+    waterTintToggle.checked = fluidSim.tintEnabled;
+    waterRefrToggle.checked = fluidSim.refrEnabled;
+    waterEdgeSel.value      = fluidSim.edgeMode;
+    waterResSel.value       = fluidSim.resolution;
+
+    waterTintToggle.addEventListener('change', (e) => { fluidSim.tintEnabled = e.target.checked; save(); });
+    waterRefrToggle.addEventListener('change', (e) => {
+      fluidSim.refrEnabled = e.target.checked;
+      compositor.setWater(e.target.checked, { refrStrength: fluidSim.refrStrength, specStrength: fluidSim.specStrength });
+      save();
+    });
+    waterEdgeSel.addEventListener('change', (e) => { fluidSim.edgeMode = e.target.value; save(); });
+    waterResSel.addEventListener('change', (e) => { fluidSim.resolution = e.target.value; fluidSim.resize(); save(); });
+
+    const mkW = (cfg) => waterSliderHost.appendChild(makeRow({ hasBounds: false, ...cfg }).row);
+
+    mkW({
+      label: 'Damping', decimals: 3, valueStep: 0.001,
+      getVal: () => fluidSim.damping, getMin: () => 0.80, getMax: () => 0.999,
+      setVal: (v) => { fluidSim.damping = clamp(v, 0.80, 0.999); save(); },
+    });
+    mkW({
+      label: 'Edge absorb', decimals: 2, valueStep: 0.01,
+      getVal: () => fluidSim.partialCoeff, getMin: () => 0, getMax: () => 0.5,
+      setVal: (v) => { fluidSim.partialCoeff = clamp(v, 0, 0.5); save(); },
+    });
+    mkW({
+      label: 'Tap strength', decimals: 2, valueStep: 0.05,
+      getVal: () => fluidSim.tapStrength, getMin: () => 0, getMax: () => 2.0,
+      setVal: (v) => { fluidSim.tapStrength = clamp(v, 0, 2.0); save(); },
+    });
+    mkW({
+      label: 'Wake strength', decimals: 2, valueStep: 0.05,
+      getVal: () => fluidSim.wakeStrength, getMin: () => 0, getMax: () => 1.0,
+      setVal: (v) => { fluidSim.wakeStrength = clamp(v, 0, 1.0); save(); },
+    });
+    mkW({
+      label: 'Wake angle °', decimals: 1, valueStep: 0.5,
+      getVal: () => fluidSim.wakeAngleDeg, getMin: () => 1, getMax: () => 60,
+      setVal: (v) => { fluidSim.wakeAngleDeg = clamp(v, 1, 60); save(); },
+    });
+    mkW({
+      label: 'Wake length', decimals: 2, valueStep: 0.1,
+      getVal: () => fluidSim.wakeLengthMul, getMin: () => 0.5, getMax: () => 5.0,
+      setVal: (v) => { fluidSim.wakeLengthMul = clamp(v, 0.5, 5.0); save(); },
+    });
+    mkW({
+      label: 'Wake points', decimals: 0, valueStep: 1,
+      getVal: () => fluidSim.wakePoints, getMin: () => 1, getMax: () => 8,
+      setVal: (v) => { fluidSim.wakePoints = clamp(Math.round(v), 1, 8); save(); },
+    });
+    mkW({
+      label: 'Tint alpha', decimals: 1, valueStep: 0.5,
+      getVal: () => fluidSim.tintMaxAlpha, getMin: () => 0, getMax: () => 20,
+      setVal: (v) => { fluidSim.tintMaxAlpha = clamp(v, 0, 20); save(); },
+    });
+    mkW({
+      label: 'Tint threshold', decimals: 3, valueStep: 0.005,
+      getVal: () => fluidSim.tintThreshold, getMin: () => 0.001, getMax: () => 0.3,
+      setVal: (v) => { fluidSim.tintThreshold = clamp(v, 0.001, 0.3); save(); },
+    });
+    mkW({
+      label: 'Tint R', decimals: 0, valueStep: 1,
+      getVal: () => fluidSim.tintR, getMin: () => 0, getMax: () => 255,
+      setVal: (v) => { fluidSim.tintR = clamp(Math.round(v), 0, 255); save(); },
+    });
+    mkW({
+      label: 'Tint G', decimals: 0, valueStep: 1,
+      getVal: () => fluidSim.tintG, getMin: () => 0, getMax: () => 255,
+      setVal: (v) => { fluidSim.tintG = clamp(Math.round(v), 0, 255); save(); },
+    });
+    mkW({
+      label: 'Tint B', decimals: 0, valueStep: 1,
+      getVal: () => fluidSim.tintB, getMin: () => 0, getMax: () => 255,
+      setVal: (v) => { fluidSim.tintB = clamp(Math.round(v), 0, 255); save(); },
+    });
+    mkW({
+      label: 'Refraction', decimals: 4, valueStep: 0.001,
+      getVal: () => fluidSim.refrStrength, getMin: () => 0, getMax: () => 0.05,
+      setVal: (v) => {
+        fluidSim.refrStrength = clamp(v, 0, 0.05);
+        if (fluidSim.refrEnabled) compositor.setWater(true, { refrStrength: fluidSim.refrStrength, specStrength: fluidSim.specStrength });
+        save();
+      },
+    });
+    mkW({
+      label: 'Spec strength', decimals: 3, valueStep: 0.01,
+      getVal: () => fluidSim.specStrength, getMin: () => 0, getMax: () => 0.5,
+      setVal: (v) => {
+        fluidSim.specStrength = clamp(v, 0, 0.5);
+        if (fluidSim.refrEnabled) compositor.setWater(true, { refrStrength: fluidSim.refrStrength, specStrength: fluidSim.specStrength });
+        save();
+      },
+    });
+  }
 
   // ── Border controls ──────────────────────────────────────────────────────────
   const borderHost   = panel.querySelector('#border-sliders');

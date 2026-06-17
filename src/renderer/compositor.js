@@ -54,6 +54,12 @@ uniform vec2 uShapeC[MAX_SHAPES];
 uniform vec4 uShapeD[MAX_SHAPES];
 uniform vec4 uShapeE[MAX_SHAPES];
 
+// Water wave simulation — E7-4
+uniform sampler2D uWaveTex;
+uniform bool  uWaterEnabled;
+uniform float uWaterRefr;
+uniform float uWaveSpecStr;
+
 // ── Shared utilities ───────────────────────────────────────────────────────────
 
 float rand2(vec2 st) {
@@ -87,12 +93,16 @@ vec4 borderShift(vec2 uv, vec2 dir, float t, float chromatic, float refraction, 
 // Static light environment sampled by position, not time.
 // Three fixed soft sources at asymmetric positions — different areas of the
 // screen reveal different catches when the glass moves over them.
-// E7-4 hook: add uWaveTex sampling here when the wave sim lands.
+// Wave crests (E7-4) add a specular highlight scaled by uWaveSpecStr.
 float envLight(vec2 fieldUV) {
   float h = 0.0;
   h += smoothstep(0.45, 0.0, distance(fieldUV, vec2(0.22, 0.25))) * 0.14;
   h += smoothstep(0.55, 0.0, distance(fieldUV, vec2(0.75, 0.38))) * 0.10;
   h += smoothstep(0.40, 0.0, distance(fieldUV, vec2(0.52, 0.72))) * 0.08;
+  if (uWaterEnabled && uWaveSpecStr > 0.0) {
+    float waveH = texture2D(uWaveTex, fieldUV).r * 2.0 - 1.0;
+    h += max(0.0, waveH) * uWaveSpecStr;
+  }
   return h;
 }
 
@@ -101,6 +111,16 @@ void main() {
   vec2 px  = 1.0 / uRes;
   float aspect = uRes.x / uRes.y;
   vec4 c = texture2D(uTex, uv);
+
+  // ── Water wave refraction (E7-4) — UV displacement from wave surface normals ────
+  if (uWaterEnabled) {
+    float h  = texture2D(uWaveTex, uv).r * 2.0 - 1.0;
+    float hR = texture2D(uWaveTex, uv + vec2(px.x, 0.0)).r * 2.0 - 1.0;
+    float hD = texture2D(uWaveTex, uv + vec2(0.0, px.y)).r * 2.0 - 1.0;
+    vec2 wNorm  = vec2(h - hR, h - hD);
+    vec2 dispUV = clamp(uv + wNorm * abs(h) * uWaterRefr, vec2(0.001), vec2(0.999));
+    c = texture2D(uTex, dispUV);
+  }
 
   // ── Border glass edge — displacement + chromatic band hugging the screen rectangle ─
   if (uGlassEdge && uBorderPx > 0.0) {
@@ -260,6 +280,7 @@ export class Compositor {
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
+    // Texture unit 0 — pond canvas
     const tex = this._tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -267,8 +288,24 @@ export class Compositor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
+    // Texture unit 1 — wave amplitude buffer (E7-4)
+    // OES_texture_float for float storage; fallback packs to Uint8Array.
+    this._floatTexSupported = !!gl.getExtension('OES_texture_float');
+    gl.activeTexture(gl.TEXTURE1);
+    const waveTex = this._waveTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, waveTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    // Seed 1×1 black pixel so it's valid before first wave upload
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array([128]));
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+
     const loc = (name) => gl.getUniformLocation(this._prog, name);
     gl.uniform1i(loc('uTex'), 0);
+    gl.uniform1i(loc('uWaveTex'), 1);
     this._uChromaKey  = loc('uChromaKey');
     this._uThreshold  = loc('uThreshold');
     this._uRes        = loc('uRes');
@@ -281,12 +318,15 @@ export class Compositor {
     this._uBorderSpecular = loc('uBorderSpecular');
     this._uSpecularMode   = loc('uSpecularMode');
     this._uSpecularCurve  = loc('uSpecularCurve');
-    this._uShapeCount = loc('uShapeCount');
-    this._uShapeA     = loc('uShapeA[0]');
-    this._uShapeB     = loc('uShapeB[0]');
-    this._uShapeC     = loc('uShapeC[0]');
-    this._uShapeD     = loc('uShapeD[0]');
-    this._uShapeE     = loc('uShapeE[0]');
+    this._uShapeCount   = loc('uShapeCount');
+    this._uShapeA       = loc('uShapeA[0]');
+    this._uShapeB       = loc('uShapeB[0]');
+    this._uShapeC       = loc('uShapeC[0]');
+    this._uShapeD       = loc('uShapeD[0]');
+    this._uShapeE       = loc('uShapeE[0]');
+    this._uWaterEnabled = loc('uWaterEnabled');
+    this._uWaterRefr    = loc('uWaterRefr');
+    this._uWaveSpecStr  = loc('uWaveSpecStr');
 
     gl.uniform1i(this._uChromaKey, 0);
     gl.uniform1f(this._uThreshold, 0.01);
@@ -306,6 +346,13 @@ export class Compositor {
     this._specularCurve   = 0.035;
     gl.uniform1i(this._uShapeCount, 0);
     gl.uniform4fv(this._uShapeE, new Float32Array(MAX_SHAPES * 4));
+    gl.uniform1i(this._uWaterEnabled, 0);
+    gl.uniform1f(this._uWaterRefr, 0.006);
+    gl.uniform1f(this._uWaveSpecStr, 0.0);
+    this._waterEnabled  = false;
+    this._waterRefr     = 0.006;
+    this._waterSpecStr  = 0.0;
+    this._waveW = 0; this._waveH = 0;
   }
 
   /** Aspect ratio (width / height) of the output framebuffer. */
@@ -327,6 +374,51 @@ export class Compositor {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this._pond);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
+
+  /**
+   * Upload a wave amplitude buffer as a luminance texture on unit 1.
+   * Values in buffer are assumed to be in [-1, 1]; packed to [0,1] for the shader.
+   * Shader reads:  h = texture.r * 2.0 - 1.0  to recover the original amplitude.
+   * @param {Float32Array} buffer - wave amplitudes [-1, 1]
+   * @param {number} w
+   * @param {number} h
+   */
+  uploadWave(buffer, w, h) {
+    const gl = this._gl;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this._waveTex);
+    if (this._floatTexSupported) {
+      // Pack [-1,1] → [0,1] for uniform shader decode
+      const data = new Float32Array(w * h);
+      for (let i = 0; i < data.length; i++) data[i] = buffer[i] * 0.5 + 0.5;
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.FLOAT, data);
+    } else {
+      const data = new Uint8Array(w * h);
+      for (let i = 0; i < data.length; i++) data[i] = Math.round((buffer[i] * 0.5 + 0.5) * 255);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex);
+  }
+
+  /**
+   * Enable/disable the water refraction pass and set its parameters.
+   * @param {boolean} enabled
+   * @param {{ refrStrength?: number, specStrength?: number }} [opts]
+   */
+  setWater(enabled, { refrStrength = this._waterRefr, specStrength = this._waterSpecStr } = {}) {
+    const gl = this._gl;
+    this._waterEnabled = enabled;
+    this._waterRefr    = refrStrength;
+    this._waterSpecStr = specStrength;
+    gl.uniform1i(this._uWaterEnabled, enabled ? 1 : 0);
+    gl.uniform1f(this._uWaterRefr,    refrStrength);
+    gl.uniform1f(this._uWaveSpecStr,  specStrength);
+  }
+
+  get waterEnabled()  { return this._waterEnabled; }
+  get waterRefr()     { return this._waterRefr; }
+  get waterSpecStr()  { return this._waterSpecStr; }
 
   /** Key out pure-black pixels (alpha → 0). threshold: luminance floor, default 0.01. */
   setChromaKey(enabled, threshold = 0.01) {
