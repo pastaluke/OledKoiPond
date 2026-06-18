@@ -245,7 +245,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     glassShapes: glassShapes.serialize(),
     water: rippleField ? {
       enabled: rippleField.enabled, smooth: rippleField.smooth,
-      damping: rippleField.damping, strength: rippleField.strength,
+      damping: rippleField.damping, speed: rippleField.speed,
+      strength: rippleField.strength,
       gain: rippleField.gain, maxDim: rippleField.maxDim,
       color: [...rippleField.color],
     } : undefined,
@@ -325,6 +326,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (typeof wv.enabled === 'boolean')  rippleField.enabled  = wv.enabled;
       if (typeof wv.smooth  === 'boolean')  rippleField.smooth   = wv.smooth;
       if (Number.isFinite(wv.damping))      rippleField.damping  = clamp(wv.damping, 0.80, 0.999);
+      if (Number.isFinite(wv.speed))        rippleField.speed    = clamp(wv.speed, 0.05, 0.5);
       if (Number.isFinite(wv.strength))     rippleField.strength = clamp(wv.strength, 0.1, 5);
       if (Number.isFinite(wv.gain))         rippleField.gain     = clamp(wv.gain, 20, 600);
       if (Number.isFinite(wv.maxDim))       rippleField.maxDim   = clamp(Math.round(wv.maxDim), 60, 400);
@@ -914,6 +916,12 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       infoText: 'How far ripples travel before fading. Higher = longer-lived.',
       getVal: () => rippleField.damping, getMin: () => 0.80, getMax: () => 0.999,
       setVal: (v) => { rippleField.damping = clamp(v, 0.80, 0.999); save(); },
+    });
+    mkW({
+      label: 'Wave speed', decimals: 2, valueStep: 0.01,
+      infoText: 'How fast rings travel outward. 0.5 is the fastest stable value.',
+      getVal: () => rippleField.speed, getMin: () => 0.05, getMax: () => 0.5,
+      setVal: (v) => { rippleField.speed = clamp(v, 0.05, 0.5); save(); },
     });
     mkW({
       label: 'Tap strength', decimals: 1, valueStep: 0.1,

@@ -19,6 +19,7 @@ export class RippleField {
 
     this.enabled  = true;
     this.damping  = 0.96;   // 0..1 — higher = rings travel farther before fading
+    this.speed    = 0.5;    // wave-speed coefficient C, stable for 0 < C ≤ 0.5
     this.strength = 1.0;    // amplitude injected by a tap
     this.gain     = 220;    // amplitude → alpha mapping for the render
     this.smooth   = true;   // smooth (soft) vs. crisp (blocky) upscaling
@@ -82,12 +83,16 @@ export class RippleField {
     if (!this.enabled) return;
     const cols = this._cols, rows = this._rows;
     const src = this._src, dst = this._dst, d = this.damping;
+    // Leapfrog wave step: next = 2·curr − prev + c·(neighbour_sum − 4·curr).
+    // dst[i] holds this cell's value two frames ago (prev). c = wave speed.
+    const c = this.speed, c2 = 2 - 4 * c;
 
     for (let y = 1; y < rows - 1; y++) {
       const row = y * cols;
       for (let x = 1; x < cols - 1; x++) {
         const i = row + x;
-        const val = (src[i - 1] + src[i + 1] + src[i - cols] + src[i + cols]) * 0.5 - dst[i];
+        const sum = src[i - 1] + src[i + 1] + src[i - cols] + src[i + cols];
+        const val = c2 * src[i] - dst[i] + c * sum;
         dst[i] = val * d;
       }
     }
