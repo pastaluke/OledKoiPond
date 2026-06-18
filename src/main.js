@@ -13,6 +13,7 @@ import { Compositor } from './renderer/compositor.js';
 import { GlassShapes } from './renderer/glass-shapes.js';
 import { KeyNavManager } from './ui/key-nav.js';
 import { FluidSim   } from './fluid/fluid-sim.js';
+import { RippleField } from './fluid/ripple-field.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -30,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const compositor  = new Compositor(canvas, glCanvas);
   const glassShapes = new GlassShapes(compositor);
   const fluidSim    = new FluidSim(grid);
+  const rippleField = new RippleField(grid);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
   overlay.glassShapes = glassShapes;
@@ -61,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
       entity.y *= scaleY;
     }
     fluidSim.resize();
+    rippleField.resize();
     overlay.sync();
     prevW = grid.logicalW;
     prevH = grid.logicalH;
@@ -108,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Tap injects a water disturbance at the touch point.
-    fluidSim.inject(lx, ly, fluidSim.tapStrength);
+    rippleField.inject(lx, ly);
 
     // Hold-to-attract: capture pointer and start 200ms timer.
     _attractPos.x = lx;
@@ -175,17 +178,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     grid.clear();
     sim.update(deltaMs);
-    fluidSim.update(deltaMs, sim.entities);
+    rippleField.update();
     sim.draw();
-    fluidSim.drawTint(grid);
+    rippleField.draw(grid);
     grid.drawBorder();
     keyNav.frame(deltaMs / 1000);
     overlay.draw(sim.entities);
     glassShapes.update(deltaMs, compositor.aspect);
-    if (fluidSim.refrEnabled) {
-      const { w, h } = fluidSim.getDimensions();
-      compositor.uploadWave(fluidSim.getBuffer(), w, h);
-    }
     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);
 
     requestAnimationFrame(frame);
