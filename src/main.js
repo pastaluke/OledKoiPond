@@ -12,7 +12,6 @@ import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index
 import { Compositor } from './renderer/compositor.js';
 import { GlassShapes } from './renderer/glass-shapes.js';
 import { KeyNavManager } from './ui/key-nav.js';
-import { FluidSim   } from './fluid/fluid-sim.js';
 import { RippleField } from './fluid/ripple-field.js';
 
 /** Number of koi to spawn. */
@@ -30,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
   grid.setWebglCanvas(glCanvas);
   const compositor  = new Compositor(canvas, glCanvas);
   const glassShapes = new GlassShapes(compositor);
-  const fluidSim    = new FluidSim(grid);
   const rippleField = new RippleField(grid);
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
@@ -62,7 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
       entity.x *= scaleX;
       entity.y *= scaleY;
     }
-    fluidSim.resize();
     rippleField.resize();
     overlay.sync();
     prevW = grid.logicalW;
@@ -167,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, fluidSim });
+  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, rippleField });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
