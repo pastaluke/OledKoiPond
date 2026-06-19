@@ -72,6 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let dragShape = -1, dragOffX = 0, dragOffY = 0;
   let attractHoldTimer = null;
   const _attractPos = { x: 0, y: 0 };
+  let _wakeX = null, _wakeY = null;   // logical coords of last wake stamp; null when pointer is up
 
   function _clearAttract() {
     if (attractHoldTimer !== null) { clearTimeout(attractHoldTimer); attractHoldTimer = null; }
@@ -107,8 +108,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Tap injects a water disturbance at the touch point.
+    // Tap injects a water disturbance at the touch point; seed the wake tracker.
     rippleField.inject(lx, ly);
+    _wakeX = lx;
+    _wakeY = ly;
 
     // Hold-to-attract: capture pointer and start 200ms timer.
     _attractPos.x = lx;
@@ -136,13 +139,35 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Track pointer for attract (active or pending timer).
     const rect = glCanvas.getBoundingClientRect();
-    _attractPos.x = (e.clientX - rect.left) / grid.scale;
-    _attractPos.y = (e.clientY - rect.top)  / grid.scale;
+    const lx = (e.clientX - rect.left) / grid.scale;
+    const ly = (e.clientY - rect.top)  / grid.scale;
+
+    // Distance-spaced wake stamping — inject along the drag path at fixed intervals.
+    // Interpolating stamps makes the spacing event-rate-independent (gap-free on fast
+    // drags, no pile-ups on slow ones). Remainder distance carries forward each move.
+    if (_wakeX !== null) {
+      const dx = lx - _wakeX, dy = ly - _wakeY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const spacing = rippleField.wakeSpacing;
+      if (dist >= spacing) {
+        const steps = Math.floor(dist / spacing);
+        for (let i = 1; i <= steps; i++) {
+          const t = (i * spacing) / dist;
+          rippleField.inject(_wakeX + dx * t, _wakeY + dy * t, rippleField.wakeStrength);
+        }
+        _wakeX += dx * (steps * spacing / dist);
+        _wakeY += dy * (steps * spacing / dist);
+      }
+    }
+
+    // Track pointer for attract (active or pending timer).
+    _attractPos.x = lx;
+    _attractPos.y = ly;
   });
 
   glCanvas.addEventListener('pointerup', () => {
+    _wakeX = null; _wakeY = null;
     if (dragShape >= 0) {
       dragShape = -1;
       glassShapes.requestSave();
@@ -159,6 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   glCanvas.addEventListener('pointercancel', () => {
+    _wakeX = null; _wakeY = null;
     if (dragShape >= 0) { dragShape = -1; glassShapes.requestSave(); return; }
     _clearAttract();
   });

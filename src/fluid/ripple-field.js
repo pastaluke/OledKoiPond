@@ -25,6 +25,8 @@ export class RippleField {
     this.gain     = 220;    // amplitude → alpha mapping for the render
     this.smooth   = true;   // smooth (soft) vs. crisp (blocky) upscaling
     this.color    = [200, 225, 255];  // ring tint (light blue)
+    this.wakeStrength = 0.3;   // per-stamp amplitude for drag trails (lower than tap to avoid saturation)
+    this.wakeSpacing  = 3.0;   // minimum world-units between consecutive wake stamps
 
     // Coarse simulation grid — capped long edge keeps the cost flat regardless
     // of how large the pond canvas gets.

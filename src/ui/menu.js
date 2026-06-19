@@ -249,6 +249,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       strength: rippleField.strength, tapRadius: rippleField.tapRadius,
       gain: rippleField.gain, maxDim: rippleField.maxDim,
       color: [...rippleField.color],
+      wakeStrength: rippleField.wakeStrength, wakeSpacing: rippleField.wakeSpacing,
     } : undefined,
   });
 
@@ -334,6 +335,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (Array.isArray(wv.color) && wv.color.length === 3) {
         rippleField.color = wv.color.map((c) => clamp(Math.round(c), 0, 255));
       }
+      if (Number.isFinite(wv.wakeStrength)) rippleField.wakeStrength = clamp(wv.wakeStrength, 0, 5);
+      if (Number.isFinite(wv.wakeSpacing))  rippleField.wakeSpacing  = clamp(wv.wakeSpacing, 0.5, 20);
       rippleField.resize();
     }
   }
@@ -962,6 +965,16 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       label: 'Color B', decimals: 0, valueStep: 1,
       getVal: () => rippleField.color[2], getMin: () => 0, getMax: () => 255,
       setVal: (v) => { rippleField.color[2] = clamp(Math.round(v), 0, 255); save(); },
+    });
+    mkW({
+      label: 'Wake strength', decimals: 2, valueStep: 0.05,
+      getVal: () => rippleField.wakeStrength, getMin: () => 0, getMax: () => 5.0,
+      setVal: (v) => { rippleField.wakeStrength = clamp(v, 0, 5.0); save(); },
+    });
+    mkW({
+      label: 'Wake spacing', decimals: 1, valueStep: 0.5,
+      getVal: () => rippleField.wakeSpacing, getMin: () => 0.5, getMax: () => 20,
+      setVal: (v) => { rippleField.wakeSpacing = clamp(v, 0.5, 20); save(); },
     });
   }
 
