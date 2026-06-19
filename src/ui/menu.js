@@ -246,7 +246,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     water: rippleField ? {
       enabled: rippleField.enabled, smooth: rippleField.smooth,
       damping: rippleField.damping, speed: rippleField.speed,
-      strength: rippleField.strength,
+      strength: rippleField.strength, tapRadius: rippleField.tapRadius,
       gain: rippleField.gain, maxDim: rippleField.maxDim,
       color: [...rippleField.color],
     } : undefined,
@@ -328,6 +328,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (Number.isFinite(wv.damping))      rippleField.damping  = clamp(wv.damping, 0.80, 0.999);
       if (Number.isFinite(wv.speed))        rippleField.speed    = clamp(wv.speed, 0.05, 0.5);
       if (Number.isFinite(wv.strength))     rippleField.strength = clamp(wv.strength, 0.1, 5);
+      if (Number.isFinite(wv.tapRadius))    rippleField.tapRadius = clamp(wv.tapRadius, 0, 6);
       if (Number.isFinite(wv.gain))         rippleField.gain     = clamp(wv.gain, 20, 600);
       if (Number.isFinite(wv.maxDim))       rippleField.maxDim   = clamp(Math.round(wv.maxDim), 60, 400);
       if (Array.isArray(wv.color) && wv.color.length === 3) {
@@ -928,6 +929,12 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       infoText: 'Amplitude of the disturbance dropped by a tap.',
       getVal: () => rippleField.strength, getMin: () => 0.1, getMax: () => 5.0,
       setVal: (v) => { rippleField.strength = clamp(v, 0.1, 5.0); save(); },
+    });
+    mkW({
+      label: 'Tap size', decimals: 1, valueStep: 0.5,
+      infoText: 'Radius of the tap splash in cells. Larger = smoother; 0 is a single-cell point tap.',
+      getVal: () => rippleField.tapRadius, getMin: () => 0, getMax: () => 6,
+      setVal: (v) => { rippleField.tapRadius = clamp(v, 0, 6); save(); },
     });
     mkW({
       label: 'Brightness', decimals: 0, valueStep: 10,
