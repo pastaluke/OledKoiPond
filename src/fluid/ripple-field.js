@@ -12,25 +12,45 @@
 // rings fade instead of ringing forever. Border cells are left at zero, so waves
 // are simply absorbed at the edges.
 
+/**
+ * First-run water settings. These are what a visitor sees before they touch any
+ * slider; their own changes persist over the top via localStorage. The Water
+ * "Reset" button restores exactly this set.
+ */
+export const WATER_DEFAULTS = Object.freeze({
+  enabled: true,
+  smooth: true,
+  damping: 0.986,
+  speed: 0.23,
+  strength: 2.6,
+  tapRadius: 2.5,
+  gain: 210,
+  maxDim: 260,
+  color: [34, 97, 139],
+  wakeStrength: 0.20,
+  wakeSpacing: 3.0,
+});
+
 export class RippleField {
   /** @param {import('../grid.js').Grid} grid */
   constructor(grid) {
     this.grid = grid;
 
-    this.enabled  = true;
-    this.damping  = 0.96;   // 0..1 — higher = rings travel farther before fading
-    this.speed    = 0.5;    // wave-speed coefficient C, stable for 0 < C ≤ 0.5
-    this.strength = 1.0;    // amplitude injected by a tap
-    this.tapRadius = 2.5;   // injection blob radius in cells (0 = single point)
-    this.gain     = 220;    // amplitude → alpha mapping for the render
-    this.smooth   = true;   // smooth (soft) vs. crisp (blocky) upscaling
-    this.color    = [200, 225, 255];  // ring tint (light blue)
-    this.wakeStrength = 0.3;   // per-stamp amplitude for drag trails (lower than tap to avoid saturation)
-    this.wakeSpacing  = 3.0;   // minimum world-units between consecutive wake stamps
+    const d = WATER_DEFAULTS;
+    this.enabled  = d.enabled;
+    this.damping  = d.damping;    // 0..1 — higher = rings travel farther before fading
+    this.speed    = d.speed;      // wave-speed coefficient C, stable for 0 < C ≤ 0.5
+    this.strength = d.strength;   // amplitude injected by a tap
+    this.tapRadius = d.tapRadius; // injection blob radius in cells (0 = single point)
+    this.gain     = d.gain;       // amplitude → alpha mapping for the render
+    this.smooth   = d.smooth;     // smooth (soft) vs. crisp (blocky) upscaling
+    this.color    = [...d.color]; // ring tint (fresh copy — never alias the frozen default)
+    this.wakeStrength = d.wakeStrength; // per-stamp amplitude for drag trails (lower than tap to avoid saturation)
+    this.wakeSpacing  = d.wakeSpacing;  // minimum world-units between consecutive wake stamps
 
     // Coarse simulation grid — capped long edge keeps the cost flat regardless
     // of how large the pond canvas gets.
-    this.maxDim = 220;
+    this.maxDim = d.maxDim;
 
     this._cols = 0;
     this._rows = 0;

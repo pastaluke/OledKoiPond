@@ -10,6 +10,7 @@ import {
   setActivePalette, getActivePaletteId, getActivePalette,
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
+import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -124,6 +125,11 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
           <input type="checkbox" id="toggle-water-smooth">
         </label>
         <div id="water-sliders"></div>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-water-reset">Reset</button>
+          <button class="menu-action" id="btn-water-copy">Copy</button>
+          <button class="menu-action" id="btn-water-paste">Paste</button>
+        </div>
       </div>
     </details>
     <details>
@@ -231,6 +237,38 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (!infoPop.hidden && !e.target.closest('.info-icon') && !infoPop.contains(e.target)) hideInfo();
   });
 
+  // ── Water settings (de)serialisation ─────────────────────────────────────────
+  // One shape, three consumers: persistence, the Copy button, and Paste/Reset.
+  const waterSnapshot = () => rippleField ? {
+    enabled: rippleField.enabled, smooth: rippleField.smooth,
+    damping: rippleField.damping, speed: rippleField.speed,
+    strength: rippleField.strength, tapRadius: rippleField.tapRadius,
+    gain: rippleField.gain, maxDim: rippleField.maxDim,
+    color: [...rippleField.color],
+    wakeStrength: rippleField.wakeStrength, wakeSpacing: rippleField.wakeSpacing,
+  } : undefined;
+
+  // Apply a (possibly partial / untrusted) water blob, clamping every field to
+  // its valid range. Returns true if anything plausibly applied.
+  const applyWaterSettings = (wv) => {
+    if (!wv || !rippleField || typeof wv !== 'object') return false;
+    if (typeof wv.enabled === 'boolean')  rippleField.enabled  = wv.enabled;
+    if (typeof wv.smooth  === 'boolean')  rippleField.smooth   = wv.smooth;
+    if (Number.isFinite(wv.damping))      rippleField.damping   = clamp(wv.damping, 0.80, 0.999);
+    if (Number.isFinite(wv.speed))        rippleField.speed     = clamp(wv.speed, 0.05, 0.5);
+    if (Number.isFinite(wv.strength))     rippleField.strength  = clamp(wv.strength, 0.1, 5);
+    if (Number.isFinite(wv.tapRadius))    rippleField.tapRadius = clamp(wv.tapRadius, 0, 6);
+    if (Number.isFinite(wv.gain))         rippleField.gain      = clamp(Math.round(wv.gain), 20, 600);
+    if (Number.isFinite(wv.maxDim))       rippleField.maxDim    = clamp(Math.round(wv.maxDim), 60, 400);
+    if (Array.isArray(wv.color) && wv.color.length === 3) {
+      rippleField.color = wv.color.map((c) => clamp(Math.round(c), 0, 255));
+    }
+    if (Number.isFinite(wv.wakeStrength)) rippleField.wakeStrength = clamp(wv.wakeStrength, 0, 5);
+    if (Number.isFinite(wv.wakeSpacing))  rippleField.wakeSpacing  = clamp(wv.wakeSpacing, 0.5, 20);
+    rippleField.resize();
+    return true;
+  };
+
   // ── Persistence ─────────────────────────────────────────────────────────────
   // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
   const save = () => savePersisted({
@@ -243,14 +281,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
                borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular,
                specularMode: compositor.specularMode, specularCurve: compositor.specularCurve },
     glassShapes: glassShapes.serialize(),
-    water: rippleField ? {
-      enabled: rippleField.enabled, smooth: rippleField.smooth,
-      damping: rippleField.damping, speed: rippleField.speed,
-      strength: rippleField.strength, tapRadius: rippleField.tapRadius,
-      gain: rippleField.gain, maxDim: rippleField.maxDim,
-      color: [...rippleField.color],
-      wakeStrength: rippleField.wakeStrength, wakeSpacing: rippleField.wakeSpacing,
-    } : undefined,
+    water: waterSnapshot(),
   });
 
   function setFishCount(n) {
@@ -322,23 +353,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       FishClass.SHAPE = liveShape;
     }
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
-    if (persisted.water && rippleField) {
-      const wv = persisted.water;
-      if (typeof wv.enabled === 'boolean')  rippleField.enabled  = wv.enabled;
-      if (typeof wv.smooth  === 'boolean')  rippleField.smooth   = wv.smooth;
-      if (Number.isFinite(wv.damping))      rippleField.damping  = clamp(wv.damping, 0.80, 0.999);
-      if (Number.isFinite(wv.speed))        rippleField.speed    = clamp(wv.speed, 0.05, 0.5);
-      if (Number.isFinite(wv.strength))     rippleField.strength = clamp(wv.strength, 0.1, 5);
-      if (Number.isFinite(wv.tapRadius))    rippleField.tapRadius = clamp(wv.tapRadius, 0, 6);
-      if (Number.isFinite(wv.gain))         rippleField.gain     = clamp(wv.gain, 20, 600);
-      if (Number.isFinite(wv.maxDim))       rippleField.maxDim   = clamp(Math.round(wv.maxDim), 60, 400);
-      if (Array.isArray(wv.color) && wv.color.length === 3) {
-        rippleField.color = wv.color.map((c) => clamp(Math.round(c), 0, 255));
-      }
-      if (Number.isFinite(wv.wakeStrength)) rippleField.wakeStrength = clamp(wv.wakeStrength, 0, 5);
-      if (Number.isFinite(wv.wakeSpacing))  rippleField.wakeSpacing  = clamp(wv.wakeSpacing, 0.5, 20);
-      rippleField.resize();
-    }
+    if (persisted.water) applyWaterSettings(persisted.water);
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -913,7 +928,18 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     waterEnableToggle.addEventListener('change', (e) => { rippleField.enabled = e.target.checked; save(); });
     waterSmoothToggle.addEventListener('change', (e) => { rippleField.smooth  = e.target.checked; save(); });
 
-    const mkW = (cfg) => waterSliderHost.appendChild(makeRow({ hasBounds: false, ...cfg }).row);
+    // Collect each row's sync() so Reset/Paste can refresh every displayed value.
+    const waterRowSyncs = [];
+    const mkW = (cfg) => {
+      const { row, sync } = makeRow({ hasBounds: false, ...cfg });
+      waterSliderHost.appendChild(row);
+      waterRowSyncs.push(sync);
+    };
+    const syncWaterUI = () => {
+      waterEnableToggle.checked = rippleField.enabled;
+      waterSmoothToggle.checked = rippleField.smooth;
+      waterRowSyncs.forEach((s) => s());
+    };
 
     mkW({
       label: 'Damping', decimals: 3, valueStep: 0.001,
@@ -975,6 +1001,39 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       label: 'Wake spacing', decimals: 1, valueStep: 0.5,
       getVal: () => rippleField.wakeSpacing, getMin: () => 0.5, getMax: () => 20,
       setVal: (v) => { rippleField.wakeSpacing = clamp(v, 0.5, 20); save(); },
+    });
+
+    // ── Reset / Copy / Paste ─────────────────────────────────────────────────
+    const flash = (btn, msg) => {
+      const prev = btn.textContent;
+      btn.textContent = msg;
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    };
+
+    const waterResetBtn = panel.querySelector('#btn-water-reset');
+    waterResetBtn.addEventListener('click', () => {
+      applyWaterSettings(WATER_DEFAULTS);
+      syncWaterUI();
+      save();
+    });
+
+    const waterCopyBtn = panel.querySelector('#btn-water-copy');
+    waterCopyBtn.addEventListener('click', async () => {
+      const json = JSON.stringify(waterSnapshot(), null, 2);
+      try { await navigator.clipboard.writeText(json); flash(waterCopyBtn, 'Copied!'); }
+      catch { console.log('[koi water]\n' + json); flash(waterCopyBtn, 'Logged'); }
+    });
+
+    const waterPasteBtn = panel.querySelector('#btn-water-paste');
+    waterPasteBtn.addEventListener('click', async () => {
+      let text;
+      try { text = await navigator.clipboard.readText(); }
+      catch { flash(waterPasteBtn, 'No access'); return; }
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { flash(waterPasteBtn, 'Bad data'); return; }
+      if (applyWaterSettings(parsed)) { syncWaterUI(); save(); flash(waterPasteBtn, 'Pasted!'); }
+      else flash(waterPasteBtn, 'Bad data');
     });
   }
 
