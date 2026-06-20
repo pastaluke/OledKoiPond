@@ -1784,7 +1784,7 @@ Full architecture, decisions, and rationale: **`docs/entity-customization-plan.m
 | E13-3 | Appendages (fins) — anchored to a spline point, mirrored; restAngle/length/shape/swayOnTurn/flapOnAccel; migrate tail/fins off width bumps | ⬜ |
 | E13-4 | Tail-pivot swish motion — flagged t-point pivot; tip wags most; replaces mid-tail wobble | ⬜ |
 | E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |
-| E13-6 | Patterns (vector regions) — palette color triplet + `rollColor`; click-silhouette blob/band editor; per-class variations + weighted spawn mix | ⬜ |
+| E13-6 | Patterns (vector regions) — palette color triplet + `rollColor`; click-silhouette blob/band editor; per-class variations + spawn-mode toggle (weighted mix or locked) | ⬜ |
 | E13-7 | Appendages beyond fins — whiskers, then tentacles/limbs (octopus, squid, turtle) reusing the appendage primitive | ⬜ |
 
 ---
