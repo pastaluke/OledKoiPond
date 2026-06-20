@@ -1766,6 +1766,29 @@ disappear once B1 ships to home-screen users. Poetic.
 
 ---
 
+### E13 · Entity Customization 🎨
+
+The fish/entity authoring overhaul: a generic, decoupled creature schema (spline
++ motion + appendages + patterns) with direct-manipulation editors, fish first.
+Full architecture, decisions, and rationale: **`docs/entity-customization-plan.md`**.
+
+> Feeds **E4-5** (data-driven entity config) and **E6** (Creator Workshop sharing).
+> Shares the palette color-triplet bump with **E11**; the triplet is consumed by
+> **E12** food. Implemented in small, independently-shippable phases — do not
+> batch them.
+
+| ID | Story | Status |
+|----|-------|--------|
+| E13-1 | Dynamic t-point editor — click-select in preview, dynamic count (min 3), movable endpoints, `+pt ⇐`/`⇒` insert-halfway buttons, remove, drag, arrow nudges | ⬜ Next |
+| E13-2 | Generic `CreatureDef` schema + parts-based renderer (smooth width, polygon-interior fill); WYSIWYG preview; legacy-shape upgrader. Fixes faceting, outline gaps, concave over-fill, and the see-through fill bug | ⬜ |
+| E13-3 | Appendages (fins) — anchored to a spline point, mirrored; restAngle/length/shape/swayOnTurn/flapOnAccel; migrate tail/fins off width bumps | ⬜ |
+| E13-4 | Tail-pivot swish motion — flagged t-point pivot; tip wags most; replaces mid-tail wobble | ⬜ |
+| E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |
+| E13-6 | Patterns (vector regions) — palette color triplet + `rollColor`; click-silhouette blob/band editor; per-class variations + weighted spawn mix | ⬜ |
+| E13-7 | Appendages beyond fins — whiskers, then tentacles/limbs (octopus, squid, turtle) reusing the appendage primitive | ⬜ |
+
+---
+
 ## 24-Hour Sprint — current
 
 > Replace this section at the start of each session.
