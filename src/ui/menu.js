@@ -251,7 +251,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // Apply a (possibly partial / untrusted) water blob, clamping every field to
   // its valid range. Returns true if anything plausibly applied.
   const applyWaterSettings = (wv) => {
-    if (!wv || !rippleField || typeof wv !== 'object') return false;
+    // Plain object only — reject null, arrays, and primitives so a stray paste
+    // like `[1,2,3]` or `42` reports "Bad data" instead of silently doing nothing.
+    if (!rippleField || wv === null || typeof wv !== 'object' || Array.isArray(wv)) return false;
     if (typeof wv.enabled === 'boolean')  rippleField.enabled  = wv.enabled;
     if (typeof wv.smooth  === 'boolean')  rippleField.smooth   = wv.smooth;
     if (Number.isFinite(wv.damping))      rippleField.damping   = clamp(wv.damping, 0.80, 0.999);
@@ -260,7 +262,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (Number.isFinite(wv.tapRadius))    rippleField.tapRadius = clamp(wv.tapRadius, 0, 6);
     if (Number.isFinite(wv.gain))         rippleField.gain      = clamp(Math.round(wv.gain), 20, 600);
     if (Number.isFinite(wv.maxDim))       rippleField.maxDim    = clamp(Math.round(wv.maxDim), 60, 400);
-    if (Array.isArray(wv.color) && wv.color.length === 3) {
+    if (Array.isArray(wv.color) && wv.color.length === 3 && wv.color.every(Number.isFinite)) {
       rippleField.color = wv.color.map((c) => clamp(Math.round(c), 0, 255));
     }
     if (Number.isFinite(wv.wakeStrength)) rippleField.wakeStrength = clamp(wv.wakeStrength, 0, 5);
