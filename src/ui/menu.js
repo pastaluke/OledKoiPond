@@ -11,6 +11,7 @@ import {
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
+import { buildBodyOutline, makeWidthFn, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -94,6 +95,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       <summary>Shape</summary>
       <div class="menu-rows">
         <canvas id="shape-preview" class="shape-preview"></canvas>
+        <label class="menu-row">
+          <span>Animate preview</span>
+          <input type="checkbox" id="toggle-shape-animate">
+        </label>
         <label class="menu-row">
           <span>Point</span>
           <select id="shape-point-sel" class="menu-select"></select>
@@ -287,7 +292,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
     fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
-    shape:   JSON.parse(JSON.stringify(liveShape)),
+    creature: JSON.parse(JSON.stringify(liveCreature)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge,
                borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
@@ -303,10 +308,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
   }
 
-  // ── Shape state — live mutable copy of FishClass.SHAPE ───────────────────────
+  // ── Creature state — live mutable copy of FishClass.CREATURE ─────────────────
   // Captured before persisted restore so Reset can return to code defaults.
-  const defaultShape = JSON.parse(JSON.stringify(FishClass.SHAPE));
-  let liveShape      = JSON.parse(JSON.stringify(FishClass.SHAPE));
+  const defaultCreature = JSON.parse(JSON.stringify(FishClass.CREATURE));
+  let liveCreature      = JSON.parse(JSON.stringify(FishClass.CREATURE));
 
   // ── Display knobs (owned by the Grid) ─────────────────────────────────────────
   const DENSITY_RANGE = { min: 1, max: 4 };    // display cells per world unit
@@ -361,9 +366,11 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         specularCurve: Number.isFinite(b.specularCurve)       ? b.specularCurve   : undefined,
       });
     }
-    if (persisted.shape && Array.isArray(persisted.shape.profile)) {
-      liveShape = persisted.shape;
-      FishClass.SHAPE = liveShape;
+    // Accept the new `creature` blob or upgrade a legacy `shape` blob in place.
+    const upgraded = upgradeCreature(persisted.creature ?? persisted.shape);
+    if (upgraded) {
+      liveCreature = upgraded;
+      FishClass.CREATURE = liveCreature;
     }
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
     if (persisted.water) applyWaterSettings(persisted.water);
@@ -689,30 +696,22 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   const shapeWHost    = panel.querySelector('#shape-w-row');
   const shapeSpineHost = panel.querySelector('#shape-spine-sliders');
 
-  // Spine sample t (0..1) → profile t, renormalized to the first→last point span
-  // (mirrors _widthAt in fish-base.js so the preview matches the rendered fish).
-  const _profT = (t, pr) => {
-    const t0 = pr[0][0], tN = pr[pr.length - 1][0], span = tN - t0;
-    return span > 1e-6 ? t0 + t * span : t0;
-  };
+  const shapeAnimToggle = panel.querySelector('#toggle-shape-animate');
+
   // Normalized 0..1 position of a stored point's t within the span — used to place
   // the preview dots so they sit on the (also-renormalized) silhouette.
   const _normT = (t, pr) => {
     const t0 = pr[0][0], tN = pr[pr.length - 1][0], span = tN - t0;
     return span > 1e-6 ? (t - t0) / span : 0;
   };
-  // Local interpolator for the preview canvas (mirrors the one in fish-base.js).
-  function _widthAtLocal(t, profile) {
-    const pt = _profT(t, profile);
-    for (let i = 1; i < profile.length; i++) {
-      const [t0, w0] = profile[i - 1], [t1, w1] = profile[i];
-      if (pt <= t1) return w0 + (w1 - w0) * ((pt - t0) / (t1 - t0));
-    }
-    return profile[profile.length - 1][1];
-  }
 
+  // STATIC preview: the width profile stretched to fill the box (good for editing),
+  // using the same monotone-cubic width function as the real renderer, plus the
+  // draggable control-point dots. Skipped while the animated preview loop runs.
   function redrawShapePreview() {
-    const pr = liveShape.profile;
+    if (animRAF) return;
+    const pr = liveCreature.spline.points;
+    const widthAt = makeWidthFn(pr);
     const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
     const W = shapePreview.clientWidth || 200;
     const H = shapePreview.clientHeight || 60;
@@ -725,20 +724,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const cy     = H / 2;
     const selIdx = parseInt(shapePointSel.value, 10);
 
-    // Draw filled silhouette
     ctx2.beginPath();
-    const STEPS = 80;
-    ctx2.moveTo(0, cy);
-    for (let i = 0; i <= STEPS; i++) {
-      const t = i / STEPS;
-      const hw = _widthAtLocal(t, pr) * scale;
-      ctx2.lineTo(t * W, cy - hw);
-    }
-    for (let i = STEPS; i >= 0; i--) {
-      const t = i / STEPS;
-      const hw = _widthAtLocal(t, pr) * scale;
-      ctx2.lineTo(t * W, cy + hw);
-    }
+    const STEPS = 96;
+    for (let i = 0; i <= STEPS; i++) { const t = i / STEPS; ctx2.lineTo(t * W, cy - widthAt(t) * scale); }
+    for (let i = STEPS; i >= 0; i--) { const t = i / STEPS; ctx2.lineTo(t * W, cy + widthAt(t) * scale); }
     ctx2.closePath();
     ctx2.fillStyle = 'rgba(255,255,255,0.12)';
     ctx2.fill();
@@ -753,13 +742,47 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       ctx2.arc(x, y, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
       ctx2.fillStyle = i === selIdx ? 'rgb(0,210,255)' : 'rgba(255,255,255,0.5)';
       ctx2.fill();
-      // Mirror dot below centerline
       ctx2.beginPath();
       ctx2.arc(x, cy + w * scale, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
       ctx2.fillStyle = i === selIdx ? 'rgba(0,210,255,0.5)' : 'rgba(255,255,255,0.25)';
       ctx2.fill();
     });
   }
+
+  // ANIMATED preview: render the real body through buildBodyOutline (the live render
+  // pipeline) with a gentle idle wiggle, fit to the box. No dots — it's a motion view.
+  let animRAF = 0, animPhase = 0, animPrevTs = 0;
+  function drawAnimatedPreview(ts) {
+    animPhase += (animPrevTs ? ts - animPrevTs : 16) * 0.004;
+    animPrevTs = ts;
+    const cre = liveCreature;
+    const poly = buildBodyOutline(cre.spline, cre.motion, {
+      headAngle: 0, steeringBend: 0, swimOsc: Math.sin(animPhase), length: 16, swimAmp: 1,
+    });
+    const W = shapePreview.clientWidth || 200, H = shapePreview.clientHeight || 60;
+    shapePreview.width = W; shapePreview.height = H;
+    const ctx2 = shapePreview.getContext('2d');
+    ctx2.clearRect(0, 0, W, H);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of poly) {
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    const bw = maxX - minX || 1, bh = maxY - minY || 1;
+    const sc = Math.min((W - 8) / bw, (H - 8) / bh);
+    const ox = (W - bw * sc) / 2 - minX * sc, oy = (H - bh * sc) / 2 - minY * sc;
+    ctx2.beginPath();
+    poly.forEach((p, i) => { const x = p.x * sc + ox, y = p.y * sc + oy; i ? ctx2.lineTo(x, y) : ctx2.moveTo(x, y); });
+    ctx2.closePath();
+    ctx2.fillStyle = 'rgba(255,255,255,0.12)'; ctx2.fill();
+    ctx2.strokeStyle = 'rgba(0,210,255,0.45)'; ctx2.lineWidth = 1; ctx2.stroke();
+    animRAF = requestAnimationFrame(drawAnimatedPreview);
+  }
+  function setShapeAnimate(on) {
+    if (on && !animRAF) { animPrevTs = 0; animRAF = requestAnimationFrame(drawAnimatedPreview); }
+    else if (!on && animRAF) { cancelAnimationFrame(animRAF); animRAF = 0; redrawShapePreview(); }
+  }
+  if (shapeAnimToggle) shapeAnimToggle.addEventListener('change', (e) => setShapeAnimate(e.target.checked));
 
   const MIN_POINTS = 3;     // floor on profile point count
   const T_GAP      = 0.01;  // minimum t separation between adjacent points
@@ -773,11 +796,11 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   function buildShapeSliders(idx) {
     shapeTHost.innerHTML = '';
     shapeWHost.innerHTML = '';
-    const pr   = liveShape.profile;
+    const pr   = liveCreature.spline.points;
     const last = pr.length - 1;
 
-    // Endpoints are editable now — their t reflows the span (see _profT). Bounds keep
-    // points strictly ordered with a small gap; ends are free within [0,1].
+    // Endpoints are editable now — their t reflows the span (renormalized in
+    // makeWidthFn). Bounds keep points strictly ordered with a small gap; ends free in [0,1].
     const tMin = idx === 0    ? 0 : pr[idx - 1][0] + T_GAP;
     const tMax = idx === last ? 1 : pr[idx + 1][0] - T_GAP;
 
@@ -788,7 +811,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         pr[idx][0] = clamp(Math.round(v * 100) / 100, tMin, tMax);
         const opt = shapePointSel.options[idx];
         if (opt) opt.textContent = ptLabel(idx, pr[idx][0]);
-        FishClass.SHAPE = liveShape;
+        FishClass.CREATURE = liveCreature;
         redrawShapePreview();
         save();
       },
@@ -802,7 +825,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       getVal: () => pr[idx][1],
       setVal: (v) => {
         pr[idx][1] = clamp(Math.round(v * 100) / 100, 0, W_MAX);
-        FishClass.SHAPE = liveShape;
+        FishClass.CREATURE = liveCreature;
         redrawShapePreview();
         save();
       },
@@ -814,14 +837,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // Enable/disable add/remove for the current selection + point count.
   function updatePtButtons() {
-    const last = liveShape.profile.length - 1;
+    const last = liveCreature.spline.points.length - 1;
     btnAddLeft.disabled  = selectedIdx === 0;
     btnAddRight.disabled = selectedIdx === last;
-    btnRemove.disabled   = liveShape.profile.length <= MIN_POINTS;
+    btnRemove.disabled   = liveCreature.spline.points.length <= MIN_POINTS;
   }
 
   function selectPoint(idx) {
-    const last = liveShape.profile.length - 1;
+    const last = liveCreature.spline.points.length - 1;
     selectedIdx = Math.max(0, Math.min(last, idx));
     shapePointSel.value = String(selectedIdx);
     buildShapeSliders(selectedIdx);
@@ -831,7 +854,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // Refresh label + slider readouts + preview after a drag/nudge (no row rebuild).
   function syncSelected() {
-    const pr = liveShape.profile;
+    const pr = liveCreature.spline.points;
     const opt = shapePointSel.options[selectedIdx];
     if (opt) opt.textContent = ptLabel(selectedIdx, pr[selectedIdx][0]);
     shapeTRow?.sync();
@@ -841,13 +864,13 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   function buildShapePointSel() {
     shapePointSel.innerHTML = '';
-    liveShape.profile.forEach(([t], i) => {
+    liveCreature.spline.points.forEach(([t], i) => {
       const opt = document.createElement('option');
       opt.value = i;
       opt.textContent = ptLabel(i, t);
       shapePointSel.appendChild(opt);
     });
-    shapePointSel.value = String(Math.min(selectedIdx, liveShape.profile.length - 1));
+    shapePointSel.value = String(Math.min(selectedIdx, liveCreature.spline.points.length - 1));
   }
 
   // ── Point management ─────────────────────────────────────────────────────────
@@ -857,14 +880,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // Insert a point halfway (in BOTH t and half-width) toward the given neighbor.
   function addPoint(side) {
-    const pr = liveShape.profile;
+    const pr = liveCreature.spline.points;
     const nbr = selectedIdx + side;
     if (nbr < 0 || nbr >= pr.length) return;
     const newT = Math.round(((pr[selectedIdx][0] + pr[nbr][0]) / 2) * 100) / 100;
     const newW = Math.round(((pr[selectedIdx][1] + pr[nbr][1]) / 2) * 100) / 100;
     const insertAt = side < 0 ? selectedIdx : selectedIdx + 1;
     pr.splice(insertAt, 0, [newT, newW]);
-    FishClass.SHAPE = liveShape;
+    FishClass.CREATURE = liveCreature;
     buildShapePointSel();
     selectPoint(insertAt);
     save();
@@ -872,10 +895,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   btnAddLeft.addEventListener('click',  () => addPoint(-1));
   btnAddRight.addEventListener('click', () => addPoint(+1));
   btnRemove.addEventListener('click', () => {
-    const pr = liveShape.profile;
+    const pr = liveCreature.spline.points;
     if (pr.length <= MIN_POINTS) return;
     pr.splice(selectedIdx, 1);
-    FishClass.SHAPE = liveShape;
+    FishClass.CREATURE = liveCreature;
     buildShapePointSel();
     selectPoint(Math.min(selectedIdx, pr.length - 1));
     save();
@@ -883,14 +906,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // ── Arrow nudge cluster (intentionally redundant with the sliders) ───────────
   function nudge(dt, dw) {
-    const pr = liveShape.profile, last = pr.length - 1, i = selectedIdx;
+    const pr = liveCreature.spline.points, last = pr.length - 1, i = selectedIdx;
     if (dt) {
       const tMin = i === 0    ? 0 : pr[i - 1][0] + T_GAP;
       const tMax = i === last ? 1 : pr[i + 1][0] - T_GAP;
       pr[i][0] = clamp(Math.round((pr[i][0] + dt) * 100) / 100, tMin, tMax);
     }
     if (dw) pr[i][1] = clamp(Math.round((pr[i][1] + dw) * 100) / 100, 0, W_MAX);
-    FishClass.SHAPE = liveShape;
+    FishClass.CREATURE = liveCreature;
     syncSelected();
     save();
   }
@@ -907,7 +930,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // ── Click / drag points directly in the preview ──────────────────────────────
   // Geometry shared by hit-testing and dragging — must match redrawShapePreview().
   const previewGeom = () => {
-    const pr = liveShape.profile;
+    const pr = liveCreature.spline.points;
     const W = shapePreview.clientWidth  || shapePreview.width  || 200;
     const H = shapePreview.clientHeight || shapePreview.height || 60;
     const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
@@ -938,7 +961,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       const rawT = t0 + clamp(px / W, 0, 1) * (tN - t0);
       pr[i][0] = clamp(Math.round(rawT * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
     }
-    FishClass.SHAPE = liveShape;
+    FishClass.CREATURE = liveCreature;
     syncSelected();
   };
 
@@ -968,14 +991,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   shapePreview.addEventListener('pointerup', endDrag);
   shapePreview.addEventListener('pointercancel', endDrag);
 
-  // Spine / animation param sliders
+  // Spine / motion param sliders. `obj` selects the CreatureDef sub-object.
   const SPINE_PARAMS = [
-    { key: 'headFrac',   label: 'Head offset',  min: 0.10, max: 0.80 },
-    { key: 'tailFrac',   label: 'Tail offset',  min: 0.10, max: 0.90 },
-    { key: 'waistFrac',  label: 'Waist',        min: 0.05, max: 0.60 },
-    { key: 'wiggleFrac', label: 'Tail wiggle',  min: 0.00, max: 0.50 },
-    { key: 'bendWaist',  label: 'Waist bend',   min: 0.00, max: 0.50 },
-    { key: 'bendBody',   label: 'Body bend',    min: 0.00, max: 0.50 },
+    { obj: 'spline', key: 'headFrac',  label: 'Head offset', min: 0.10, max: 0.80 },
+    { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90 },
+    { obj: 'spline', key: 'waistFrac', label: 'Waist',       min: 0.05, max: 0.60 },
+    { obj: 'motion', key: 'swishAmp',  label: 'Tail wiggle', min: 0.00, max: 0.50 },
+    { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50 },
+    { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50 },
   ];
   for (const sp of SPINE_PARAMS) {
     const { row } = makeRow({
@@ -983,10 +1006,11 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       decimals: 3,
       valueStep: 0.001,
       hasBounds: false,
-      getVal: () => liveShape[sp.key],
+      getVal: () => liveCreature[sp.obj][sp.key],
       setVal: (v) => {
-        liveShape[sp.key] = Math.round(v * 1000) / 1000;
-        FishClass.SHAPE = liveShape;
+        liveCreature[sp.obj][sp.key] = Math.round(v * 1000) / 1000;
+        FishClass.CREATURE = liveCreature;
+        redrawShapePreview();
         save();
       },
       getMin: () => sp.min,
@@ -995,24 +1019,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     shapeSpineHost.appendChild(row);
   }
 
-  // Copy shape values
+  // Copy values — emit the live CreatureDef as JSON (paste into a class override).
   panel.querySelector('#btn-copy-shape').addEventListener('click', async () => {
-    const pr   = liveShape.profile;
-    const pad  = 11;
-    const lines = [
-      'static SHAPE = {',
-      `  headFrac:   ${liveShape.headFrac.toFixed(3)},`,
-      `  tailFrac:   ${liveShape.tailFrac.toFixed(3)},`,
-      `  waistFrac:  ${liveShape.waistFrac.toFixed(3)},`,
-      `  wiggleFrac: ${liveShape.wiggleFrac.toFixed(3)},`,
-      `  bendWaist:  ${liveShape.bendWaist.toFixed(3)},`,
-      `  bendBody:   ${liveShape.bendBody.toFixed(3)},`,
-      '  profile: [',
-      ...pr.map(([t, w], i) => `    [${t.toFixed(2)}, ${w.toFixed(2)}],  // point ${i + 1}`),
-      '  ],',
-      '};',
-    ];
-    const snippet = lines.join('\n');
+    const snippet = JSON.stringify(liveCreature, null, 2);
     const copyBtn = panel.querySelector('#btn-copy-shape');
     try { await navigator.clipboard.writeText(snippet); }
     catch { console.log(snippet); }
@@ -1023,17 +1032,19 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // Reset shape
   panel.querySelector('#btn-reset-shape').addEventListener('click', () => {
-    liveShape = JSON.parse(JSON.stringify(defaultShape));
-    FishClass.SHAPE = liveShape;
+    liveCreature = JSON.parse(JSON.stringify(defaultCreature));
+    FishClass.CREATURE = liveCreature;
     selectedIdx = 0;
     buildShapePointSel();
     selectPoint(0);
     save();
   });
 
-  // Redraw preview when Shape section is opened (canvas size may have been 0 when hidden).
+  // When the Shape section opens, refresh the preview (canvas may have been 0-size
+  // while hidden) and resume animation if the toggle is on; pause it when closed.
   panel.querySelector('#shape-preview').closest('details').addEventListener('toggle', (e) => {
-    if (e.target.open) redrawShapePreview();
+    if (e.target.open) { shapeAnimToggle?.checked ? setShapeAnimate(true) : redrawShapePreview(); }
+    else setShapeAnimate(false);
   });
 
   // ── Build display sliders (grid knobs) ────────────────────────────────────────

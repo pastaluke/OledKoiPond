@@ -1780,7 +1780,7 @@ Full architecture, decisions, and rationale: **`docs/entity-customization-plan.m
 | ID | Story | Status |
 |----|-------|--------|
 | E13-1 | Dynamic t-point editor — click-select in preview, dynamic count (min 3), movable endpoints, `+pt ⇐`/`⇒` insert-halfway buttons, remove, drag, arrow nudges | ✅ Shipped 2026-06-20 |
-| E13-2 | Generic `CreatureDef` schema + parts-based renderer (smooth width, polygon-interior fill); WYSIWYG preview; legacy-shape upgrader. Fixes faceting, outline gaps, concave over-fill, and the see-through fill bug | ⬜ |
+| E13-2 | Generic `CreatureDef` schema + parts-based renderer (monotone-cubic width, nonzero-winding fill); preview pose toggle; legacy-shape upgrader. Fixes faceting, outline gaps, concave over-fill, and the see-through fill bug | ✅ Shipped 2026-06-21 |
 | E13-3 | Appendages (fins) — anchored to a spline point, mirrored; restAngle/length/shape/swayOnTurn/flapOnAccel; migrate tail/fins off width bumps | ⬜ |
 | E13-4 | Tail-pivot swish motion — flagged t-point pivot; tip wags most; replaces mid-tail wobble | ⬜ |
 | E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |

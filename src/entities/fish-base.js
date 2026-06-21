@@ -25,42 +25,67 @@ function _sampleSize(min, max, curve) {
 // ─── Spline renderer ──────────────────────────────────────────────────────────
 const SWIM_AMP_FLOOR = 0.06;   // faint idle tail sway kept when a fish is nearly stopped
 
-// Half-width at position t along the body, linearly interpolated from a profile array.
-// profile: [[t, halfWidth], ...] sorted by t, t=0 (tail tip) → t=1 (head tip).
-// The spine sample t (0..1) is renormalized into the profile's first→last point span,
-// so moving an endpoint reflows the body's proportions instead of leaving a flat stub
-// or extrapolating to negative width. When the ends sit at 0 and 1 this is identity.
-function _widthAt(t, profile) {
-  const t0 = profile[0][0], tN = profile[profile.length - 1][0], span = tN - t0;
-  const pt = span > 1e-6 ? t0 + t * span : t0;
-  for (let i = 1; i < profile.length; i++) {
-    const [a0, w0] = profile[i - 1], [a1, w1] = profile[i];
-    if (pt <= a1) return w0 + (w1 - w0) * ((pt - a0) / (a1 - a0));
+// Build a half-width(t) function from a profile [[t, halfWidth], ...] using
+// Fritsch–Carlson MONOTONE cubic interpolation: smooth, but with no overshoot, so the
+// peduncle pinch (a sharp dip then rise) stays clean instead of bulging. The spine
+// sample t (0..1) is renormalized into the profile's first→last span, so moving an
+// endpoint reflows proportions instead of leaving a stub / going negative-width
+// (identity when the ends sit at 0 and 1). Tangents are computed once; the returned
+// closure is cheap per sample.
+export function makeWidthFn(points) {
+  const n = points.length;
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const t0 = xs[0], tN = xs[n - 1], span = tN - t0;
+
+  const m = new Array(n).fill(0);
+  if (n >= 2) {
+    const d = new Array(n - 1);
+    for (let i = 0; i < n - 1; i++) {
+      const dx = xs[i + 1] - xs[i];
+      d[i] = dx > 1e-9 ? (ys[i + 1] - ys[i]) / dx : 0;
+    }
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      m[i] = (d[i - 1] === 0 || d[i] === 0 || (d[i - 1] > 0) !== (d[i] > 0))
+        ? 0 : (d[i - 1] + d[i]) / 2;
+    }
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+      const a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+      if (s > 9) { const tau = 3 / Math.sqrt(s); m[i] = tau * a * d[i]; m[i + 1] = tau * b * d[i]; }
+    }
   }
-  return profile[profile.length - 1][1];
+
+  return (t) => {
+    const pt = span > 1e-6 ? t0 + t * span : t0;
+    let i = 0;
+    while (i < n - 1 && pt > xs[i + 1]) i++;
+    if (i >= n - 1) return Math.max(0, ys[n - 1]);
+    const h = xs[i + 1] - xs[i];
+    if (h <= 1e-9) return Math.max(0, ys[i]);
+    const u = (pt - xs[i]) / h, u2 = u * u, u3 = u2 * u;
+    const w = (2*u3 - 3*u2 + 1) * ys[i]
+            + (u3 - 2*u2 + u) * h * m[i]
+            + (-2*u3 + 3*u2) * ys[i + 1]
+            + (u3 - u2) * h * m[i + 1];
+    return Math.max(0, w);
+  };
 }
 
-// Snaps outline points to the DISPLAY-CELL grid (density cells per world unit). All
-// inputs are world units; the `d` factor converts to cells just before rounding, so the
-// fish keeps its world-unit shape but is rasterized finer as density rises.
-function _outlinePx(set, bx, by, nx, ny, w, d) {
-  if (w < 0.35) {
-    set.add(`${Math.round(bx * d)},${Math.round(by * d)}`);
-  } else {
-    set.add(`${Math.round((bx + nx * w) * d)},${Math.round((by + ny * w) * d)}`);
-    set.add(`${Math.round((bx - nx * w) * d)},${Math.round((by - ny * w) * d)}`);
-  }
-}
-
-// Returns [{x,y}] DISPLAY-CELL coords relative to fish center (0,0).
-// headAngle : direction the head points (radians; 0=east, π/2=south-screen)
-// steeringBend : body curvature (+= clockwise/right, -= counter-clockwise/left)
-// swimOsc  : swim oscillation in [-1, 1]
-// length   : fish nose-to-tail length in world units
-// density  : display cells per world unit (render fidelity). 1 = current behavior.
-// shape    : FishBase.SHAPE — all body proportions + profile
-function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, swimAmp = 1, shape) {
-  const { headFrac, tailFrac, waistFrac, wiggleFrac, bendWaist, bendBody, profile } = shape;
+// Build the closed body outline polygon in WORLD units, relative to the fish center.
+// Returns an ordered ring of {x,y}: top edge tail→head, then bottom edge head→tail.
+// The caller scales to display cells and rasterizes. Shared by the live renderer and
+// the editor preview so they agree on the body shape.
+//   headAngle    : head direction (rad; 0=east, π/2=south-screen)
+//   steeringBend : body curvature (+= right, -= left)
+//   swimOsc      : swim oscillation in [-1, 1]
+//   length       : nose-to-tail world units
+//   spline/motion: from a CreatureDef (see FishBase.CREATURE)
+export function buildBodyOutline(spline, motion, { headAngle, steeringBend, swimOsc, length, swimAmp = 1 }) {
+  const { headFrac, tailFrac, waistFrac, bendWaist, bendBody, points } = spline;
+  const widthAt = makeWidthFn(points);
 
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
@@ -74,39 +99,109 @@ function _renderSpline(headAngle, steeringBend, swimOsc, length, density = 1, sw
   const Wx = -cosH * waistDist - cosP * steeringBend * length * bendWaist;
   const Wy = -sinH * waistDist - sinP * steeringBend * length * bendWaist;
 
-  const tailWigglePx = length * wiggleFrac * swimAmp;
+  const tailWigglePx = length * motion.swishAmp * swimAmp;
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
-
   const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
   const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
 
-  const set = new Set();
-
-  // Scale sample counts with density so the finer outline stays gap-free.
-  const TAIL_STEPS = 18 * density, BODY_STEPS = 42 * density;
+  const TAIL_STEPS = 30, BODY_STEPS = 66;   // resolution-independent polygon; density applied by the rasterizer
+  const top = [], bot = [];
+  const sample = (bx, by, dx, dy, t) => {
+    const dl = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = -dy / dl, ny = dx / dl, w = widthAt(t);
+    top.push({ x: bx + nx * w, y: by + ny * w });
+    bot.push({ x: bx - nx * w, y: by - ny * w });
+  };
 
   for (let i = 0; i <= TAIL_STEPS; i++) {
     const s = i / TAIL_STEPS, t = s * waistFrac;
     const bx = (1-s)*(1-s)*Tx + 2*(1-s)*s*TCx + s*s*Wx;
     const by = (1-s)*(1-s)*Ty + 2*(1-s)*s*TCy + s*s*Wy;
-    const dx = 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx);
-    const dy = 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy);
-    const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t, profile), density);
+    sample(bx, by, 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx), 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy), t);
   }
-
-  for (let i = 0; i <= BODY_STEPS; i++) {
+  for (let i = 1; i <= BODY_STEPS; i++) {   // start at 1: i=0 duplicates the waist sample
     const s = i / BODY_STEPS, t = waistFrac + s * (1 - waistFrac);
     const bx = (1-s)*(1-s)*Wx + 2*(1-s)*s*BCx + s*s*Hx;
     const by = (1-s)*(1-s)*Wy + 2*(1-s)*s*BCy + s*s*Hy;
-    const dx = 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx);
-    const dy = 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy);
-    const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    _outlinePx(set, bx, by, -dy/dl, dx/dl, _widthAt(t, profile), density);
+    sample(bx, by, 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx), 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy), t);
   }
 
-  return [...set].map(k => { const [x, y] = k.split(',').map(Number); return { x, y }; });
+  const ring = top.slice();
+  for (let i = bot.length - 1; i >= 0; i--) ring.push(bot[i]);
+  return ring;
+}
+
+// Nonzero-winding scanline fill of a world-unit polygon → Set of "cx,cy" display cells
+// (cell centers at integer coords). Overlapping sub-loops stay filled — no holes.
+export function fillOutlineCells(poly, d) {
+  const pts = poly.map((p) => ({ x: p.x * d, y: p.y * d }));
+  let minY = Infinity, maxY = -Infinity;
+  for (const p of pts) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
+  const set = new Set();
+  const yLo = Math.ceil(minY), yHi = Math.floor(maxY), n = pts.length;
+  for (let cy = yLo; cy <= yHi; cy++) {
+    const xs = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      if ((a.y <= cy && b.y > cy) || (b.y <= cy && a.y > cy)) {
+        xs.push({ x: a.x + (cy - a.y) / (b.y - a.y) * (b.x - a.x), dir: b.y > a.y ? 1 : -1 });
+      }
+    }
+    if (xs.length < 2) continue;
+    xs.sort((p, q) => p.x - q.x);
+    let wind = 0;
+    for (let i = 0; i < xs.length - 1; i++) {
+      wind += xs[i].dir;
+      if (wind !== 0) {
+        const xa = Math.ceil(xs[i].x), xb = Math.floor(xs[i + 1].x);
+        for (let cx = xa; cx <= xb; cx++) set.add(`${cx},${cy}`);
+      }
+    }
+  }
+  return set;
+}
+
+// Connected-segment outline of a world-unit polygon → Set of "cx,cy" cells (Bresenham
+// between consecutive ring vertices, so the stroke is gap-free).
+export function strokeOutlineCells(poly, d) {
+  const set = new Set();
+  const line = (x0, y0, x1, y1) => {
+    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      set.add(`${x0},${y0}`);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  };
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    line(Math.round(a.x * d), Math.round(a.y * d), Math.round(b.x * d), Math.round(b.y * d));
+  }
+  return set;
+}
+
+// Upgrade any stored shape blob (legacy flat SHAPE or a new CreatureDef) to a
+// CreatureDef. Returns null if unrecognizable.
+export function upgradeCreature(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.spline && Array.isArray(raw.spline.points)) return JSON.parse(JSON.stringify(raw));
+  if (!Array.isArray(raw.profile)) return null;   // legacy { headFrac, …, profile }
+  return {
+    schemaVersion: 1,
+    spline: {
+      headFrac: raw.headFrac, tailFrac: raw.tailFrac, waistFrac: raw.waistFrac,
+      bendWaist: raw.bendWaist, bendBody: raw.bendBody,
+      points: raw.profile.map(([t, w]) => [t, w]),
+    },
+    motion: { swishAmp: raw.wiggleFrac ?? 0.156, swishRate: 1.0, swishCurve: 1.0 },
+    appendages: [],
+    patterns: { spawnMode: 'mix', active: null, variations: [] },
+  };
 }
 
 // ─── Angle utilities ──────────────────────────────────────────────────────────
@@ -128,26 +223,33 @@ export class FishBase {
   static SPEED_MAX  = 0.03;   // logical px/ms
   static COLORS     = [{ r: 200, g: 200, b: 200 }];
 
-  /** Body shape definition — all rendering constants in one place.
-   *  Subclasses can override; the live shape editor mutates FishClass.SHAPE directly. */
-  static SHAPE = {
-    headFrac:   0.42,   // fraction of length: center → head tip
-    tailFrac:   0.58,   // fraction of length: center → tail tip
-    waistFrac:  0.28,   // tail bézier span (fraction of tailDist)
-    wiggleFrac: 0.156,  // tail wiggle amplitude (fraction of length)
-    bendWaist:  0.12,   // waist lateral-bow factor with steering
-    bendBody:   0.22,   // body control-point bow factor with steering
-    profile: [          // [t, halfWidth] breakpoints, linearly interpolated
-      [0.00, 0.0],  // tail tip
-      [0.06, 0.4],  // fin base
-      [0.13, 1.8],  // fin peak
-      [0.20, 0.4],  // peduncle (pinch)
-      [0.28, 1.3],  // waist rise
-      [0.55, 2.2],  // belly
-      [0.72, 2.2],  // belly end
-      [0.88, 0.8],  // head taper
-      [1.00, 0.1],  // snout
-    ],
+  /** Creature definition — body geometry + motion + (future) appendages & patterns,
+   *  all in one serializable place. Subclasses can override; the live editor mutates
+   *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints (they
+   *  gain a pivot flag and become objects in E13-4). See docs/entity-customization-plan.md. */
+  static CREATURE = {
+    schemaVersion: 1,
+    spline: {
+      headFrac:  0.42,   // fraction of length: center → head tip
+      tailFrac:  0.58,   // fraction of length: center → tail tip
+      waistFrac: 0.28,   // tail bézier span (fraction of tailDist); also the waist's profile-t
+      bendWaist: 0.12,   // waist lateral-bow factor with steering
+      bendBody:  0.22,   // body control-point bow factor with steering
+      points: [          // [t, halfWidth] breakpoints (monotone-cubic interpolated)
+        [0.00, 0.0],  // tail tip
+        [0.06, 0.4],
+        [0.13, 1.8],
+        [0.20, 0.4],  // peduncle pinch
+        [0.28, 1.3],
+        [0.55, 2.2],  // belly
+        [0.72, 2.2],
+        [0.88, 0.8],
+        [1.00, 0.1],  // snout
+      ],
+    },
+    motion: { swishAmp: 0.156, swishRate: 1.0, swishCurve: 1.0 },
+    appendages: [],
+    patterns: { spawnMode: 'mix', active: null, variations: [] },
   };
 
   // Schooling (boids) — SCHOOL_WEIGHT 0=solitary, 1=strong schooler.
@@ -405,26 +507,29 @@ export class FishBase {
   draw(grid) {
     const D       = grid.density;
     const swimOsc = Math.sin(this.swimPhase);
-    const pixels  = _renderSpline(this.heading, this.steeringBend, swimOsc, this.length, D, this.swimAmp, this.constructor.SHAPE);
-    // Center on the display-cell grid; spline offsets are already in display cells.
-    const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
-    const { r, g, b } = this.color;
+    const creature = this.constructor.CREATURE;
 
-    if (this.constructor.FILLED) {
-      // Scanline fill: for each y-row, paint every cell between the leftmost and
-      // rightmost outline pixel so the body is solid rather than hollow.
-      const rows = new Map();
-      for (const { x, y } of pixels) {
-        const ay = ocy + y, ax = ocx + x;
-        const row = rows.get(ay);
-        if (!row) rows.set(ay, { min: ax, max: ax });
-        else { if (ax < row.min) row.min = ax; if (ax > row.max) row.max = ax; }
+    // Parts-based render: build each closed part's outline polygon, then rasterize.
+    // Today the body is the only part; appendages (E13-3) and patterns (E13-6) will
+    // push more parts here, each with its own polygon + color + fill flag.
+    const parts = [{
+      poly:   buildBodyOutline(creature.spline, creature.motion, {
+        headAngle: this.heading, steeringBend: this.steeringBend,
+        swimOsc, length: this.length, swimAmp: this.swimAmp,
+      }),
+      filled: this.constructor.FILLED,
+      color:  this.color,
+    }];
+
+    const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
+    for (const part of parts) {
+      const { r, g, b } = part.color;
+      const cells = part.filled ? fillOutlineCells(part.poly, D) : strokeOutlineCells(part.poly, D);
+      for (const key of cells) {
+        const ci = key.indexOf(',');
+        const cx = +key.slice(0, ci), cy = +key.slice(ci + 1);
+        grid.drawCell(ocx + cx, ocy + cy, r, g, b);
       }
-      for (const [ay, { min, max }] of rows) {
-        for (let ax = min; ax <= max; ax++) grid.drawCell(ax, ay, r, g, b);
-      }
-    } else {
-      for (const { x, y } of pixels) grid.drawCell(ocx + x, ocy + y, r, g, b);
     }
   }
 }

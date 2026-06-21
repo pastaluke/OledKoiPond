@@ -227,9 +227,11 @@ Each module above is independently editable and independently rendered:
 Replace "one Set of cells + scanline fill" with composed, closed parts:
 
 1. **Body** → build the closed outline polygon (top edge tail→head, bottom edge
-   head→tail) from a **smooth** width function (Catmull-Rom / monotone through
-   the points). Fill by polygon interior test (even-odd scan), not "rows with an
-   outline sample". Outline mode = draw the closed edge with connected segments.
+   head→tail) from a **monotone-cubic** width function (Fritsch–Carlson — no
+   overshoot at the peduncle pinch). Fill by polygon interior test with the
+   **nonzero-winding** rule (so a self-overlapping tail stays filled, no holes),
+   not "rows with an outline sample". Outline mode = draw the closed edge with
+   connected segments.
 2. **Appendages** → each is its own closed polygon, transformed by its anchor +
    motion, mirrored, filled independently.
 3. **Patterns** → each region rasterized and **clipped to the body polygon**,
@@ -291,11 +293,23 @@ clicking/dragging/adding, ends included, and it persists & renders correctly.
 
 ### Phase 2 — Generic schema + parts-based renderer
 
+**Locked decisions (2026-06-21):** monotone-cubic (Fritsch–Carlson) width;
+nonzero-winding fill; rename `FishBase.SHAPE` → `FishBase.CREATURE` and the
+persisted `shape` key → `creature` (legacy upgrader reads the old key/format);
+editor preview gets a **pose toggle** — static rest pose (default, for precise
+editing) *and* a gentle idle wiggle. **Scope note:** `spline.points` stay `[t,w]`
+tuples in this phase to keep the E13-1 editor intact; they become `{t,w,pivot}`
+objects in **E13-4** when the pivot flag is actually needed. Motion behavior is
+unchanged here (`motion.swishAmp` == old `wiggleFrac`; `swishRate`/`swishCurve`
+carried but unused until E13-4).
+
 - Define `CreatureDef`; refactor `FishBase.SHAPE` into `spline` + `motion`
   (fish-first), with the legacy upgrader.
-- Rebuild `_renderSpline` into composed closed parts (body now; appendage &
-  pattern layers stubbed). Smooth width function; polygon-interior fill.
-- Make the editor preview render through the real pipeline.
+- Rebuild the renderer into composed closed parts (body now; appendage &
+  pattern layers are the obvious next entries in the parts loop). Monotone-cubic
+  width; nonzero-winding polygon fill; connected-segment outline.
+- Make the editor preview share the body-outline builder (WYSIWYG width shaping)
+  with the static/animated pose toggle.
 
 *Done when:* fish render identically-or-better with no faceting, no outline
 gaps, and the **see-through line bug is gone** for both collapsed and forked tips.
