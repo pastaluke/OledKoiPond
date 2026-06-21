@@ -108,8 +108,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         <div class="menu-btn-row">
           <button class="menu-action" id="btn-pt-left"  title="Move point toward tail">←</button>
           <button class="menu-action" id="btn-pt-right" title="Move point toward head">→</button>
-          <button class="menu-action" id="btn-pt-up"    title="Widen">↑</button>
-          <button class="menu-action" id="btn-pt-down"  title="Narrow">↓</button>
+          <button class="menu-action" id="btn-pt-up"    title="Widen (both sides)"><span class="wh-stack"><span>↑</span><span>↓</span></span></button>
+          <button class="menu-action" id="btn-pt-down"  title="Narrow (both sides)"><span class="wh-stack"><span>↓</span><span>↑</span></span></button>
         </div>
         <div id="shape-spine-sliders"></div>
         <div class="menu-btn-row">
@@ -947,7 +947,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const rect = shapePreview.getBoundingClientRect();
     const hit = pickPoint(e.clientX - rect.left, e.clientY - rect.top);
     if (hit < 0) return;
-    selectPoint(hit);
+    // First click only selects; you drag the already-selected point to move it.
+    if (hit !== selectedIdx) { selectPoint(hit); return; }
     dragging = true;
     shapePreview.setPointerCapture(e.pointerId);
     dragTo(e.clientX - rect.left, e.clientY - rect.top);
