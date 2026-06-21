@@ -98,8 +98,19 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
           <span>Point</span>
           <select id="shape-point-sel" class="menu-select"></select>
         </label>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-pt-add-left" title="Add a point halfway toward the tail-side neighbor">+pt ⇐</button>
+          <button class="menu-action" id="btn-pt-add-right" title="Add a point halfway toward the head-side neighbor">+pt ⇒</button>
+          <button class="menu-action" id="btn-pt-remove" title="Remove the selected point">− pt</button>
+        </div>
         <div id="shape-t-row"></div>
         <div id="shape-w-row"></div>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-pt-left"  title="Move point toward tail">←</button>
+          <button class="menu-action" id="btn-pt-right" title="Move point toward head">→</button>
+          <button class="menu-action" id="btn-pt-up"    title="Widen">↑</button>
+          <button class="menu-action" id="btn-pt-down"  title="Narrow">↓</button>
+        </div>
         <div id="shape-spine-sliders"></div>
         <div class="menu-btn-row">
           <button class="menu-action" id="btn-copy-shape">Copy values</button>
@@ -672,18 +683,30 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   fishHost.appendChild(countRow);
 
   // ── Shape editor ─────────────────────────────────────────────────────────────
-  const PT_LABELS = ['Tail tip','Fin base','Fin peak','Peduncle','Waist rise','Belly','Belly end','Head taper','Snout'];
   const shapePreview  = panel.querySelector('#shape-preview');
   const shapePointSel = panel.querySelector('#shape-point-sel');
   const shapeTHost    = panel.querySelector('#shape-t-row');
   const shapeWHost    = panel.querySelector('#shape-w-row');
   const shapeSpineHost = panel.querySelector('#shape-spine-sliders');
 
+  // Spine sample t (0..1) → profile t, renormalized to the first→last point span
+  // (mirrors _widthAt in fish-base.js so the preview matches the rendered fish).
+  const _profT = (t, pr) => {
+    const t0 = pr[0][0], tN = pr[pr.length - 1][0], span = tN - t0;
+    return span > 1e-6 ? t0 + t * span : t0;
+  };
+  // Normalized 0..1 position of a stored point's t within the span — used to place
+  // the preview dots so they sit on the (also-renormalized) silhouette.
+  const _normT = (t, pr) => {
+    const t0 = pr[0][0], tN = pr[pr.length - 1][0], span = tN - t0;
+    return span > 1e-6 ? (t - t0) / span : 0;
+  };
   // Local interpolator for the preview canvas (mirrors the one in fish-base.js).
   function _widthAtLocal(t, profile) {
+    const pt = _profT(t, profile);
     for (let i = 1; i < profile.length; i++) {
       const [t0, w0] = profile[i - 1], [t1, w1] = profile[i];
-      if (t <= t1) return w0 + (w1 - w0) * ((t - t0) / (t1 - t0));
+      if (pt <= t1) return w0 + (w1 - w0) * ((pt - t0) / (t1 - t0));
     }
     return profile[profile.length - 1][1];
   }
@@ -723,9 +746,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     ctx2.lineWidth = 1;
     ctx2.stroke();
 
-    // Draw control-point dots
+    // Draw control-point dots (x at the point's normalized position within the span)
     pr.forEach(([t, w], i) => {
-      const x = t * W, y = cy - w * scale;
+      const x = _normT(t, pr) * W, y = cy - w * scale;
       ctx2.beginPath();
       ctx2.arc(x, y, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
       ctx2.fillStyle = i === selIdx ? 'rgb(0,210,255)' : 'rgba(255,255,255,0.5)';
@@ -738,84 +761,211 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     });
   }
 
+  const MIN_POINTS = 3;     // floor on profile point count
+  const T_GAP      = 0.01;  // minimum t separation between adjacent points
+  const W_MAX      = 5.0;   // half-width ceiling
+
+  let selectedIdx = 0;
   let shapeTRow = null, shapeWRow = null;
+
+  const ptLabel = (i, t) => `Point ${i + 1}  ·  t=${t.toFixed(2)}`;
 
   function buildShapeSliders(idx) {
     shapeTHost.innerHTML = '';
     shapeWHost.innerHTML = '';
     const pr   = liveShape.profile;
-    const isEndpoint = idx === 0 || idx === pr.length - 1;
+    const last = pr.length - 1;
 
-    // t-position slider
-    const tMin = isEndpoint ? pr[idx][0] : pr[idx - 1][0] + 0.01;
-    const tMax = isEndpoint ? pr[idx][0] : pr[idx + 1][0] - 0.01;
+    // Endpoints are editable now — their t reflows the span (see _profT). Bounds keep
+    // points strictly ordered with a small gap; ends are free within [0,1].
+    const tMin = idx === 0    ? 0 : pr[idx - 1][0] + T_GAP;
+    const tMax = idx === last ? 1 : pr[idx + 1][0] - T_GAP;
+
     const tResult = makeRow({
-      label: 't position',
-      decimals: 2,
-      valueStep: 0.01,
-      hasBounds: false,
+      label: 't position', decimals: 2, valueStep: 0.01, hasBounds: false,
       getVal: () => pr[idx][0],
       setVal: (v) => {
-        pr[idx][0] = Math.round(v * 100) / 100;
-        // Update option label
+        pr[idx][0] = clamp(Math.round(v * 100) / 100, tMin, tMax);
         const opt = shapePointSel.options[idx];
-        if (opt) opt.textContent = `${PT_LABELS[idx] ?? `Point ${idx}`}  t=${pr[idx][0].toFixed(2)}`;
+        if (opt) opt.textContent = ptLabel(idx, pr[idx][0]);
         FishClass.SHAPE = liveShape;
         redrawShapePreview();
         save();
       },
-      getMin: () => tMin,
-      getMax: () => tMax,
+      getMin: () => tMin, getMax: () => tMax,
     });
     shapeTHost.appendChild(tResult.row);
-    if (isEndpoint) {
-      tResult.row.querySelector('input[type="range"]').disabled = true;
-      tResult.row.querySelectorAll('.step-btn').forEach(b => b.disabled = true);
-      tResult.row.style.opacity = '0.4';
-    }
     shapeTRow = tResult;
 
-    // Half-width slider
     const wResult = makeRow({
-      label: 'Half-width',
-      decimals: 2,
-      valueStep: 0.01,
-      hasBounds: false,
+      label: 'Half-width', decimals: 2, valueStep: 0.01, hasBounds: false,
       getVal: () => pr[idx][1],
       setVal: (v) => {
-        pr[idx][1] = Math.round(v * 100) / 100;
+        pr[idx][1] = clamp(Math.round(v * 100) / 100, 0, W_MAX);
         FishClass.SHAPE = liveShape;
         redrawShapePreview();
         save();
       },
-      getMin: () => 0,
-      getMax: () => 5.0,
+      getMin: () => 0, getMax: () => W_MAX,
     });
     shapeWHost.appendChild(wResult.row);
     shapeWRow = wResult;
   }
 
-  // Populate point dropdown
-  function buildShapePointSel() {
-    shapePointSel.innerHTML = '';
-    liveShape.profile.forEach(([t, ], i) => {
-      const opt = document.createElement('option');
-      opt.value = i;
-      opt.textContent = `${PT_LABELS[i] ?? `Point ${i}`}  t=${t.toFixed(2)}`;
-      shapePointSel.appendChild(opt);
-    });
-    shapePointSel.value = 0;
+  // Enable/disable add/remove for the current selection + point count.
+  function updatePtButtons() {
+    const last = liveShape.profile.length - 1;
+    btnAddLeft.disabled  = selectedIdx === 0;
+    btnAddRight.disabled = selectedIdx === last;
+    btnRemove.disabled   = liveShape.profile.length <= MIN_POINTS;
   }
 
-  buildShapePointSel();
-  buildShapeSliders(0);
-  redrawShapePreview();
-
-  shapePointSel.addEventListener('change', () => {
-    const idx = parseInt(shapePointSel.value, 10);
-    buildShapeSliders(idx);
+  function selectPoint(idx) {
+    const last = liveShape.profile.length - 1;
+    selectedIdx = Math.max(0, Math.min(last, idx));
+    shapePointSel.value = String(selectedIdx);
+    buildShapeSliders(selectedIdx);
+    updatePtButtons();
     redrawShapePreview();
+  }
+
+  // Refresh label + slider readouts + preview after a drag/nudge (no row rebuild).
+  function syncSelected() {
+    const pr = liveShape.profile;
+    const opt = shapePointSel.options[selectedIdx];
+    if (opt) opt.textContent = ptLabel(selectedIdx, pr[selectedIdx][0]);
+    shapeTRow?.sync();
+    shapeWRow?.sync();
+    redrawShapePreview();
+  }
+
+  function buildShapePointSel() {
+    shapePointSel.innerHTML = '';
+    liveShape.profile.forEach(([t], i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = ptLabel(i, t);
+      shapePointSel.appendChild(opt);
+    });
+    shapePointSel.value = String(Math.min(selectedIdx, liveShape.profile.length - 1));
+  }
+
+  // ── Point management ─────────────────────────────────────────────────────────
+  const btnAddLeft  = panel.querySelector('#btn-pt-add-left');
+  const btnAddRight = panel.querySelector('#btn-pt-add-right');
+  const btnRemove   = panel.querySelector('#btn-pt-remove');
+
+  // Insert a point halfway (in BOTH t and half-width) toward the given neighbor.
+  function addPoint(side) {
+    const pr = liveShape.profile;
+    const nbr = selectedIdx + side;
+    if (nbr < 0 || nbr >= pr.length) return;
+    const newT = Math.round(((pr[selectedIdx][0] + pr[nbr][0]) / 2) * 100) / 100;
+    const newW = Math.round(((pr[selectedIdx][1] + pr[nbr][1]) / 2) * 100) / 100;
+    const insertAt = side < 0 ? selectedIdx : selectedIdx + 1;
+    pr.splice(insertAt, 0, [newT, newW]);
+    FishClass.SHAPE = liveShape;
+    buildShapePointSel();
+    selectPoint(insertAt);
+    save();
+  }
+  btnAddLeft.addEventListener('click',  () => addPoint(-1));
+  btnAddRight.addEventListener('click', () => addPoint(+1));
+  btnRemove.addEventListener('click', () => {
+    const pr = liveShape.profile;
+    if (pr.length <= MIN_POINTS) return;
+    pr.splice(selectedIdx, 1);
+    FishClass.SHAPE = liveShape;
+    buildShapePointSel();
+    selectPoint(Math.min(selectedIdx, pr.length - 1));
+    save();
   });
+
+  // ── Arrow nudge cluster (intentionally redundant with the sliders) ───────────
+  function nudge(dt, dw) {
+    const pr = liveShape.profile, last = pr.length - 1, i = selectedIdx;
+    if (dt) {
+      const tMin = i === 0    ? 0 : pr[i - 1][0] + T_GAP;
+      const tMax = i === last ? 1 : pr[i + 1][0] - T_GAP;
+      pr[i][0] = clamp(Math.round((pr[i][0] + dt) * 100) / 100, tMin, tMax);
+    }
+    if (dw) pr[i][1] = clamp(Math.round((pr[i][1] + dw) * 100) / 100, 0, W_MAX);
+    FishClass.SHAPE = liveShape;
+    syncSelected();
+    save();
+  }
+  panel.querySelector('#btn-pt-left').addEventListener('click',  () => nudge(-0.01, 0));
+  panel.querySelector('#btn-pt-right').addEventListener('click', () => nudge(+0.01, 0));
+  panel.querySelector('#btn-pt-up').addEventListener('click',    () => nudge(0, +0.05));
+  panel.querySelector('#btn-pt-down').addEventListener('click',  () => nudge(0, -0.05));
+
+  buildShapePointSel();
+  selectPoint(0);
+
+  shapePointSel.addEventListener('change', () => selectPoint(parseInt(shapePointSel.value, 10)));
+
+  // ── Click / drag points directly in the preview ──────────────────────────────
+  // Geometry shared by hit-testing and dragging — must match redrawShapePreview().
+  const previewGeom = () => {
+    const pr = liveShape.profile;
+    const W = shapePreview.clientWidth  || shapePreview.width  || 200;
+    const H = shapePreview.clientHeight || shapePreview.height || 60;
+    const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
+    return { pr, W, H, scale: (H / 2 - 4) / maxW, cy: H / 2 };
+  };
+
+  const pickPoint = (px, py) => {
+    const { pr, W, scale, cy } = previewGeom();
+    let best = -1, bestD = 12 * 12;   // 12px pick radius (squared)
+    pr.forEach(([t, w], i) => {
+      const x = _normT(t, pr) * W;
+      for (const yy of [cy - w * scale, cy + w * scale]) {
+        const d = (px - x) ** 2 + (py - yy) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+    });
+    return best;
+  };
+
+  const dragTo = (px, py) => {
+    const { pr, W, scale, cy } = previewGeom();
+    const last = pr.length - 1, i = selectedIdx;
+    // Half-width from the vertical distance to the centerline (both sides edit |w|).
+    pr[i][1] = clamp(Math.round((Math.abs(py - cy) / scale) * 100) / 100, 0, W_MAX);
+    // Interior points also move in t; endpoints stay pinned (their t is reflow-only).
+    if (i !== 0 && i !== last) {
+      const t0 = pr[0][0], tN = pr[last][0];
+      const rawT = t0 + clamp(px / W, 0, 1) * (tN - t0);
+      pr[i][0] = clamp(Math.round(rawT * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
+    }
+    FishClass.SHAPE = liveShape;
+    syncSelected();
+  };
+
+  let dragging = false;
+  shapePreview.addEventListener('pointerdown', (e) => {
+    const rect = shapePreview.getBoundingClientRect();
+    const hit = pickPoint(e.clientX - rect.left, e.clientY - rect.top);
+    if (hit < 0) return;
+    selectPoint(hit);
+    dragging = true;
+    shapePreview.setPointerCapture(e.pointerId);
+    dragTo(e.clientX - rect.left, e.clientY - rect.top);
+    e.preventDefault();
+  });
+  shapePreview.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const rect = shapePreview.getBoundingClientRect();
+    dragTo(e.clientX - rect.left, e.clientY - rect.top);
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try { shapePreview.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+    save();
+  };
+  shapePreview.addEventListener('pointerup', endDrag);
+  shapePreview.addEventListener('pointercancel', endDrag);
 
   // Spine / animation param sliders
   const SPINE_PARAMS = [
@@ -857,7 +1007,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       `  bendWaist:  ${liveShape.bendWaist.toFixed(3)},`,
       `  bendBody:   ${liveShape.bendBody.toFixed(3)},`,
       '  profile: [',
-      ...pr.map(([t, w], i) => `    [${t.toFixed(2)}, ${w.toFixed(2)}],  // ${PT_LABELS[i] ?? `Point ${i}`}`),
+      ...pr.map(([t, w], i) => `    [${t.toFixed(2)}, ${w.toFixed(2)}],  // point ${i + 1}`),
       '  ],',
       '};',
     ];
@@ -874,9 +1024,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   panel.querySelector('#btn-reset-shape').addEventListener('click', () => {
     liveShape = JSON.parse(JSON.stringify(defaultShape));
     FishClass.SHAPE = liveShape;
+    selectedIdx = 0;
     buildShapePointSel();
-    buildShapeSliders(parseInt(shapePointSel.value, 10));
-    redrawShapePreview();
+    selectPoint(0);
     save();
   });
 

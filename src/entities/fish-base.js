@@ -27,10 +27,15 @@ const SWIM_AMP_FLOOR = 0.06;   // faint idle tail sway kept when a fish is nearl
 
 // Half-width at position t along the body, linearly interpolated from a profile array.
 // profile: [[t, halfWidth], ...] sorted by t, t=0 (tail tip) → t=1 (head tip).
+// The spine sample t (0..1) is renormalized into the profile's first→last point span,
+// so moving an endpoint reflows the body's proportions instead of leaving a flat stub
+// or extrapolating to negative width. When the ends sit at 0 and 1 this is identity.
 function _widthAt(t, profile) {
+  const t0 = profile[0][0], tN = profile[profile.length - 1][0], span = tN - t0;
+  const pt = span > 1e-6 ? t0 + t * span : t0;
   for (let i = 1; i < profile.length; i++) {
-    const [t0, w0] = profile[i - 1], [t1, w1] = profile[i];
-    if (t <= t1) return w0 + (w1 - w0) * ((t - t0) / (t1 - t0));
+    const [a0, w0] = profile[i - 1], [a1, w1] = profile[i];
+    if (pt <= a1) return w0 + (w1 - w0) * ((pt - a0) / (a1 - a0));
   }
   return profile[profile.length - 1][1];
 }
