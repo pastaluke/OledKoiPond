@@ -314,7 +314,11 @@ primitive (`at(t) → {x,y,nx,ny}`) — the same skeleton **E13-3 appendages** h
 off, so this front-loads E13-3. Endpoints are **pinned to t=0/1** (movable
 endpoints + renormalization dropped). Slider grouping: Head/Tail offset + Waist
 under the editor pane; Tail wiggle / Waist bend / Body bend under the live pane.
-`(i)` tooltips added to all of them.
+`(i)` tooltips added to all of them. **Editor zoom/pan (2026-06-22):** points were
+too small to grab, so the editor pane is taller (130px) and zoomable — wheel zooms
+toward the cursor, drag-empty-space pans when zoomed, double-click / Fit resets,
+plus Zoom −/Fit/+ buttons. The transform is `applyView(baseFit)` layering
+zoom-about-center + pan; drag/pick invert through it.
 
 - Define `CreatureDef`; refactor `FishBase.SHAPE` into `spline` + `motion`
   (fish-first), with the legacy upgrader.

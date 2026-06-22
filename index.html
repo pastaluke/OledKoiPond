@@ -459,6 +459,14 @@
       margin-bottom: 4px;
     }
 
+    /* The editor pane is taller (more room to grab points) and owns pointer
+       gestures so dragging/zooming doesn't scroll the menu panel. */
+    .shape-preview.shape-edit {
+      height: 130px;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
     /* ── Specular ring blocks ────────────────────────────────────────────────── */
     .spec-rings { margin-top: 2px; }
     .spec-ring-block {

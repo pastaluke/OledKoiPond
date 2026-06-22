@@ -95,7 +95,12 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       <summary>Shape</summary>
       <div class="menu-rows">
         <!-- Editor pane: accurate resting silhouette with draggable points -->
-        <canvas id="shape-preview" class="shape-preview"></canvas>
+        <canvas id="shape-preview" class="shape-preview shape-edit"></canvas>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-zoom-out" title="Zoom out">Zoom −</button>
+          <button class="menu-action" id="btn-zoom-fit" title="Fit to view (or double-click the preview)">Fit</button>
+          <button class="menu-action" id="btn-zoom-in" title="Zoom in (or scroll on the preview)">Zoom +</button>
+        </div>
         <label class="menu-row">
           <span>Point</span>
           <select id="shape-point-sel" class="menu-select"></select>
@@ -707,6 +712,19 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   let selectedIdx = 0;
   let shapeTRow = null, shapeWRow = null;
   let previewXform = { sc: 1, ox: 0, oy: 0 };   // world→canvas for the editor pane (drag inverse)
+  let previewBase  = { sc: 1, ox: 0, oy: 0, W: 0, H: 0 };   // aspect-fit before zoom/pan
+  const editorView = { zoom: 1, panX: 0, panY: 0 };          // editor-pane zoom + pan
+  const EDIT_ZMAX  = 12;
+
+  // Apply the editor zoom (about the canvas center) + pan to a base fit transform.
+  function applyView(base) {
+    const W = shapePreview.width, H = shapePreview.height, z = editorView.zoom;
+    return {
+      W, H, sc: base.sc * z,
+      ox: (W / 2) * (1 - z) + base.ox * z + editorView.panX,
+      oy: (H / 2) * (1 - z) + base.oy * z + editorView.panY,
+    };
+  }
 
   const ptLabel = (i, t) => `Point ${i + 1}  ·  t=${t.toFixed(2)}`;
   const isEnd   = (i) => i === 0 || i === liveCreature.spline.points.length - 1;
@@ -743,7 +761,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   function redrawShapePreview() {
     const cre = liveCreature, pr = cre.spline.points;
     const poly = buildBodyOutline(cre.spline, cre.motion, restOpts());
-    const xf = fitPoly(shapePreview, poly);
+    previewBase = fitPoly(shapePreview, poly);
+    const xf = applyView(previewBase);
     previewXform = xf;
     const ctx2 = shapePreview.getContext('2d');
     ctx2.clearRect(0, 0, xf.W, xf.H);
@@ -977,24 +996,60 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     syncSelected();
   };
 
-  let dragging = false;
+  // Zoom helpers. clampView keeps pan sane and snaps back to centered at zoom 1.
+  function clampView() {
+    editorView.zoom = clamp(editorView.zoom, 1, EDIT_ZMAX);
+    if (editorView.zoom <= 1.0001) { editorView.zoom = 1; editorView.panX = 0; editorView.panY = 0; }
+  }
+  function zoomAround(px, py, factor) {
+    const z0 = editorView.zoom, z1 = clamp(z0 * factor, 1, EDIT_ZMAX);
+    if (z1 === z0) return;
+    // Keep the world point under (px,py) fixed across the zoom.
+    const b = previewBase, W = shapePreview.width, H = shapePreview.height;
+    const eff = previewXform;
+    const wx = (px - eff.ox) / eff.sc, wy = (py - eff.oy) / eff.sc;
+    editorView.zoom = z1;
+    editorView.panX = px - wx * (b.sc * z1) - ((W / 2) * (1 - z1) + b.ox * z1);
+    editorView.panY = py - wy * (b.sc * z1) - ((H / 2) * (1 - z1) + b.oy * z1);
+    clampView();
+    redrawShapePreview();
+  }
+
+  let dragging = false, panning = false, panStart = null;
   shapePreview.addEventListener('pointerdown', (e) => {
     const rect = shapePreview.getBoundingClientRect();
-    const hit = pickPoint(e.clientX - rect.left, e.clientY - rect.top);
-    if (hit < 0) return;
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    const hit = pickPoint(px, py);
+    if (hit < 0) {
+      // Empty space while zoomed in → pan the view.
+      if (editorView.zoom > 1) {
+        panning = true;
+        panStart = { px, py, panX: editorView.panX, panY: editorView.panY };
+        shapePreview.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }
+      return;
+    }
     // First click only selects; you drag the already-selected point to move it.
     if (hit !== selectedIdx) { selectPoint(hit); return; }
     dragging = true;
     shapePreview.setPointerCapture(e.pointerId);
-    dragTo(e.clientX - rect.left, e.clientY - rect.top);
+    dragTo(px, py);
     e.preventDefault();
   });
   shapePreview.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
     const rect = shapePreview.getBoundingClientRect();
-    dragTo(e.clientX - rect.left, e.clientY - rect.top);
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    if (panning) {
+      editorView.panX = panStart.panX + (px - panStart.px);
+      editorView.panY = panStart.panY + (py - panStart.py);
+      redrawShapePreview();
+    } else if (dragging) {
+      dragTo(px, py);
+    }
   });
   const endDrag = (e) => {
+    if (panning) { panning = false; try { shapePreview.releasePointerCapture(e.pointerId); } catch { /**/ } return; }
     if (!dragging) return;
     dragging = false;
     try { shapePreview.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
@@ -1002,6 +1057,28 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   };
   shapePreview.addEventListener('pointerup', endDrag);
   shapePreview.addEventListener('pointercancel', endDrag);
+
+  // Wheel zooms toward the cursor; double-click resets to fit.
+  shapePreview.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = shapePreview.getBoundingClientRect();
+    zoomAround(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.2 : 1 / 1.2);
+  }, { passive: false });
+  shapePreview.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    editorView.zoom = 1; editorView.panX = 0; editorView.panY = 0;
+    redrawShapePreview();
+  });
+
+  // Zoom buttons (centered) + Fit — discoverable alongside wheel/drag.
+  panel.querySelector('#btn-zoom-out').addEventListener('click', () =>
+    zoomAround(shapePreview.width / 2, shapePreview.height / 2, 1 / 1.4));
+  panel.querySelector('#btn-zoom-in').addEventListener('click', () =>
+    zoomAround(shapePreview.width / 2, shapePreview.height / 2, 1.4));
+  panel.querySelector('#btn-zoom-fit').addEventListener('click', () => {
+    editorView.zoom = 1; editorView.panX = 0; editorView.panY = 0;
+    redrawShapePreview();
+  });
 
   // ── Proportion sliders (editor pane) + motion sliders (live pane) ────────────
   const mkSpine = (host, sp) => {
