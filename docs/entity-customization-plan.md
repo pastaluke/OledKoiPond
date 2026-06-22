@@ -332,14 +332,32 @@ the **see-through line bug is gone**, and the **editor pane matches the live fis
 
 ### Phase 3 — Appendages (fins)
 
-- Implement the appendage primitive (anchor to a point, mirror, restAngle,
-  length, shape, swayOnTurn, flapOnAccel).
-- Migrate the caudal/dorsal/pelvic look from width-profile bumps to fin
-  appendages; the body profile becomes a clean torpedo.
-- Editor sub-menu for appendages.
+**Locked decisions (2026-06-22):**
+- **Geometry = reuse the profile machinery.** A fin is a *mini-outline*: its own
+  `[t,w]` width profile run through the same `makeWidthFn` + `fillOutlineCells` /
+  `strokeOutlineCells` as the body, on a short local spine rooted at the anchor.
+  Fan tail = profile widest at the tip; forked tail = two mirrored leaves or a
+  notched profile. (Max reuse; same authoring feel as the body.)
+- **Anchor via `centerline.at(t)`** (settled in E13-2) — fins auto-follow the
+  body's bend/wiggle. Mirrored across the spine by default.
+- **Top-down view ⇒ pectoral + caudal only.** We look down into the pond, so
+  pectorals (stick out the sides) and the caudal (tail, in-plane) read; **dorsal**
+  (points up at the camera → edge-on ridge) and pelvic/anal (point away) do not.
+  No dorsal/anal this phase.
+- **Default koi loadout:** clean-taper body + a **stock caudal fin** in the schema
+  (so the default is never tail-less); the user authors pectorals in the editor and
+  **Copy**-bakes their `CreatureDef`.
+- **Scope = all-in-one:** primitive + render in the fish **and both preview panes**
+  (required now the preview is accurate) + fin editor + koi migration, one phase.
+- **Fin editor reuses the dot-editor:** selecting a fin retargets the existing
+  draggable-dot + zoom editor to that fin's profile, plus fin sliders (anchor t,
+  rest angle, length, mirror, swayOnTurn, flapOnAccel).
+- **Draw order is moot** until E13-6 — all parts share the fish color, so body/fin
+  overlap is a seamless union.
 
-*Done when:* a split-tail koi is a fin object, the body is unforked, and fins
-sway/flap with motion.
+*Done when:* the koi's tail is a caudal fin object, the body is unforked, fins
+mirror + sway/flap with motion, both preview panes show fins, and a fin's shape is
+editable with the same dot UI.
 
 ### Phase 4 — Tail-pivot swish motion
 
