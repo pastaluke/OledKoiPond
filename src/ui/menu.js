@@ -11,7 +11,7 @@ import {
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
-import { buildBodyOutline, makeWidthFn, upgradeCreature } from '../entities/fish-base.js';
+import { buildBodyOutline, buildCenterline, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -94,11 +94,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     <details>
       <summary>Shape</summary>
       <div class="menu-rows">
+        <!-- Editor pane: accurate resting silhouette with draggable points -->
         <canvas id="shape-preview" class="shape-preview"></canvas>
-        <label class="menu-row">
-          <span>Animate preview</span>
-          <input type="checkbox" id="toggle-shape-animate">
-        </label>
         <label class="menu-row">
           <span>Point</span>
           <select id="shape-point-sel" class="menu-select"></select>
@@ -116,7 +113,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
           <button class="menu-action" id="btn-pt-up"    title="Widen (both sides)"><span class="wh-stack"><span>↑</span><span>↓</span></span></button>
           <button class="menu-action" id="btn-pt-down"  title="Narrow (both sides)"><span class="wh-stack"><span>↓</span><span>↑</span></span></button>
         </div>
-        <div id="shape-spine-sliders"></div>
+        <div id="shape-proportion-sliders"></div>
+        <!-- Live pane: the real fish swimming (gentle weave shows wiggle + bends) -->
+        <canvas id="shape-live" class="shape-preview"></canvas>
+        <div id="shape-motion-sliders"></div>
         <div class="menu-btn-row">
           <button class="menu-action" id="btn-copy-shape">Copy values</button>
           <button class="menu-action" id="btn-reset-shape">Reset</button>
@@ -690,122 +690,120 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   fishHost.appendChild(countRow);
 
   // ── Shape editor ─────────────────────────────────────────────────────────────
-  const shapePreview  = panel.querySelector('#shape-preview');
-  const shapePointSel = panel.querySelector('#shape-point-sel');
-  const shapeTHost    = panel.querySelector('#shape-t-row');
-  const shapeWHost    = panel.querySelector('#shape-w-row');
-  const shapeSpineHost = panel.querySelector('#shape-spine-sliders');
+  const shapePreview    = panel.querySelector('#shape-preview');   // editor pane (static + dots)
+  const shapeLive       = panel.querySelector('#shape-live');      // live pane (animated, weaving)
+  const shapePointSel   = panel.querySelector('#shape-point-sel');
+  const shapeTHost      = panel.querySelector('#shape-t-row');
+  const shapeWHost      = panel.querySelector('#shape-w-row');
+  const shapePropHost   = panel.querySelector('#shape-proportion-sliders');
+  const shapeMotionHost = panel.querySelector('#shape-motion-sliders');
 
-  const shapeAnimToggle = panel.querySelector('#toggle-shape-animate');
+  const MIN_POINTS  = 3;     // floor on point count
+  const T_GAP       = 0.01;  // minimum t separation between adjacent points
+  const W_MAX       = 5.0;   // half-width ceiling
+  const PREVIEW_LEN = 16;    // nominal body length both preview panes draw at
+  const WEAVE_BEND  = 0.55;  // steeringBend amplitude of the live pane's lazy S-weave
 
-  // Normalized 0..1 position of a stored point's t within the span — used to place
-  // the preview dots so they sit on the (also-renormalized) silhouette.
-  const _normT = (t, pr) => {
-    const t0 = pr[0][0], tN = pr[pr.length - 1][0], span = tN - t0;
-    return span > 1e-6 ? (t - t0) / span : 0;
-  };
+  let selectedIdx = 0;
+  let shapeTRow = null, shapeWRow = null;
+  let previewXform = { sc: 1, ox: 0, oy: 0 };   // world→canvas for the editor pane (drag inverse)
 
-  // STATIC preview: the width profile stretched to fill the box (good for editing),
-  // using the same monotone-cubic width function as the real renderer, plus the
-  // draggable control-point dots. Skipped while the animated preview loop runs.
-  function redrawShapePreview() {
-    if (animRAF) return;
-    const pr = liveCreature.spline.points;
-    const widthAt = makeWidthFn(pr);
-    const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
-    const W = shapePreview.clientWidth || 200;
-    const H = shapePreview.clientHeight || 60;
-    shapePreview.width  = W;
-    shapePreview.height = H;
-    const ctx2 = shapePreview.getContext('2d');
-    ctx2.clearRect(0, 0, W, H);
+  const ptLabel = (i, t) => `Point ${i + 1}  ·  t=${t.toFixed(2)}`;
+  const isEnd   = (i) => i === 0 || i === liveCreature.spline.points.length - 1;
+  const restOpts = () => ({ headAngle: 0, steeringBend: 0, swimOsc: 0, length: PREVIEW_LEN, swimAmp: 0 });
 
-    const scale  = (H / 2 - 4) / maxW;
-    const cy     = H / 2;
-    const selIdx = parseInt(shapePointSel.value, 10);
-
-    ctx2.beginPath();
-    const STEPS = 96;
-    for (let i = 0; i <= STEPS; i++) { const t = i / STEPS; ctx2.lineTo(t * W, cy - widthAt(t) * scale); }
-    for (let i = STEPS; i >= 0; i--) { const t = i / STEPS; ctx2.lineTo(t * W, cy + widthAt(t) * scale); }
-    ctx2.closePath();
-    ctx2.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx2.fill();
-    ctx2.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx2.lineWidth = 1;
-    ctx2.stroke();
-
-    // Draw control-point dots (x at the point's normalized position within the span)
-    pr.forEach(([t, w], i) => {
-      const x = _normT(t, pr) * W, y = cy - w * scale;
-      ctx2.beginPath();
-      ctx2.arc(x, y, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
-      ctx2.fillStyle = i === selIdx ? 'rgb(0,210,255)' : 'rgba(255,255,255,0.5)';
-      ctx2.fill();
-      ctx2.beginPath();
-      ctx2.arc(x, cy + w * scale, i === selIdx ? 4 : 2.5, 0, Math.PI * 2);
-      ctx2.fillStyle = i === selIdx ? 'rgba(0,210,255,0.5)' : 'rgba(255,255,255,0.25)';
-      ctx2.fill();
-    });
-  }
-
-  // ANIMATED preview: render the real body through buildBodyOutline (the live render
-  // pipeline) with a gentle idle wiggle, fit to the box. No dots — it's a motion view.
-  let animRAF = 0, animPhase = 0, animPrevTs = 0;
-  function drawAnimatedPreview(ts) {
-    animPhase += (animPrevTs ? ts - animPrevTs : 16) * 0.004;
-    animPrevTs = ts;
-    const cre = liveCreature;
-    const poly = buildBodyOutline(cre.spline, cre.motion, {
-      headAngle: 0, steeringBend: 0, swimOsc: Math.sin(animPhase), length: 16, swimAmp: 1,
-    });
-    const W = shapePreview.clientWidth || 200, H = shapePreview.clientHeight || 60;
-    shapePreview.width = W; shapePreview.height = H;
-    const ctx2 = shapePreview.getContext('2d');
-    ctx2.clearRect(0, 0, W, H);
+  // Fit a world-space polygon into a canvas, preserving aspect (no fish-stretch). Sets
+  // the canvas backing size and returns the transform; pad leaves room for the dots.
+  function fitPoly(canvas, poly, pad = 10) {
+    const W = canvas.clientWidth || 240, H = canvas.clientHeight || 90;
+    canvas.width = W; canvas.height = H;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const p of poly) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     }
     const bw = maxX - minX || 1, bh = maxY - minY || 1;
-    const sc = Math.min((W - 8) / bw, (H - 8) / bh);
-    const ox = (W - bw * sc) / 2 - minX * sc, oy = (H - bh * sc) / 2 - minY * sc;
+    const sc = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh);
+    return { W, H, sc, ox: (W - bw * sc) / 2 - minX * sc, oy: (H - bh * sc) / 2 - minY * sc };
+  }
+
+  const strokePoly = (ctx2, poly, xf, fill, stroke) => {
     ctx2.beginPath();
-    poly.forEach((p, i) => { const x = p.x * sc + ox, y = p.y * sc + oy; i ? ctx2.lineTo(x, y) : ctx2.moveTo(x, y); });
+    poly.forEach((p, i) => {
+      const x = p.x * xf.sc + xf.ox, y = p.y * xf.sc + xf.oy;
+      i ? ctx2.lineTo(x, y) : ctx2.moveTo(x, y);
+    });
     ctx2.closePath();
-    ctx2.fillStyle = 'rgba(255,255,255,0.12)'; ctx2.fill();
-    ctx2.strokeStyle = 'rgba(0,210,255,0.45)'; ctx2.lineWidth = 1; ctx2.stroke();
-    animRAF = requestAnimationFrame(drawAnimatedPreview);
+    ctx2.fillStyle = fill; ctx2.fill();
+    ctx2.strokeStyle = stroke; ctx2.lineWidth = 1; ctx2.stroke();
+  };
+
+  // Editor pane: the accurate RESTING silhouette + draggable control-point dots.
+  // Dots sit on the real outline — centerline.at(t) offset by ±w along the normal.
+  function redrawShapePreview() {
+    const cre = liveCreature, pr = cre.spline.points;
+    const poly = buildBodyOutline(cre.spline, cre.motion, restOpts());
+    const xf = fitPoly(shapePreview, poly);
+    previewXform = xf;
+    const ctx2 = shapePreview.getContext('2d');
+    ctx2.clearRect(0, 0, xf.W, xf.H);
+    strokePoly(ctx2, poly, xf, 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0.30)');
+
+    const spine = buildCenterline(cre.spline, cre.motion, restOpts());
+    pr.forEach(([t, w], i) => {
+      const f = spine.at(t);
+      for (const sgn of [1, -1]) {
+        const x = (f.x + f.nx * w * sgn) * xf.sc + xf.ox;
+        const y = (f.y + f.ny * w * sgn) * xf.sc + xf.oy;
+        ctx2.beginPath();
+        ctx2.arc(x, y, i === selectedIdx ? 4 : 2.5, 0, Math.PI * 2);
+        ctx2.fillStyle = i === selectedIdx
+          ? (sgn > 0 ? 'rgb(0,210,255)' : 'rgba(0,210,255,0.5)')
+          : (sgn > 0 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.25)');
+        ctx2.fill();
+      }
+    });
   }
-  function setShapeAnimate(on) {
-    if (on && !animRAF) { animPrevTs = 0; animRAF = requestAnimationFrame(drawAnimatedPreview); }
-    else if (!on && animRAF) { cancelAnimationFrame(animRAF); animRAF = 0; redrawShapePreview(); }
+
+  // Live pane: the real fish swimming with a lazy S-weave, so the tail wiggle AND both
+  // bends are visible. Runs only while the Shape section is open.
+  let liveRAF = 0, livePhase = 0, livePrevTs = 0;
+  function drawLivePreview(ts) {
+    livePhase += (livePrevTs ? ts - livePrevTs : 16) * 0.004;
+    livePrevTs = ts;
+    const cre = liveCreature;
+    const poly = buildBodyOutline(cre.spline, cre.motion, {
+      headAngle: 0,
+      steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND,
+      swimOsc: Math.sin(livePhase),
+      length: PREVIEW_LEN, swimAmp: 1,
+    });
+    const xf = fitPoly(shapeLive, poly);
+    const ctx2 = shapeLive.getContext('2d');
+    ctx2.clearRect(0, 0, xf.W, xf.H);
+    strokePoly(ctx2, poly, xf, 'rgba(0,210,255,0.10)', 'rgba(0,210,255,0.5)');
+    liveRAF = requestAnimationFrame(drawLivePreview);
   }
-  if (shapeAnimToggle) shapeAnimToggle.addEventListener('change', (e) => setShapeAnimate(e.target.checked));
-
-  const MIN_POINTS = 3;     // floor on profile point count
-  const T_GAP      = 0.01;  // minimum t separation between adjacent points
-  const W_MAX      = 5.0;   // half-width ceiling
-
-  let selectedIdx = 0;
-  let shapeTRow = null, shapeWRow = null;
-
-  const ptLabel = (i, t) => `Point ${i + 1}  ·  t=${t.toFixed(2)}`;
+  function setLivePreview(on) {
+    if (on && !liveRAF) { livePrevTs = 0; liveRAF = requestAnimationFrame(drawLivePreview); }
+    else if (!on && liveRAF) { cancelAnimationFrame(liveRAF); liveRAF = 0; }
+  }
 
   function buildShapeSliders(idx) {
     shapeTHost.innerHTML = '';
     shapeWHost.innerHTML = '';
     const pr   = liveCreature.spline.points;
     const last = pr.length - 1;
+    const endpoint = idx === 0 || idx === last;
 
-    // Endpoints are editable now — their t reflows the span (renormalized in
-    // makeWidthFn). Bounds keep points strictly ordered with a small gap; ends free in [0,1].
+    // First/last points are pinned to t=0 / t=1; interior t is bounded by neighbors.
     const tMin = idx === 0    ? 0 : pr[idx - 1][0] + T_GAP;
     const tMax = idx === last ? 1 : pr[idx + 1][0] - T_GAP;
 
     const tResult = makeRow({
-      label: 't position', decimals: 2, valueStep: 0.01, hasBounds: false,
+      label: 't position',
+      infoText: 'Where this point sits along the body: 0 = tail tip, 1 = snout. The first and last points are pinned at the ends.',
+      decimals: 2, valueStep: 0.01, hasBounds: false,
       getVal: () => pr[idx][0],
       setVal: (v) => {
         pr[idx][0] = clamp(Math.round(v * 100) / 100, tMin, tMax);
@@ -818,10 +816,17 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       getMin: () => tMin, getMax: () => tMax,
     });
     shapeTHost.appendChild(tResult.row);
+    if (endpoint) {
+      tResult.row.querySelector('input[type="range"]').disabled = true;
+      tResult.row.querySelectorAll('.step-btn').forEach((b) => b.disabled = true);
+      tResult.row.style.opacity = '0.4';
+    }
     shapeTRow = tResult;
 
     const wResult = makeRow({
-      label: 'Half-width', decimals: 2, valueStep: 0.01, hasBounds: false,
+      label: 'Half-width',
+      infoText: 'Body half-thickness at this point (mirrored top and bottom).',
+      decimals: 2, valueStep: 0.01, hasBounds: false,
       getVal: () => pr[idx][1],
       setVal: (v) => {
         pr[idx][1] = clamp(Math.round(v * 100) / 100, 0, W_MAX);
@@ -835,12 +840,15 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     shapeWRow = wResult;
   }
 
-  // Enable/disable add/remove for the current selection + point count.
+  // Enable/disable add/remove/nudge for the current selection. Endpoints are pinned:
+  // they can't be removed or moved in t (keeps t=0 / t=1 always present).
   function updatePtButtons() {
     const last = liveCreature.spline.points.length - 1;
     btnAddLeft.disabled  = selectedIdx === 0;
     btnAddRight.disabled = selectedIdx === last;
-    btnRemove.disabled   = liveCreature.spline.points.length <= MIN_POINTS;
+    btnRemove.disabled   = isEnd(selectedIdx) || liveCreature.spline.points.length <= MIN_POINTS;
+    btnPtLeft.disabled   = isEnd(selectedIdx);
+    btnPtRight.disabled  = isEnd(selectedIdx);
   }
 
   function selectPoint(idx) {
@@ -877,6 +885,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   const btnAddLeft  = panel.querySelector('#btn-pt-add-left');
   const btnAddRight = panel.querySelector('#btn-pt-add-right');
   const btnRemove   = panel.querySelector('#btn-pt-remove');
+  const btnPtLeft   = panel.querySelector('#btn-pt-left');
+  const btnPtRight  = panel.querySelector('#btn-pt-right');
 
   // Insert a point halfway (in BOTH t and half-width) toward the given neighbor.
   function addPoint(side) {
@@ -896,7 +906,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   btnAddRight.addEventListener('click', () => addPoint(+1));
   btnRemove.addEventListener('click', () => {
     const pr = liveCreature.spline.points;
-    if (pr.length <= MIN_POINTS) return;
+    if (isEnd(selectedIdx) || pr.length <= MIN_POINTS) return;
     pr.splice(selectedIdx, 1);
     FishClass.CREATURE = liveCreature;
     buildShapePointSel();
@@ -907,9 +917,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // ── Arrow nudge cluster (intentionally redundant with the sliders) ───────────
   function nudge(dt, dw) {
     const pr = liveCreature.spline.points, last = pr.length - 1, i = selectedIdx;
-    if (dt) {
-      const tMin = i === 0    ? 0 : pr[i - 1][0] + T_GAP;
-      const tMax = i === last ? 1 : pr[i + 1][0] - T_GAP;
+    if (dt && !isEnd(i)) {
+      const tMin = pr[i - 1][0] + T_GAP, tMax = pr[i + 1][0] - T_GAP;
       pr[i][0] = clamp(Math.round((pr[i][0] + dt) * 100) / 100, tMin, tMax);
     }
     if (dw) pr[i][1] = clamp(Math.round((pr[i][1] + dw) * 100) / 100, 0, W_MAX);
@@ -917,33 +926,29 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     syncSelected();
     save();
   }
-  panel.querySelector('#btn-pt-left').addEventListener('click',  () => nudge(-0.01, 0));
-  panel.querySelector('#btn-pt-right').addEventListener('click', () => nudge(+0.01, 0));
-  panel.querySelector('#btn-pt-up').addEventListener('click',    () => nudge(0, +0.05));
-  panel.querySelector('#btn-pt-down').addEventListener('click',  () => nudge(0, -0.05));
+  btnPtLeft.addEventListener('click',  () => nudge(-0.01, 0));
+  btnPtRight.addEventListener('click', () => nudge(+0.01, 0));
+  panel.querySelector('#btn-pt-up').addEventListener('click',   () => nudge(0, +0.05));
+  panel.querySelector('#btn-pt-down').addEventListener('click', () => nudge(0, -0.05));
 
   buildShapePointSel();
   selectPoint(0);
 
   shapePointSel.addEventListener('change', () => selectPoint(parseInt(shapePointSel.value, 10)));
 
-  // ── Click / drag points directly in the preview ──────────────────────────────
-  // Geometry shared by hit-testing and dragging — must match redrawShapePreview().
-  const previewGeom = () => {
-    const pr = liveCreature.spline.points;
-    const W = shapePreview.clientWidth  || shapePreview.width  || 200;
-    const H = shapePreview.clientHeight || shapePreview.height || 60;
-    const maxW = Math.max(...pr.map(([, w]) => w), 0.1);
-    return { pr, W, H, scale: (H / 2 - 4) / maxW, cy: H / 2 };
-  };
-
+  // ── Click / drag points on the editor pane ───────────────────────────────────
+  // Both hit-testing and dragging go through the centerline + the editor's fit
+  // transform, so dots sit on (and follow) the real silhouette.
   const pickPoint = (px, py) => {
-    const { pr, W, scale, cy } = previewGeom();
-    let best = -1, bestD = 12 * 12;   // 12px pick radius (squared)
+    const pr = liveCreature.spline.points, xf = previewXform;
+    const spine = buildCenterline(liveCreature.spline, liveCreature.motion, restOpts());
+    let best = -1, bestD = 14 * 14;   // 14px pick radius (squared)
     pr.forEach(([t, w], i) => {
-      const x = _normT(t, pr) * W;
-      for (const yy of [cy - w * scale, cy + w * scale]) {
-        const d = (px - x) ** 2 + (py - yy) ** 2;
+      const f = spine.at(t);
+      for (const sgn of [1, -1]) {
+        const x = (f.x + f.nx * w * sgn) * xf.sc + xf.ox;
+        const y = (f.y + f.ny * w * sgn) * xf.sc + xf.oy;
+        const d = (px - x) ** 2 + (py - y) ** 2;
         if (d < bestD) { bestD = d; best = i; }
       }
     });
@@ -951,16 +956,23 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   };
 
   const dragTo = (px, py) => {
-    const { pr, W, scale, cy } = previewGeom();
-    const last = pr.length - 1, i = selectedIdx;
-    // Half-width from the vertical distance to the centerline (both sides edit |w|).
-    pr[i][1] = clamp(Math.round((Math.abs(py - cy) / scale) * 100) / 100, 0, W_MAX);
-    // Interior points also move in t; endpoints stay pinned (their t is reflow-only).
-    if (i !== 0 && i !== last) {
-      const t0 = pr[0][0], tN = pr[last][0];
-      const rawT = t0 + clamp(px / W, 0, 1) * (tN - t0);
-      pr[i][0] = clamp(Math.round(rawT * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
+    const pr = liveCreature.spline.points, last = pr.length - 1, i = selectedIdx, xf = previewXform;
+    const wx = (px - xf.ox) / xf.sc, wy = (py - xf.oy) / xf.sc;   // canvas → world
+    const spine = buildCenterline(liveCreature.spline, liveCreature.motion, restOpts());
+    let t = pr[i][0];
+    if (!isEnd(i)) {
+      // Interior: snap t to the nearest point along the spine under the cursor.
+      let bestT = t, bestD = Infinity;
+      for (let s = 0; s <= 200; s++) {
+        const tt = s / 200, f = spine.at(tt), d = (f.x - wx) ** 2 + (f.y - wy) ** 2;
+        if (d < bestD) { bestD = d; bestT = tt; }
+      }
+      t = clamp(Math.round(bestT * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
+      pr[i][0] = t;
     }
+    const f = spine.at(t);
+    const w = Math.abs((wx - f.x) * f.nx + (wy - f.y) * f.ny);   // perpendicular distance
+    pr[i][1] = clamp(Math.round(w * 100) / 100, 0, W_MAX);
     FishClass.CREATURE = liveCreature;
     syncSelected();
   };
@@ -991,21 +1003,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   shapePreview.addEventListener('pointerup', endDrag);
   shapePreview.addEventListener('pointercancel', endDrag);
 
-  // Spine / motion param sliders. `obj` selects the CreatureDef sub-object.
-  const SPINE_PARAMS = [
-    { obj: 'spline', key: 'headFrac',  label: 'Head offset', min: 0.10, max: 0.80 },
-    { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90 },
-    { obj: 'spline', key: 'waistFrac', label: 'Waist',       min: 0.05, max: 0.60 },
-    { obj: 'motion', key: 'swishAmp',  label: 'Tail wiggle', min: 0.00, max: 0.50 },
-    { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50 },
-    { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50 },
-  ];
-  for (const sp of SPINE_PARAMS) {
+  // ── Proportion sliders (editor pane) + motion sliders (live pane) ────────────
+  const mkSpine = (host, sp) => {
     const { row } = makeRow({
-      label: sp.label,
-      decimals: 3,
-      valueStep: 0.001,
-      hasBounds: false,
+      label: sp.label, infoText: sp.info, decimals: 3, valueStep: 0.001, hasBounds: false,
       getVal: () => liveCreature[sp.obj][sp.key],
       setVal: (v) => {
         liveCreature[sp.obj][sp.key] = Math.round(v * 1000) / 1000;
@@ -1013,11 +1014,28 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         redrawShapePreview();
         save();
       },
-      getMin: () => sp.min,
-      getMax: () => sp.max,
+      getMin: () => sp.min, getMax: () => sp.max,
     });
-    shapeSpineHost.appendChild(row);
-  }
+    host.appendChild(row);
+  };
+  // Resting-shape proportions — visible in the editor pane.
+  [
+    { obj: 'spline', key: 'headFrac',  label: 'Head offset', min: 0.10, max: 0.80,
+      info: 'How far the snout reaches ahead of center, as a fraction of length. Larger = longer front half.' },
+    { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90,
+      info: 'How far the tail tip reaches behind center. Larger = longer back half. (Head + Tail ≈ total nose-to-tail length.)' },
+    { obj: 'spline', key: 'waistFrac', label: 'Waist',       min: 0.05, max: 0.60,
+      info: 'Where the neck between body and tail sits, and where the tail section meets the body. Larger = waist further forward.' },
+  ].forEach((sp) => mkSpine(shapePropHost, sp));
+  // Motion — only visible in the live pane (wiggle while swimming; bends while turning).
+  [
+    { obj: 'motion', key: 'swishAmp',  label: 'Tail wiggle', min: 0.00, max: 0.50,
+      info: 'How far the tail swings side-to-side while swimming. Only shows in the live pane. 0 = stiff tail.' },
+    { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50,
+      info: 'How much the waist bows sideways when the fish turns. Shown by the live pane’s weave. 0 = stays straight.' },
+    { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50,
+      info: 'How much the mid-body bows when turning — with Waist bend it shapes the turning C-curve. Shown in the live pane.' },
+  ].forEach((sp) => mkSpine(shapeMotionHost, sp));
 
   // Copy values — emit the live CreatureDef as JSON (paste into a class override).
   panel.querySelector('#btn-copy-shape').addEventListener('click', async () => {
@@ -1040,11 +1058,11 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     save();
   });
 
-  // When the Shape section opens, refresh the preview (canvas may have been 0-size
-  // while hidden) and resume animation if the toggle is on; pause it when closed.
+  // Shape section open → draw the editor pane (canvas may have been 0-size when hidden)
+  // and run the live pane; closed → pause the live loop.
   panel.querySelector('#shape-preview').closest('details').addEventListener('toggle', (e) => {
-    if (e.target.open) { shapeAnimToggle?.checked ? setShapeAnimate(true) : redrawShapePreview(); }
-    else setShapeAnimate(false);
+    if (e.target.open) { redrawShapePreview(); setLivePreview(true); }
+    else setLivePreview(false);
   });
 
   // ── Build display sliders (grid knobs) ────────────────────────────────────────

@@ -295,24 +295,36 @@ clicking/dragging/adding, ends included, and it persists & renders correctly.
 
 **Locked decisions (2026-06-21):** monotone-cubic (Fritsch–Carlson) width;
 nonzero-winding fill; rename `FishBase.SHAPE` → `FishBase.CREATURE` and the
-persisted `shape` key → `creature` (legacy upgrader reads the old key/format);
-editor preview gets a **pose toggle** — static rest pose (default, for precise
-editing) *and* a gentle idle wiggle. **Scope note:** `spline.points` stay `[t,w]`
-tuples in this phase to keep the E13-1 editor intact; they become `{t,w,pivot}`
-objects in **E13-4** when the pivot flag is actually needed. Motion behavior is
-unchanged here (`motion.swishAmp` == old `wiggleFrac`; `swishRate`/`swishCurve`
-carried but unused until E13-4).
+persisted `shape` key → `creature` (legacy upgrader reads the old key/format).
+**Scope note:** `spline.points` stay `[t,w]` tuples in this phase to keep the
+E13-1 editor intact; they become `{t,w,pivot}` objects in **E13-4** when the
+pivot flag is actually needed. Motion behavior is unchanged here
+(`motion.swishAmp` == old `wiggleFrac`; `swishRate`/`swishCurve` carried but
+unused until E13-4).
+
+**Preview rework (2026-06-22):** the first preview attempt drew the static pane
+as a *width-vs-t graph* stretched to the box — wildly inaccurate vs the real fish.
+Replaced with **two always-on panes** (the toggle is gone): an **editor pane**
+(accurate resting silhouette + draggable dots) and a **live pane** (the real fish
+swimming a gentle S-weave so tail wiggle *and* both bends are visible). Both panes
+render the real `buildBodyOutline`, fit aspect-preserving (no fish-stretch, no
+dynamic box resize), oriented E–W head-right. To place dots on the true outline
+and invert drags, the centerline was extracted into a shared **`buildCenterline`**
+primitive (`at(t) → {x,y,nx,ny}`) — the same skeleton **E13-3 appendages** hang
+off, so this front-loads E13-3. Endpoints are **pinned to t=0/1** (movable
+endpoints + renormalization dropped). Slider grouping: Head/Tail offset + Waist
+under the editor pane; Tail wiggle / Waist bend / Body bend under the live pane.
+`(i)` tooltips added to all of them.
 
 - Define `CreatureDef`; refactor `FishBase.SHAPE` into `spline` + `motion`
   (fish-first), with the legacy upgrader.
 - Rebuild the renderer into composed closed parts (body now; appendage &
   pattern layers are the obvious next entries in the parts loop). Monotone-cubic
   width; nonzero-winding polygon fill; connected-segment outline.
-- Make the editor preview share the body-outline builder (WYSIWYG width shaping)
-  with the static/animated pose toggle.
+- Extract `buildCenterline`; both the renderer and the editor panes consume it.
 
-*Done when:* fish render identically-or-better with no faceting, no outline
-gaps, and the **see-through line bug is gone** for both collapsed and forked tips.
+*Done when:* fish render identically-or-better with no faceting, no outline gaps,
+the **see-through line bug is gone**, and the **editor pane matches the live fish**.
 
 ### Phase 3 — Appendages (fins)
 

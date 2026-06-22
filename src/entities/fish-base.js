@@ -74,18 +74,17 @@ export function makeWidthFn(points) {
   };
 }
 
-// Build the closed body outline polygon in WORLD units, relative to the fish center.
-// Returns an ordered ring of {x,y}: top edge tail→head, then bottom edge head→tail.
-// The caller scales to display cells and rasterizes. Shared by the live renderer and
-// the editor preview so they agree on the body shape.
+// The body's kinematic skeleton in WORLD units, relative to the fish center. Returns
+// { at(t), waistFrac } where at(t) gives { x, y, nx, ny } — position + unit normal at
+// body parameter t (0=tail tip, 1=snout), bent by steering and wiggled by swim. This is
+// the shared spine the body outline AND (future) appendages + the editor's dots hang off.
 //   headAngle    : head direction (rad; 0=east, π/2=south-screen)
 //   steeringBend : body curvature (+= right, -= left)
 //   swimOsc      : swim oscillation in [-1, 1]
 //   length       : nose-to-tail world units
 //   spline/motion: from a CreatureDef (see FishBase.CREATURE)
-export function buildBodyOutline(spline, motion, { headAngle, steeringBend, swimOsc, length, swimAmp = 1 }) {
-  const { headFrac, tailFrac, waistFrac, bendWaist, bendBody, points } = spline;
-  const widthAt = makeWidthFn(points);
+export function buildCenterline(spline, motion, { headAngle, steeringBend, swimOsc, length, swimAmp = 1 }) {
+  const { headFrac, tailFrac, waistFrac, bendWaist, bendBody } = spline;
 
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
@@ -105,27 +104,45 @@ export function buildBodyOutline(spline, motion, { headAngle, steeringBend, swim
   const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
   const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
 
-  const TAIL_STEPS = 30, BODY_STEPS = 66;   // resolution-independent polygon; density applied by the rasterizer
-  const top = [], bot = [];
-  const sample = (bx, by, dx, dy, t) => {
-    const dl = Math.sqrt(dx * dx + dy * dy) || 1;
-    const nx = -dy / dl, ny = dx / dl, w = widthAt(t);
-    top.push({ x: bx + nx * w, y: by + ny * w });
-    bot.push({ x: bx - nx * w, y: by - ny * w });
+  // Position + unit normal at body parameter t (0=tail tip, 1=snout). Two quadratic
+  // bézier segments meet at the waist (profile-t === waistFrac).
+  const at = (t) => {
+    let bx, by, dx, dy;
+    if (t <= waistFrac) {
+      const s = waistFrac > 1e-6 ? t / waistFrac : 0;
+      bx = (1-s)*(1-s)*Tx + 2*(1-s)*s*TCx + s*s*Wx;
+      by = (1-s)*(1-s)*Ty + 2*(1-s)*s*TCy + s*s*Wy;
+      dx = 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx);
+      dy = 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy);
+    } else {
+      const s = (t - waistFrac) / (1 - waistFrac);
+      bx = (1-s)*(1-s)*Wx + 2*(1-s)*s*BCx + s*s*Hx;
+      by = (1-s)*(1-s)*Wy + 2*(1-s)*s*BCy + s*s*Hy;
+      dx = 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx);
+      dy = 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy);
+    }
+    const dl = Math.sqrt(dx*dx + dy*dy) || 1;
+    return { x: bx, y: by, nx: -dy/dl, ny: dx/dl };
   };
 
-  for (let i = 0; i <= TAIL_STEPS; i++) {
-    const s = i / TAIL_STEPS, t = s * waistFrac;
-    const bx = (1-s)*(1-s)*Tx + 2*(1-s)*s*TCx + s*s*Wx;
-    const by = (1-s)*(1-s)*Ty + 2*(1-s)*s*TCy + s*s*Wy;
-    sample(bx, by, 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx), 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy), t);
-  }
-  for (let i = 1; i <= BODY_STEPS; i++) {   // start at 1: i=0 duplicates the waist sample
-    const s = i / BODY_STEPS, t = waistFrac + s * (1 - waistFrac);
-    const bx = (1-s)*(1-s)*Wx + 2*(1-s)*s*BCx + s*s*Hx;
-    const by = (1-s)*(1-s)*Wy + 2*(1-s)*s*BCy + s*s*Hy;
-    sample(bx, by, 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx), 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy), t);
-  }
+  return { at, waistFrac };
+}
+
+// Closed body outline ring {x,y} (world units): offset the centerline by ±half-width.
+// top edge tail→head, then bottom edge head→tail. Caller scales to cells + rasterizes.
+export function buildBodyOutline(spline, motion, opts) {
+  const widthAt = makeWidthFn(spline.points);
+  const spine = buildCenterline(spline, motion, opts);
+  const TAIL_STEPS = 30, BODY_STEPS = 66;   // resolution-independent polygon; density applied by the rasterizer
+
+  const top = [], bot = [];
+  const push = (t) => {
+    const f = spine.at(t), w = widthAt(t);
+    top.push({ x: f.x + f.nx * w, y: f.y + f.ny * w });
+    bot.push({ x: f.x - f.nx * w, y: f.y - f.ny * w });
+  };
+  for (let i = 0; i <= TAIL_STEPS; i++) push((i / TAIL_STEPS) * spine.waistFrac);
+  for (let i = 1; i <= BODY_STEPS; i++) push(spine.waistFrac + (i / BODY_STEPS) * (1 - spine.waistFrac));
 
   const ring = top.slice();
   for (let i = bot.length - 1; i >= 0; i--) ring.push(bot[i]);
