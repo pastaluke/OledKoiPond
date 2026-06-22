@@ -330,6 +330,17 @@ sway/flap with motion.
 - Use the pivot-flagged point: everything tailward swishes about it as a unit;
   `swishCurve` makes the tip wag most. Replaces the current mid-tail wobble.
 - Tunable via `motion.*`.
+- **Schema bump (do here):** convert `spline.points` `[t,w]` → `{t,w,pivot}`
+  objects (needed for the pivot flag) and bump `schemaVersion`. While touching it,
+  **trim `upgradeCreature`**: drop the now-dead legacy flat-`SHAPE` branch (no
+  precious old data, single machine), but keep a thin load boundary
+  (clone + version-route + validate). Rationale: local persistence and future
+  **cross-machine import** (E6 "copy entity") are the same boundary problem —
+  deserializing external/old data into the one canonical `CreatureDef`. Keeping a
+  single boundary + a real `schemaVersion` makes import a localized extension (a
+  versioned migration *chain* + defensive validation of untrusted input) rather
+  than a refactor. Keep `CreatureDef` strictly JSON-serializable so export is just
+  `JSON.stringify`.
 
 *Done when:* the tail "swishes" believably and the old wobble is gone.
 
