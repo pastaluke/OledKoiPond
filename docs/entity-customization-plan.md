@@ -359,6 +359,18 @@ the **see-through line bug is gone**, and the **editor pane matches the live fis
 mirror + sway/flap with motion, both preview panes show fins, and a fin's shape is
 editable with the same dot UI.
 
+**Shipped (2026-06-22):** `buildFinOutline`/`buildAppendageOutlines` — a fin is a
+mini-outline (own `[s,w]` profile via `makeWidthFn`) on a short spine rooted via
+`centerline.at(anchor)`; `side` 0 = centered fan, ±1 = side fin; `mirror` pairs it;
+`angle` sweeps out→tailward; `swayOnTurn`+`flapOnAccel` modulate it. Default koi:
+clean torpedo body + a stock **centered caudal fan** (the mirrored-lobes attempt
+read as a bowtie, so centered won). Fins render in the fish and both preview panes.
+Fin editor: an **Edit: Body / Fin N** selector; fins get placement sliders
+(anchor/angle/length/centered/mirror/sway/flap) and their *shape* is edited by the
+existing Point editor retargeted to the fin's profile. **Note:** canvas dot-drag is
+body-only for now; fins are edited via sliders (drag-on-fin can be a fast-follow).
+Author pectorals in the editor → **Copy** the `CreatureDef` to bake.
+
 ### Phase 4 — Tail-pivot swish motion
 
 - Use the pivot-flagged point: everything tailward swishes about it as a unit;
