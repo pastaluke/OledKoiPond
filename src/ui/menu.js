@@ -725,7 +725,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   let editSel = 'body';
   const targetIsBody = () => editSel === 'body';
   const activePoints = () => targetIsBody()
-    ? activePoints()
+    ? liveCreature.spline.points
     : liveCreature.appendages[editSel].profile;
   let shapeTRow = null, shapeWRow = null;
   let previewXform = { sc: 1, ox: 0, oy: 0 };   // world→canvas for the editor pane (drag inverse)
