@@ -367,9 +367,10 @@ clean torpedo body + a stock **centered caudal fan** (the mirrored-lobes attempt
 read as a bowtie, so centered won). Fins render in the fish and both preview panes.
 Fin editor: an **Edit: Body / Fin N** selector; fins get placement sliders
 (anchor/angle/length/centered/mirror/sway/flap) and their *shape* is edited by the
-existing Point editor retargeted to the fin's profile. **Note:** canvas dot-drag is
-body-only for now; fins are edited via sliders (drag-on-fin can be a fast-follow).
-Author pectorals in the editor → **Copy** the `CreatureDef` to bake.
+existing Point editor retargeted to the fin's profile. A fin's profile points show as
+**draggable dots on the fin** too (via a shared `finSpineFrame` the outline and the
+editor both use), so editing a fin feels like editing the body. Author pectorals in
+the editor → **Copy** the `CreatureDef` to bake.
 
 ### Phase 4 — Tail-pivot swish motion
 

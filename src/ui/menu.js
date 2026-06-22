@@ -11,7 +11,7 @@ import {
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
-import { buildBodyOutline, buildCenterline, buildAppendageOutlines, upgradeCreature } from '../entities/fish-base.js';
+import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -727,6 +727,18 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   const activePoints = () => targetIsBody()
     ? liveCreature.spline.points
     : liveCreature.appendages[editSel].profile;
+  // Frames for placing the editable dots: the body centerline, or — for a fin — the
+  // representative side's local fin spine. `at(a) → {x,y,nx,ny}` (rest pose).
+  function activeFrames() {
+    if (targetIsBody()) {
+      const spine = buildCenterline(liveCreature.spline, liveCreature.motion, restOpts());
+      return { pts: liveCreature.spline.points, at: (t) => spine.at(t) };
+    }
+    const fin = liveCreature.appendages[editSel];
+    const sideSign = (fin.side ?? 1) === 0 ? 0 : 1;   // edit the representative side
+    const { Rx, Ry, Dx, Dy } = finSpineFrame(liveCreature.spline, liveCreature.motion, fin, sideSign, restOpts());
+    return { pts: fin.profile, at: (s) => ({ x: Rx + Dx * s * fin.length, y: Ry + Dy * s * fin.length, nx: -Dy, ny: Dx }) };
+  }
   let shapeTRow = null, shapeWRow = null;
   let previewXform = { sc: 1, ox: 0, oy: 0 };   // world→canvas for the editor pane (drag inverse)
   let previewBase  = { sc: 1, ox: 0, oy: 0, W: 0, H: 0 };   // aspect-fit before zoom/pan
@@ -787,28 +799,28 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     for (const fp of fins) strokePoly(ctx2, fp, xf, 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0.20)');
     strokePoly(ctx2, body, xf, 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0.30)');
 
-    if (targetIsBody()) {
-      // Draggable dots on the body outline.
-      const spine = buildCenterline(cre.spline, cre.motion, restOpts());
-      pr.forEach(([t, w], i) => {
-        const f = spine.at(t);
-        for (const sgn of [1, -1]) {
-          const x = (f.x + f.nx * w * sgn) * xf.sc + xf.ox;
-          const y = (f.y + f.ny * w * sgn) * xf.sc + xf.oy;
-          ctx2.beginPath();
-          ctx2.arc(x, y, i === selectedIdx ? 4 : 2.5, 0, Math.PI * 2);
-          ctx2.fillStyle = i === selectedIdx
-            ? (sgn > 0 ? 'rgb(0,210,255)' : 'rgba(0,210,255,0.5)')
-            : (sgn > 0 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.25)');
-          ctx2.fill();
-        }
-      });
-    } else if (cre.appendages[editSel]) {
-      // Editing a fin: highlight that fin's outline (it's edited via the sliders below).
+    // When editing a fin, brighten that fin's outline so it's clear which one is active.
+    if (!targetIsBody() && cre.appendages[editSel]) {
       const sel = buildAppendageOutlines(
         { spline: cre.spline, motion: cre.motion, appendages: [cre.appendages[editSel]] }, restOpts());
-      for (const r of sel) strokePoly(ctx2, r, xf, 'rgba(0,210,255,0.12)', 'rgba(0,210,255,0.7)');
+      for (const r of sel) strokePoly(ctx2, r, xf, 'rgba(0,210,255,0.10)', 'rgba(0,210,255,0.6)');
     }
+
+    // Draggable dots on the active target (body outline, or the selected fin's outline).
+    const tgt = activeFrames();
+    tgt.pts.forEach(([a, w], i) => {
+      const f = tgt.at(a);
+      for (const sgn of [1, -1]) {
+        const x = (f.x + f.nx * w * sgn) * xf.sc + xf.ox;
+        const y = (f.y + f.ny * w * sgn) * xf.sc + xf.oy;
+        ctx2.beginPath();
+        ctx2.arc(x, y, i === selectedIdx ? 4 : 2.5, 0, Math.PI * 2);
+        ctx2.fillStyle = i === selectedIdx
+          ? (sgn > 0 ? 'rgb(0,210,255)' : 'rgba(0,210,255,0.5)')
+          : (sgn > 0 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.25)');
+        ctx2.fill();
+      }
+    });
   }
 
   // Live pane: the real fish swimming with a lazy S-weave, so the tail wiggle AND both
@@ -1075,11 +1087,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // Both hit-testing and dragging go through the centerline + the editor's fit
   // transform, so dots sit on (and follow) the real silhouette.
   const pickPoint = (px, py) => {
-    const pr = activePoints(), xf = previewXform;
-    const spine = buildCenterline(liveCreature.spline, liveCreature.motion, restOpts());
+    const tgt = activeFrames(), xf = previewXform;
     let best = -1, bestD = 14 * 14;   // 14px pick radius (squared)
-    pr.forEach(([t, w], i) => {
-      const f = spine.at(t);
+    tgt.pts.forEach(([a, w], i) => {
+      const f = tgt.at(a);
       for (const sgn of [1, -1]) {
         const x = (f.x + f.nx * w * sgn) * xf.sc + xf.ox;
         const y = (f.y + f.ny * w * sgn) * xf.sc + xf.oy;
@@ -1091,21 +1102,20 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   };
 
   const dragTo = (px, py) => {
-    const pr = activePoints(), last = pr.length - 1, i = selectedIdx, xf = previewXform;
+    const tgt = activeFrames(), pr = tgt.pts, i = selectedIdx, xf = previewXform;
     const wx = (px - xf.ox) / xf.sc, wy = (py - xf.oy) / xf.sc;   // canvas → world
-    const spine = buildCenterline(liveCreature.spline, liveCreature.motion, restOpts());
-    let t = pr[i][0];
+    let a = pr[i][0];
     if (!isEnd(i)) {
-      // Interior: snap t to the nearest point along the spine under the cursor.
-      let bestT = t, bestD = Infinity;
+      // Interior: snap the param to the nearest point along the active spine.
+      let bestA = a, bestD = Infinity;
       for (let s = 0; s <= 200; s++) {
-        const tt = s / 200, f = spine.at(tt), d = (f.x - wx) ** 2 + (f.y - wy) ** 2;
-        if (d < bestD) { bestD = d; bestT = tt; }
+        const aa = s / 200, f = tgt.at(aa), d = (f.x - wx) ** 2 + (f.y - wy) ** 2;
+        if (d < bestD) { bestD = d; bestA = aa; }
       }
-      t = clamp(Math.round(bestT * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
-      pr[i][0] = t;
+      a = clamp(Math.round(bestA * 100) / 100, pr[i - 1][0] + T_GAP, pr[i + 1][0] - T_GAP);
+      pr[i][0] = a;
     }
-    const f = spine.at(t);
+    const f = tgt.at(a);
     const w = Math.abs((wx - f.x) * f.nx + (wy - f.y) * f.ny);   // perpendicular distance
     pr[i][1] = clamp(Math.round(w * 100) / 100, 0, W_MAX);
     FishClass.CREATURE = liveCreature;
@@ -1135,9 +1145,9 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   shapePreview.addEventListener('pointerdown', (e) => {
     const rect = shapePreview.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
-    const hit = targetIsBody() ? pickPoint(px, py) : -1;   // dots are body-only; fins use sliders
+    const hit = pickPoint(px, py);   // body points or the selected fin's profile points
     if (hit < 0) {
-      // Empty space (or a fin target) while zoomed in → pan the view.
+      // Empty space while zoomed in → pan the view.
       if (editorView.zoom > 1) {
         panning = true;
         panStart = { px, py, panX: editorView.panX, panY: editorView.panY };

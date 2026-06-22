@@ -155,35 +155,31 @@ export function buildBodyOutline(spline, motion, opts) {
 // tailward), modulated by turning (swayOnTurn) and swimming (flapOnAccel). sideSign
 // ±1 places/mirrors it. Returns a closed ring {x,y} in world units, like the body.
 const FIN_SWAY_DEG = 28;   // fin deflection (deg) per unit steeringBend × swayOnTurn
-export function buildFinOutline(spline, motion, fin, sideSign, opts) {
+// The fin's local spine for one side: root point + unit direction (world units).
+// sideSign 0 = centered (roots on the body spine, points tailward); ±1 = side fin
+// (roots at the body edge, sweeps straight-out→tailward as `angle` goes 0→90).
+// Shared by buildFinOutline (geometry) and the editor (dot placement on a fin).
+export function finSpineFrame(spline, motion, fin, sideSign, opts) {
   const spine = buildCenterline(spline, motion, opts);
-  const bodyW = makeWidthFn(spline.points);
-  const finW  = makeWidthFn(fin.profile);
   const f = spine.at(fin.anchor);
   const Tx = f.ny, Ty = -f.nx;   // unit tangent toward the head
-
-  // Per-frame sweep: base angle + sway with turning + flap with swimming (degrees).
   const swayDeg = (fin.swayOnTurn || 0) * (opts.steeringBend || 0) * FIN_SWAY_DEG;
   const flapDeg = (fin.flapOnAccel?.amp || 0) * (opts.swimOsc || 0) * (opts.swimAmp ?? 1);
-
-  let Rx, Ry, Dx, Dy;
   if (sideSign === 0) {
-    // Centered fin (e.g. a caudal fan): roots on the spine, points straight tailward,
-    // the whole fan swinging by the sway/flap angle.
-    Rx = f.x; Ry = f.y;
     const rot = (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
     const c = Math.cos(rot), s = Math.sin(rot);
-    Dx = -Tx * c + -Ty * -s; Dy = -Tx * s + -Ty * c;   // (-T) rotated by rot
-  } else {
-    // Side fin (e.g. a pectoral, or a tail lobe): roots at the body edge, sweeps from
-    // straight-out (angle 0) toward tailward (angle 90) on its side.
-    const Nsx = f.nx * sideSign, Nsy = f.ny * sideSign;
-    const bw = bodyW(fin.anchor);
-    Rx = f.x + Nsx * bw; Ry = f.y + Nsy * bw;
-    const rot = sideSign * (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
-    const c = Math.cos(rot), s = Math.sin(rot);
-    Dx = Nsx * c - Nsy * s; Dy = Nsx * s + Nsy * c;
+    return { Rx: f.x, Ry: f.y, Dx: -Tx * c + Ty * s, Dy: -Tx * s - Ty * c };   // (-T) rotated
   }
+  const Nsx = f.nx * sideSign, Nsy = f.ny * sideSign;
+  const bw = makeWidthFn(spline.points)(fin.anchor);
+  const rot = sideSign * (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return { Rx: f.x + Nsx * bw, Ry: f.y + Nsy * bw, Dx: Nsx * c - Nsy * s, Dy: Nsx * s + Nsy * c };
+}
+
+export function buildFinOutline(spline, motion, fin, sideSign, opts) {
+  const finW = makeWidthFn(fin.profile);
+  const { Rx, Ry, Dx, Dy } = finSpineFrame(spline, motion, fin, sideSign, opts);
   const Px = -Dy, Py = Dx;   // fin-spine perpendicular
 
   const STEPS = 26;
