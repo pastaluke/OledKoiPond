@@ -11,7 +11,7 @@ import {
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
-import { buildBodyOutline, buildCenterline, upgradeCreature } from '../entities/fish-base.js';
+import { buildBodyOutline, buildCenterline, buildAppendageOutlines, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
 const LONG_PRESS_MS = 450;
@@ -730,13 +730,13 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   const isEnd   = (i) => i === 0 || i === liveCreature.spline.points.length - 1;
   const restOpts = () => ({ headAngle: 0, steeringBend: 0, swimOsc: 0, length: PREVIEW_LEN, swimAmp: 0 });
 
-  // Fit a world-space polygon into a canvas, preserving aspect (no fish-stretch). Sets
-  // the canvas backing size and returns the transform; pad leaves room for the dots.
-  function fitPoly(canvas, poly, pad = 10) {
+  // Fit world-space rings (body + fins) into a canvas, preserving aspect (no
+  // fish-stretch). Sets the canvas backing size; pad leaves room for the dots.
+  function fitPoly(canvas, rings, pad = 10) {
     const W = canvas.clientWidth || 240, H = canvas.clientHeight || 90;
     canvas.width = W; canvas.height = H;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const p of poly) {
+    for (const ring of rings) for (const p of ring) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     }
@@ -760,13 +760,15 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // Dots sit on the real outline — centerline.at(t) offset by ±w along the normal.
   function redrawShapePreview() {
     const cre = liveCreature, pr = cre.spline.points;
-    const poly = buildBodyOutline(cre.spline, cre.motion, restOpts());
-    previewBase = fitPoly(shapePreview, poly);
+    const body = buildBodyOutline(cre.spline, cre.motion, restOpts());
+    const fins = buildAppendageOutlines(cre, restOpts());
+    previewBase = fitPoly(shapePreview, [body, ...fins]);
     const xf = applyView(previewBase);
     previewXform = xf;
     const ctx2 = shapePreview.getContext('2d');
     ctx2.clearRect(0, 0, xf.W, xf.H);
-    strokePoly(ctx2, poly, xf, 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0.30)');
+    for (const fp of fins) strokePoly(ctx2, fp, xf, 'rgba(255,255,255,0.05)', 'rgba(255,255,255,0.20)');
+    strokePoly(ctx2, body, xf, 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0.30)');
 
     const spine = buildCenterline(cre.spline, cre.motion, restOpts());
     pr.forEach(([t, w], i) => {
@@ -791,16 +793,19 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     livePhase += (livePrevTs ? ts - livePrevTs : 16) * 0.004;
     livePrevTs = ts;
     const cre = liveCreature;
-    const poly = buildBodyOutline(cre.spline, cre.motion, {
+    const opts = {
       headAngle: 0,
       steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND,
       swimOsc: Math.sin(livePhase),
       length: PREVIEW_LEN, swimAmp: 1,
-    });
-    const xf = fitPoly(shapeLive, poly);
+    };
+    const body = buildBodyOutline(cre.spline, cre.motion, opts);
+    const fins = buildAppendageOutlines(cre, opts);
+    const xf = fitPoly(shapeLive, [body, ...fins]);
     const ctx2 = shapeLive.getContext('2d');
     ctx2.clearRect(0, 0, xf.W, xf.H);
-    strokePoly(ctx2, poly, xf, 'rgba(0,210,255,0.10)', 'rgba(0,210,255,0.5)');
+    for (const fp of fins) strokePoly(ctx2, fp, xf, 'rgba(0,210,255,0.08)', 'rgba(0,210,255,0.4)');
+    strokePoly(ctx2, body, xf, 'rgba(0,210,255,0.10)', 'rgba(0,210,255,0.5)');
     liveRAF = requestAnimationFrame(drawLivePreview);
   }
   function setLivePreview(on) {

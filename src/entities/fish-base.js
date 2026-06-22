@@ -149,6 +149,67 @@ export function buildBodyOutline(spline, motion, opts) {
   return ring;
 }
 
+// A fin/appendage is a "mini-outline": its own [s,w] profile (s: 0=root → 1=tip) run
+// through the same makeWidthFn, laid along a short straight spine rooted at the body
+// edge at `anchor`, swept by `angle` (0 = straight out the side, 90 = straight
+// tailward), modulated by turning (swayOnTurn) and swimming (flapOnAccel). sideSign
+// ±1 places/mirrors it. Returns a closed ring {x,y} in world units, like the body.
+const FIN_SWAY_DEG = 28;   // fin deflection (deg) per unit steeringBend × swayOnTurn
+export function buildFinOutline(spline, motion, fin, sideSign, opts) {
+  const spine = buildCenterline(spline, motion, opts);
+  const bodyW = makeWidthFn(spline.points);
+  const finW  = makeWidthFn(fin.profile);
+  const f = spine.at(fin.anchor);
+  const Tx = f.ny, Ty = -f.nx;   // unit tangent toward the head
+
+  // Per-frame sweep: base angle + sway with turning + flap with swimming (degrees).
+  const swayDeg = (fin.swayOnTurn || 0) * (opts.steeringBend || 0) * FIN_SWAY_DEG;
+  const flapDeg = (fin.flapOnAccel?.amp || 0) * (opts.swimOsc || 0) * (opts.swimAmp ?? 1);
+
+  let Rx, Ry, Dx, Dy;
+  if (sideSign === 0) {
+    // Centered fin (e.g. a caudal fan): roots on the spine, points straight tailward,
+    // the whole fan swinging by the sway/flap angle.
+    Rx = f.x; Ry = f.y;
+    const rot = (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    Dx = -Tx * c + -Ty * -s; Dy = -Tx * s + -Ty * c;   // (-T) rotated by rot
+  } else {
+    // Side fin (e.g. a pectoral, or a tail lobe): roots at the body edge, sweeps from
+    // straight-out (angle 0) toward tailward (angle 90) on its side.
+    const Nsx = f.nx * sideSign, Nsy = f.ny * sideSign;
+    const bw = bodyW(fin.anchor);
+    Rx = f.x + Nsx * bw; Ry = f.y + Nsy * bw;
+    const rot = sideSign * (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    Dx = Nsx * c - Nsy * s; Dy = Nsx * s + Nsy * c;
+  }
+  const Px = -Dy, Py = Dx;   // fin-spine perpendicular
+
+  const STEPS = 26;
+  const top = [], bot = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const s = i / STEPS, w = finW(s);
+    const cx = Rx + Dx * (s * fin.length), cy = Ry + Dy * (s * fin.length);
+    top.push({ x: cx + Px * w, y: cy + Py * w });
+    bot.push({ x: cx - Px * w, y: cy - Py * w });
+  }
+  const ring = top.slice();
+  for (let i = bot.length - 1; i >= 0; i--) ring.push(bot[i]);
+  return ring;
+}
+
+// All appendage outline rings for a creature (world units), honoring `mirror`.
+export function buildAppendageOutlines(creature, opts) {
+  const out = [];
+  for (const fin of creature.appendages || []) {
+    if (!Array.isArray(fin.profile) || fin.profile.length < 2) continue;
+    const sides = fin.mirror ? [1, -1] : [fin.side ?? 1];
+    for (const s of sides) out.push(buildFinOutline(creature.spline, creature.motion, fin, s, opts));
+  }
+  return out;
+}
+
 // Nonzero-winding scanline fill of a world-unit polygon → Set of "cx,cy" display cells
 // (cell centers at integer coords). Overlapping sub-loops stay filled — no holes.
 export function fillOutlineCells(poly, d) {
@@ -252,20 +313,25 @@ export class FishBase {
       waistFrac: 0.28,   // tail bézier span (fraction of tailDist); also the waist's profile-t
       bendWaist: 0.12,   // waist lateral-bow factor with steering
       bendBody:  0.22,   // body control-point bow factor with steering
+      // Clean torpedo taper to a peduncle at the tail (t=0). The caudal fan is now a
+      // fin appendage below — no more fork faked into the body width.
       points: [          // [t, halfWidth] breakpoints (monotone-cubic interpolated)
-        [0.00, 0.0],  // tail tip
-        [0.06, 0.4],
-        [0.13, 1.8],
-        [0.20, 0.4],  // peduncle pinch
-        [0.28, 1.3],
-        [0.55, 2.2],  // belly
-        [0.72, 2.2],
-        [0.88, 0.8],
-        [1.00, 0.1],  // snout
+        [0.00, 0.32],  // peduncle (tail root)
+        [0.16, 0.55],
+        [0.42, 2.05],  // belly
+        [0.66, 2.00],
+        [0.85, 0.85],
+        [1.00, 0.10],  // snout
       ],
     },
     motion: { swishAmp: 0.156, swishRate: 1.0, swishCurve: 1.0 },
-    appendages: [],
+    // Stock caudal fin: a mirrored pair of lobes at the peduncle, swept tailward into a
+    // fan/fork. Pectorals are left for the user to author + Copy-bake. profile is [s, w].
+    appendages: [
+      { kind: 'fin', anchor: 0.0, side: 0, mirror: false, angle: 0, length: 5.0,
+        swayOnTurn: 0.5, flapOnAccel: { amp: 6 },
+        profile: [[0.0, 0.12], [0.5, 0.85], [1.0, 1.5]] },
+    ],
     patterns: { spawnMode: 'mix', active: null, variations: [] },
   };
 
@@ -526,17 +592,15 @@ export class FishBase {
     const swimOsc = Math.sin(this.swimPhase);
     const creature = this.constructor.CREATURE;
 
-    // Parts-based render: build each closed part's outline polygon, then rasterize.
-    // Today the body is the only part; appendages (E13-3) and patterns (E13-6) will
-    // push more parts here, each with its own polygon + color + fill flag.
-    const parts = [{
-      poly:   buildBodyOutline(creature.spline, creature.motion, {
-        headAngle: this.heading, steeringBend: this.steeringBend,
-        swimOsc, length: this.length, swimAmp: this.swimAmp,
-      }),
-      filled: this.constructor.FILLED,
-      color:  this.color,
-    }];
+    // Parts-based render: body + appendages, each a closed polygon rasterized below.
+    // (Patterns add more parts with their own colors in E13-6.)
+    const opts = {
+      headAngle: this.heading, steeringBend: this.steeringBend,
+      swimOsc, length: this.length, swimAmp: this.swimAmp,
+    };
+    const filled = this.constructor.FILLED, color = this.color;
+    const parts = [{ poly: buildBodyOutline(creature.spline, creature.motion, opts), filled, color }];
+    for (const poly of buildAppendageOutlines(creature, opts)) parts.push({ poly, filled, color });
 
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     for (const part of parts) {
