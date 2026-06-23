@@ -133,6 +133,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         <div id="shape-motion-sliders"></div>
         <div class="menu-btn-row">
           <button class="menu-action" id="btn-copy-shape">Copy values</button>
+          <button class="menu-action" id="btn-paste-shape">Paste values</button>
           <button class="menu-action" id="btn-reset-shape">Reset</button>
         </div>
       </div>
@@ -1249,6 +1250,33 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const prev = copyBtn.textContent;
     copyBtn.textContent = 'Copied!';
     setTimeout(() => { copyBtn.textContent = prev; }, 1200);
+  });
+
+  // Paste values — load a CreatureDef (or legacy shape) from the clipboard.
+  panel.querySelector('#btn-paste-shape').addEventListener('click', async () => {
+    const btn = panel.querySelector('#btn-paste-shape');
+    const flash = (msg) => { const p = btn.textContent; btn.textContent = msg; setTimeout(() => { btn.textContent = p; }, 1200); };
+    let text;
+    try { text = await navigator.clipboard.readText(); }
+    catch { flash('No access'); return; }
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch { flash('Bad data'); return; }
+    const up = upgradeCreature(parsed);
+    if (!up || !up.spline || !Array.isArray(up.spline.points) || up.spline.points.length < MIN_POINTS) {
+      flash('Bad data'); return;
+    }
+    // Backfill anything a hand-edited blob might omit, so the renderer can't choke.
+    up.motion ??= { swishAmp: 0.156, swishRate: 1, swishCurve: 1 };
+    if (!Array.isArray(up.appendages)) up.appendages = [];
+    if (!up.patterns) up.patterns = { spawnMode: 'mix', active: null, variations: [] };
+    liveCreature = up;
+    FishClass.CREATURE = liveCreature;
+    editSel = 'body';
+    buildTargetSel();
+    selectTarget('body');
+    save();
+    flash('Pasted!');
   });
 
   // Reset shape
