@@ -1786,7 +1786,8 @@ Full architecture, decisions, and rationale: **`docs/entity-customization-plan.m
 | E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); **size preview screens cycling small→large** (the E13-8 growth); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |
 | E13-6 | Patterns (vector regions) — palette color triplet + `rollColor`; click-silhouette blob/band editor; per-class variations + spawn-mode toggle (weighted mix or locked) | ⬜ |
 | E13-7 | Appendages beyond fins — whiskers, then tentacles/limbs (octopus, squid, turtle) reusing the appendage primitive | ⬜ |
-| E13-8 | Creature size & growth variance — size keyframes (set smallest/avg/largest) blended by the existing `_sizeFrac`; size/age slider previews the morph; open Q: size-now vs age-grows-over-time. **Sequence before E13-5.** See plan doc Phase 4.5 | ⬜ |
+| E13-8 | Creature size & growth variance — size keyframes (set smallest/avg/largest) blended by the existing `_sizeFrac`; size slider previews the morph. **Decided: size-driven first** (age/growth-over-time is a follow-on with persistent individuals). **Sequence before E13-5.** See plan doc Phase 4.5 | ⬜ |
+| E13-9 | **Creature class registry (class-as-data)** ★ foundation — collapse `Koi extends FishBase` into one `FishBase` engine driven by a species *data record* (`CreatureDef` + tuning + size + name) in a registry; individuals are instances referencing a species. Sim spawns a mix, per-species counts, independent add/remove; tuning becomes per-species; editor + persistence target the selected species. Enables koi+turtle and user-authored/imported species without code. Concretizes E4-5. **Sequence before E13-5 (and underpins E13-8).** See plan doc Phase 4.6 | ⬜ |
 
 ---
 

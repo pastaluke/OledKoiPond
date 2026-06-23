@@ -497,17 +497,61 @@ controls** can make a convincing eel or fantasy air-swimmer.
   point count + fin list to blend (lerp each `[t,w]` and each fin param). Simplest:
   a "Set …" button stamps the *current* topology into all slots so they always
   match; otherwise enforce/auto-snap counts.
-- **Size vs Age (open question).** Driver = instantaneous **size** (`_sizeFrac`
-  fixed at spawn, as today) or a real **age** that *grows over time*? Age = a new
-  entity attribute ramping `_sizeFrac` over the creature's life (newborn → adult) +
-  a spawn option ("introduce as newborn / juvenile / adult"). Lean: ship
-  **size-driven** first (reuses `_sizeFrac`, no new state); treat **age/growth over
-  time** as a follow-on.
+- **Size vs Age — DECIDED (2026-06-23): size-driven first.** v1 blends by the
+  existing spawn-fixed `_sizeFrac` (no new state, reuses the handle that already
+  drives agility). A real **age** that *grows over time* (a per-entity attribute
+  ramping `_sizeFrac` newborn→adult + an "introduce as newborn/juvenile/adult"
+  spawn option) is a **follow-on** — it only becomes meaningful once creatures
+  persist as individuals (see the "souls / persistent individuals" ideas pond), so
+  it rides along with that system, not before it.
 - Where keyframes live in `CreatureDef` (e.g. `sizes: { small, large, avg? }`) and
   how they round-trip through Copy/Paste + `upgradeCreature`.
 
 *Done when:* a class can define distinct small vs large shapes, fish spawn morphed
 to their own size, and the editor's size slider previews the growth.
+
+### Phase 4.6 — Creature class registry (class-as-data)  ★ FOUNDATION
+
+> Decided 2026-06-23. The substrate that lets koi, sea turtle, … coexist in one
+> pond — each independently spawned/subtracted — and lets users author/import new
+> species **without shipping code**. Build it before the class browser (Phase 5);
+> it underpins per-class editing (so it also precedes/【reframes】 Phase 4.5's UI).
+
+**Locked decision — a *species* and an *individual* are DATA, not JS subclasses.**
+One engine class; the two lower tiers are data + instances:
+- **`FishBase` = the only code class** — physics, steering, render, spline/fin math.
+- **Species (koi / turtle) = a data record** — a `CreatureDef` + tuning/size profile
+  + name, held in a **registry**. Today `Koi extends FishBase` and overrides static
+  fields; collapse that into a record the engine *reads* →
+  `new FishBase(grid, speciesDef)` instead of `new Koi(grid)`. **Why data, not
+  `extends`:** a user-made or dragged-in species can't be a JS subclass without
+  shipping code — as data it just loads. (This is the crux that makes the creature
+  creator + file sharing possible.)
+- **Individuals (Carl / Franklin) = `FishBase` instances** that reference a species
+  record and carry their own per-individual data (trait rolls within the species
+  min/max, name, color locks, soul…). The persistent-individual / "soul" ideas
+  (GDD ideas pond) build directly on this tier.
+
+**What changes:**
+- A **registry** of species records; the sim spawns a *mix*; each species has its
+  own count with independent add/subtract. (`Simulation` is already type-agnostic —
+  flat `entities[]`, polymorphic `update()/draw()` — so the engine change is small.)
+- **Tuning moves into the species record** — movement params (separation, alignment,
+  speed, turn rate, …) are static `FishClass` fields today; they become per-species
+  data so two species behave differently. (Some genuinely global knobs may stay global.)
+- **The editor targets the *selected* species**, not a global `FishClass` (today the
+  whole editor + persistence mutate one class).
+- **Persistence** stores the species registry + per-class counts.
+- **Concretizes E4-5** ("entity config file — register entities without code").
+
+**To nail when built:**
+- Registry storage shape; how built-in species (koi) seed it vs user-made ones.
+- Migration: today's single persisted `creature` → one species in the new registry.
+- Which tuning is per-species vs global.
+
+*Done when:* koi and a second species (e.g. sea turtle) coexist in one pond, each
+added/removed independently, and a new species can be defined purely as data (no
+new code).
 
 ### Phase 5 — Menu reorg
 
