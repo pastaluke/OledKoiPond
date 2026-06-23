@@ -275,7 +275,7 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E1-5",  "epic":"E1",  "title":"Performance profiling pass",              "status":"backlog",          "sprint":"",         "notes":"Measure frame time on mid-range Android; identify bottlenecks" },
   { "id":"E1-6",  "epic":"E1",  "title":"Edge-factor debug stat",                  "status":"backlog",          "sprint":"",         "notes":"Add edge-factor to Entity Stats box (depth into wall-avoidance band)" },
 
-  { "id":"E2-1",  "epic":"E2",  "title":"Tap → pixelated ripple",                  "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Visual expanding ring at tap point; pixelated; no fluid sim yet" },
+  { "id":"E2-1",  "epic":"E2",  "title":"Tap → pixelated ripple",                  "status":"live",             "sprint":"",         "notes":"Shipped via RippleField tap injection (rippleField.inject on tap). The fuller E2 fluid-sim stories below were superseded by E7-2 (RippleField)" },
   { "id":"E2-2",  "epic":"E2",  "title":"2D wave fluid grid (CPU)",                "status":"ready-for-design", "sprint":"Sprint 2", "notes":"Discrete wave equation from GDD §8; fish inject energy; brightness tint" },
   { "id":"E2-3",  "epic":"E2",  "title":"Ripple injection from fish",              "status":"backlog",          "sprint":"",         "notes":"Body displacement → fluid grid; depends on E2-2" },
   { "id":"E2-4",  "epic":"E2",  "title":"Ripple overlay renderer",                 "status":"backlog",          "sprint":"",         "notes":"Fluid grid → semi-transparent pixel overlay; depends on E2-2" },
@@ -351,6 +351,16 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E12-4", "epic":"E12", "title":"Shader cross-fade",                       "status":"backlog",          "sprint":"",         "notes":"globalAlpha cross-fade between shaderFrom and shaderTo over fixed 1.5s; depends on E12-3" },
   { "id":"E12-5", "epic":"E12", "title":"Special shimmer pellet → rainbow",        "status":"backlog",          "sprint":"",         "notes":"rollColor isSpecial signal; eating sets rainbowEffect='time'; retires the special color bag" },
 
+  { "id":"E13-1", "epic":"E13", "title":"Dynamic t-point shape editor",            "status":"live",             "sprint":"",         "notes":"Click-select points in preview, dynamic count (min 3), pinned movable endpoints, +pt/−pt insert-halfway, drag, arrow nudges. Shipped 2026-06-21" },
+  { "id":"E13-2", "epic":"E13", "title":"Generic CreatureDef schema + parts renderer", "status":"live",         "sprint":"",         "notes":"FishBase.SHAPE → CREATURE {spline,motion,appendages,patterns}; monotone-cubic width; nonzero-winding fill; buildCenterline; two-pane accurate+animated editor with zoom. Fixes faceting/gaps/see-through. Shipped 2026-06-22" },
+  { "id":"E13-3", "epic":"E13", "title":"Appendages (fins) + fin editor",          "status":"live",             "sprint":"",         "notes":"buildFinOutline (mini-outline via makeWidthFn, anchored via centerline.at); koi tail → centered caudal fan; Edit Body/Fin selector, placement sliders, draggable fin profile dots; Copy/Paste values. Shipped 2026-06-23" },
+  { "id":"E13-4", "epic":"E13", "title":"Spline muscle-sim (pivoted flex)",        "status":"ready-for-design", "sprint":"",         "notes":"DESIGN/RESEARCH. Sliding waist pivot; back half flexes/wags (propulsion fake), front bends only to turn + only while moving; canoe-paddle fin asymmetry; arc→shape definer; glide-depth→1. Decisions #1–3 (steering split/wag drive/momentum gate) deferred to a future session. Rides {t,w,pivot} schema bump + upgradeCreature trim. See plan doc Phase 4" },
+  { "id":"E13-9", "epic":"E13", "title":"Creature class registry (class-as-data)", "status":"ready-for-design", "sprint":"",         "notes":"FOUNDATION. One FishBase engine; species (koi/turtle) = data records in a registry, individuals = instances referencing a species — not JS subclasses (so species are authorable/importable without code). Sim spawns a mix, per-species counts + independent add/remove; tuning per-species; editor/persistence target selected species. Concretizes E4-5. Sequence before E13-5" },
+  { "id":"E13-8", "epic":"E13", "title":"Creature size & growth variance",         "status":"ready-for-design", "sprint":"",         "notes":"Size keyframes (Set smallest/avg/largest) blended by the existing _sizeFrac; size slider previews the morph. Decided: size-driven first (age/growth-over-time is a follow-on with persistent individuals). Sequence before E13-5" },
+  { "id":"E13-5", "epic":"E13", "title":"Menu reorg — class browser",              "status":"backlog",          "sprint":"",         "notes":"Fish section → class browser (silhouette + name + −/+ per class); size-preview screens small→large; Food gets its own home; rehome shape/pattern/appendage editors into the class editor. Depends on E13-9" },
+  { "id":"E13-6", "epic":"E13", "title":"Patterns (vector regions)",               "status":"backlog",          "sprint":"",         "notes":"Palette color triplet + rollColor; click-silhouette blob/band editor; per-class variations + spawn-mode toggle (weighted mix or locked). Coordinates with E11/E12 palette format" },
+  { "id":"E13-7", "epic":"E13", "title":"Appendages beyond fins",                  "status":"backlog",          "sprint":"",         "notes":"Whiskers, then tentacles/limbs (octopus, squid, turtle) reusing the appendage primitive" },
+
   { "id":"B1-1",  "epic":"B1",  "title":"viewport-fit=cover + safe-area CSS",     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"viewport meta + env(safe-area-inset-*) on hamburger and panel; canvas fills under notch" },
   { "id":"B1-2",  "epic":"B1",  "title":"manifest.json (standalone PWA)",          "status":"ready-for-design", "sprint":"Sprint 2", "notes":"display:standalone, theme_color:#000000; overlaps E1-1/E5-1 — do all together" },
   { "id":"B1-3",  "epic":"B1",  "title":"Apple PWA meta tags",                     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"apple-mobile-web-app-capable/title/status-bar-style; overlaps E1-2 — do together" },
@@ -374,7 +384,7 @@ const EPIC_COLORS = {
   E4:  '#44cc88', E5:  '#ff9944', E6:  '#ff5599',
   E7:  '#00c8a0', E8:  '#88d8ff', E9:  '#ffcc44',
   E10: '#66ee88', E11: '#cc88ff', E12: '#ff8866',
-  B1:  '#ff5555',
+  E13: '#ffb000', B1:  '#ff5555',
 };
 
 const EPIC_NAMES = {
@@ -384,7 +394,7 @@ const EPIC_NAMES = {
   E7:  'Render Pipeline',    E8:  'Glass Polish',
   E9:  'TV Remote / KeyNav', E10: 'Hold-to-Attract',
   E11: 'Fish Shaders',       E12: 'Fish Food',
-  B1:  'iOS Fullscreen Bug',
+  E13: 'Entity Customization', B1: 'iOS Fullscreen Bug',
 };
 
 let tickets = [];
