@@ -381,20 +381,30 @@ the editor → **Copy** the `CreatureDef` to bake.
 > we fake propulsive flex so fish, eels, and fantasy air-swimmers all get it.
 
 **Concept — a sliding "waist pivot" that flexes the back half:**
-- A **pivot** point on the spline (slidable t) splits the body into a rigid-ish
+- A **pivot** point on the spline (slidable t) splits the body into a steerable
   **front** (head side) and a flexing **back** (pivot → tail tip). "Tail end" can
   mean anywhere from the back ~half down to just before the peduncle.
-- **Natural-flow default:** with no wag, the spline holds a single bend curve
-  (C / | / reverse-C) set by steering — already reads as "turning vs coasting".
-  The back half **inherits that curvature, continued through the pivot** from the
-  front half.
+- **The front half bends *only to turn*, and only while moving.** The front-half
+  curve **is** the creature's turn: it bends the minimum needed to achieve the
+  heading change it wants, and only when there's forward motion. Consequence —
+  a creature can't pivot in place; to "look behind" itself it must be moving (even
+  slightly) and it swings around at the arc its front section allows. So the **turn
+  arc is a property of the creature's shape**, not a global movement knob (see
+  Tuning).
+- **Natural-flow default:** with no wag the spline holds a single bend curve
+  (C / | / reverse-C) — the steering turn. The back half **inherits that curvature,
+  continued through the pivot** from the front — but only under forward momentum;
+  coasting/stopped → the back relaxes toward straight.
 - **Wag = the propulsion fake:** from the pivot, a lateral bend **travels down the
   back half** (one peak for a koi; an eel wants several — start with one, maybe
-  expose peak-count later). This is the "displace fluid to move forward" cheat.
+  expose peak-count later). The flex is the "displace fluid → move forward" cheat.
 - **Acceleration drives the wag:** amplitude/rate scale with how hard the creature
   is *propelling* (burst throttle / accel), not merely current speed.
-- **Forward-momentum gating:** the front half only imposes its curvature on the
-  back half when there's forward momentum (try it); coasting/stopped → back relaxes.
+- **Fin asymmetry on turns (canoe-paddle rule):** for a **mirrored** fin pair,
+  flap-on-acceleration should **drop out on the inside of the curve** once the body
+  is bent past a threshold — like paddling only one side of a canoe to turn the
+  other way. The outside fin keeps stroking; the inside one eases. Easy,
+  characterful win; refines `flapOnAccel`/`swayOnTurn` for mirrored fins.
 
 **Code map — where each piece lives today (what E13-4 changes):**
 - `buildCenterline` (`src/entities/fish-base.js`): the tail bézier `T→W` is shaped
@@ -426,24 +436,39 @@ the editor → **Copy** the `CreatureDef` to bake.
 - **Glide depth** (`CRUISE_GLIDE_MAX`, `tuning.js`): raise the slider to allow
   **1.0** so a glide doesn't itself slow the creature — **drag** (`GLIDE_DRAG`)
   becomes the sole brake. Lean toward drag-only deceleration.
-- **Arc (sm)/(lg)** (`MAX_FORCE_MAX`/`MAX_FORCE_MIN`): feel useless/confusing —
-  reconsider removing or folding into one "agility" control once the flex drives
-  the turning feel.
+- **Arc → move into the shape definer, retire the Movement sliders.** The turn arc
+  (how much the front half curves) is a per-creature *shape* attribute, not a global
+  movement knob. Pull it out of the Movement tab's `Arc (sm)/(lg)`
+  (`MAX_FORCE_MAX`/`MAX_FORCE_MIN`) and define it on the creature as a **min/max
+  front-curve bend** that the animation cycles between. Likely retire the global Arc
+  sliders entirely.
 - **Collision philosophy:** creatures should **turn away** from obstacles, not
   hard-brake into drag — favor edge/separation *steering* over throttle-down
   (tune `EDGE_WEIGHT`/`EDGE_YIELD`/avoid-ahead in `movement/`).
 
-**Open decisions to nail before building:**
-1. Wag model — single traveling bend vs N-peak wave (start single; eel peak-count later?).
-2. What drives the wag — burst throttle, |accel|, or speed? (lean throttle/accel, so propulsion ↔ flex).
-3. Forward-momentum gating — hard gate vs ramp with speed.
-4. Does steering bend the *whole* spline (today) or only the front, with the back inheriting via the pivot? (lean: steering sets the front curve; back inherits + wags).
-5. `motion` field names/ranges + editor controls (pivot position, wag amp/rate, accel gain, follow-front).
+**Open decisions — answer in a FUTURE session (do not finalize now).** Leanings are
+recorded from the principles above; finalize them when E13-4 is actually built:
+
+1. **Whole-spline vs front-only steering.** *Leaning: the FRONT section creates the
+   turn arc (it bends only to turn, only while moving); the BACK inherits that curve
+   through the pivot and adds the wag.* Finalize the exact split and how the back
+   blends inherited curvature vs. its own wag.
+2. **What drives the wag** — burst throttle, |accel|, or speed. *Leaning
+   throttle/accel, so propulsion ↔ flex.* Finalize the source + response curve.
+3. **Forward-momentum gate** — hard on/off vs ramp with speed. *Note: the gate
+   applies to the front-half TURN too (no turning when stopped), not just the back
+   wag.* Finalize the gating curve.
+
+**Smaller decisions (can default if unanswered):**
+4. Wag model — single traveling bend now; expose multi-peak (eel) later.
+5. `motion` field names/ranges + editor controls (pivot position, wag amp/rate,
+   accel gain, follow-front) **plus the min/max front-bend in the shape definer**.
 6. Retire `swishAmp` outright, or keep as a fallback.
 
-*Done when:* a koi visibly flexes its back half to swim (propulsive wag), holds a
-clean single bend when turning/coasting, the pivot is slidable in the editor, and
-the **same controls** can make a convincing eel or fantasy air-swimmer.
+*Done when:* a koi visibly flexes its back half to swim (propulsive wag), only turns
+its body while moving (holding a clean single front-bend arc), the pivot is slidable
+in the editor, mirrored fins paddle asymmetrically through turns, and the **same
+controls** can make a convincing eel or fantasy air-swimmer.
 
 ### Phase 5 — Menu reorg
 
