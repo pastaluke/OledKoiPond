@@ -372,24 +372,78 @@ existing Point editor retargeted to the fin's profile. A fin's profile points sh
 editor both use), so editing a fin feels like editing the body. Author pectorals in
 the editor → **Copy** the `CreatureDef` to bake.
 
-### Phase 4 — Tail-pivot swish motion
+### Phase 4 — Spline "muscle sim": pivoted back-half flex + propulsion fake
 
-- Use the pivot-flagged point: everything tailward swishes about it as a unit;
-  `swishCurve` makes the tip wag most. Replaces the current mid-tail wobble.
-- Tunable via `motion.*`.
-- **Schema bump (do here):** convert `spline.points` `[t,w]` → `{t,w,pivot}`
-  objects (needed for the pivot flag) and bump `schemaVersion`. While touching it,
-  **trim `upgradeCreature`**: drop the now-dead legacy flat-`SHAPE` branch (no
-  precious old data, single machine), but keep a thin load boundary
-  (clone + version-route + validate). Rationale: local persistence and future
-  **cross-machine import** (E6 "copy entity") are the same boundary problem —
-  deserializing external/old data into the one canonical `CreatureDef`. Keeping a
-  single boundary + a real `schemaVersion` makes import a localized extension (a
-  versioned migration *chain* + defensive validation of untrusted input) rather
-  than a refactor. Keep `CreatureDef` strictly JSON-serializable so export is just
-  `JSON.stringify`.
+> **Status: design / research (2026-06-23).** Reframed from "tail swish" into a
+> **universal body-flex driver**. The goal isn't koi-accuracy — it's that *seeing
+> the thing move* is what personifies it. Real koi have tiny fins for their mass;
+> they propel by **flexing the spline**. We won't simulate fluid displacement, but
+> we fake propulsive flex so fish, eels, and fantasy air-swimmers all get it.
 
-*Done when:* the tail "swishes" believably and the old wobble is gone.
+**Concept — a sliding "waist pivot" that flexes the back half:**
+- A **pivot** point on the spline (slidable t) splits the body into a rigid-ish
+  **front** (head side) and a flexing **back** (pivot → tail tip). "Tail end" can
+  mean anywhere from the back ~half down to just before the peduncle.
+- **Natural-flow default:** with no wag, the spline holds a single bend curve
+  (C / | / reverse-C) set by steering — already reads as "turning vs coasting".
+  The back half **inherits that curvature, continued through the pivot** from the
+  front half.
+- **Wag = the propulsion fake:** from the pivot, a lateral bend **travels down the
+  back half** (one peak for a koi; an eel wants several — start with one, maybe
+  expose peak-count later). This is the "displace fluid to move forward" cheat.
+- **Acceleration drives the wag:** amplitude/rate scale with how hard the creature
+  is *propelling* (burst throttle / accel), not merely current speed.
+- **Forward-momentum gating:** the front half only imposes its curvature on the
+  back half when there's forward momentum (try it); coasting/stopped → back relaxes.
+
+**Code map — where each piece lives today (what E13-4 changes):**
+- `buildCenterline` (`src/entities/fish-base.js`): the tail bézier `T→W` is shaped
+  by `W` (bent by `steeringBend·bendWaist`) and `TC` (midpoint wobbled by
+  `swimOsc·motion.swishAmp`). **Change:** the **pivot = the waist `W`** promoted to
+  a flagged t-point (slidable); **replace the `TC` simple-wobble with a traveling
+  wag** rooted at the pivot that inherits the front-half tangent at `W`; back-half
+  rest curvature = continuation of the `W→H` bend, gated on forward momentum.
+- `update()` (`fish-base.js`, steps 4–5): `steeringBend` (the single C-bend) stays
+  the "turn/flow" curve; `swimPhase`/`swimAmp` get repurposed/expanded into the
+  **wag drive** (phase + amplitude), fed by accel/throttle.
+- **Fins ride along free** — they anchor via `centerline.at(t)`, so a flexing back
+  half already carries the caudal/anal fins with it.
+
+**Schema (rides here):**
+- `spline.points` `[t,w]` → `{t,w,pivot}` objects; one flagged `pivot` (the waist).
+  Bump `schemaVersion`.
+- `motion` gains wag controls (names TBD): e.g. `wagAmp`, `wagRate`,
+  `wagAccelGain`, `followFront` — superseding `swishAmp/swishRate/swishCurve`
+  (the new default koi already runs `swishAmp: 0`).
+- **Trim `upgradeCreature`**: drop the dead legacy flat-`SHAPE` branch, keep a thin
+  load boundary (clone + version-route + validate). Rationale: local persistence
+  and future **cross-machine import** (E6 "copy entity") are the same boundary
+  problem; one boundary + a real `schemaVersion` makes import a localized
+  extension (versioned migration chain + defensive validation), not a refactor.
+  Keep `CreatureDef` strictly JSON-serializable.
+
+**Movement-tuning cleanups tagged here (decide during this story):**
+- **Glide depth** (`CRUISE_GLIDE_MAX`, `tuning.js`): raise the slider to allow
+  **1.0** so a glide doesn't itself slow the creature — **drag** (`GLIDE_DRAG`)
+  becomes the sole brake. Lean toward drag-only deceleration.
+- **Arc (sm)/(lg)** (`MAX_FORCE_MAX`/`MAX_FORCE_MIN`): feel useless/confusing —
+  reconsider removing or folding into one "agility" control once the flex drives
+  the turning feel.
+- **Collision philosophy:** creatures should **turn away** from obstacles, not
+  hard-brake into drag — favor edge/separation *steering* over throttle-down
+  (tune `EDGE_WEIGHT`/`EDGE_YIELD`/avoid-ahead in `movement/`).
+
+**Open decisions to nail before building:**
+1. Wag model — single traveling bend vs N-peak wave (start single; eel peak-count later?).
+2. What drives the wag — burst throttle, |accel|, or speed? (lean throttle/accel, so propulsion ↔ flex).
+3. Forward-momentum gating — hard gate vs ramp with speed.
+4. Does steering bend the *whole* spline (today) or only the front, with the back inheriting via the pivot? (lean: steering sets the front curve; back inherits + wags).
+5. `motion` field names/ranges + editor controls (pivot position, wag amp/rate, accel gain, follow-front).
+6. Retire `swishAmp` outright, or keep as a fallback.
+
+*Done when:* a koi visibly flexes its back half to swim (propulsive wag), holds a
+clean single bend when turning/coasting, the pivot is slidable in the editor, and
+the **same controls** can make a convincing eel or fantasy air-swimmer.
 
 ### Phase 5 — Menu reorg
 
