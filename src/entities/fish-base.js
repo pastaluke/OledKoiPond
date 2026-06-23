@@ -301,32 +301,36 @@ export class FishBase {
    *  all in one serializable place. Subclasses can override; the live editor mutates
    *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints (they
    *  gain a pivot flag and become objects in E13-4). See docs/entity-customization-plan.md. */
+  // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
+  // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
   static CREATURE = {
     schemaVersion: 1,
     spline: {
-      headFrac:  0.42,   // fraction of length: center → head tip
-      tailFrac:  0.58,   // fraction of length: center → tail tip
-      waistFrac: 0.28,   // tail bézier span (fraction of tailDist); also the waist's profile-t
-      bendWaist: 0.12,   // waist lateral-bow factor with steering
-      bendBody:  0.22,   // body control-point bow factor with steering
-      // Clean torpedo taper to a peduncle at the tail (t=0). The caudal fan is now a
-      // fin appendage below — no more fork faked into the body width.
-      points: [          // [t, halfWidth] breakpoints (monotone-cubic interpolated)
-        [0.00, 0.32],  // peduncle (tail root)
-        [0.16, 0.55],
-        [0.42, 2.05],  // belly
-        [0.66, 2.00],
-        [0.85, 0.85],
-        [1.00, 0.10],  // snout
+      headFrac:  0.7,
+      tailFrac:  0.624,
+      waistFrac: 0.229,
+      bendWaist: 0.097,
+      bendBody:  0.297,
+      points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
+        [0.00, 0.44],
+        [0.16, 1.83],
+        [0.49, 2.90],
+        [0.66, 3.63],
+        [0.95, 1.71],
+        [1.00, 0.10],
       ],
     },
-    motion: { swishAmp: 0.156, swishRate: 1.0, swishCurve: 1.0 },
-    // Stock caudal fin: a mirrored pair of lobes at the peduncle, swept tailward into a
-    // fan/fork. Pectorals are left for the user to author + Copy-bake. profile is [s, w].
+    motion: { swishAmp: 0, swishRate: 1, swishCurve: 1 },
     appendages: [
-      { kind: 'fin', anchor: 0.0, side: 0, mirror: false, angle: 0, length: 5.0,
-        swayOnTurn: 0.5, flapOnAccel: { amp: 6 },
-        profile: [[0.0, 0.12], [0.5, 0.85], [1.0, 1.5]] },
+      { kind: 'fin', anchor: 0.08, side: 0, mirror: false, angle: 0, length: 4,
+        swayOnTurn: 0.05, flapOnAccel: { amp: 39 },
+        profile: [[0, 0], [0.21, 0.97], [0.5, 1.71], [1, 3.02]] },
+      { kind: 'fin', anchor: 0.7, side: 1, mirror: true, angle: 72, length: 5,
+        swayOnTurn: 0.25, flapOnAccel: { amp: 12 },
+        profile: [[0, 0.21], [0.5, 1.1], [1, 0.5]] },
+      { kind: 'fin', anchor: 1, side: 1, mirror: true, angle: 30, length: 7.5,
+        swayOnTurn: 0, flapOnAccel: { amp: 0 },
+        profile: [[0, 0.14], [0.19, 0.37], [1, 0]] },
     ],
     patterns: { spawnMode: 'mix', active: null, variations: [] },
   };
