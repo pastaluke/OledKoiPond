@@ -1783,9 +1783,10 @@ Full architecture, decisions, and rationale: **`docs/entity-customization-plan.m
 | E13-2 | Generic `CreatureDef` schema + parts-based renderer (monotone-cubic width, nonzero-winding fill); preview pose toggle; legacy-shape upgrader. Fixes faceting, outline gaps, concave over-fill, and the see-through fill bug | ✅ Shipped 2026-06-21 |
 | E13-3 | Appendages (fins) — anchored via `centerline.at(t)`, mirrored; angle/length/profile/swayOnTurn/flapOnAccel; koi tail migrated to a centered caudal fan (body unforked); fins render in fish + both preview panes; fin editor (select Body/Fin N, placement sliders, profile via the point editor) | ✅ Shipped 2026-06-22 |
 | E13-4 | Spline "muscle sim" — sliding **waist pivot**; back half flexes/wags from it (propulsion fake), inherits front-half curve under forward momentum; universal (fish/eel/air-swimmer). Rides: `{t,w,pivot}` schema bump + `schemaVersion` + **trim `upgradeCreature`** (drop legacy branch, keep thin import-seam boundary). Front bends only to turn + only while moving (arc → shape definer min/max bend, retire Movement Arc sliders); canoe-paddle fin asymmetry on turns; Glide-depth→1 (drag-only brake); turn-away-not-brake collisions. Decisions #1–3 (steering split / wag drive / momentum gate) deferred to a future session. **Design/research — see plan doc** | ⬜ Design |
-| E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |
+| E13-5 | Menu reorg — Fish class browser (silhouette + name + −/+); **size preview screens cycling small→large** (the E13-8 growth); Food gets its own home; rehome shape/pattern/appendage editors into the class editor | ⬜ |
 | E13-6 | Patterns (vector regions) — palette color triplet + `rollColor`; click-silhouette blob/band editor; per-class variations + spawn-mode toggle (weighted mix or locked) | ⬜ |
 | E13-7 | Appendages beyond fins — whiskers, then tentacles/limbs (octopus, squid, turtle) reusing the appendage primitive | ⬜ |
+| E13-8 | Creature size & growth variance — size keyframes (set smallest/avg/largest) blended by the existing `_sizeFrac`; size/age slider previews the morph; open Q: size-now vs age-grows-over-time. **Sequence before E13-5.** See plan doc Phase 4.5 | ⬜ |
 
 ---
 

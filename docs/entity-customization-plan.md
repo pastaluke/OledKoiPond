@@ -470,17 +470,59 @@ its body while moving (holding a clean single front-bend arc), the pivot is slid
 in the editor, mirrored fins paddle asymmetrically through turns, and the **same
 controls** can make a convincing eel or fantasy air-swimmer.
 
+### Phase 4.5 — Creature size & growth variance  (sequence BEFORE the UI revamp)
+
+> Requested 2026-06-23. Build **before Phase 5**. Extends size from "just a random
+> length" to a **shape that morphs across the creature's size range** — young/small
+> can look different from old/large, not merely scaled.
+
+**What exists today:** each spawn samples `length` from `SIZE_MIN..SIZE_MAX` with
+`SIZE_CURVE` (`fish-base.js`), and a normalized **`_sizeFrac`** (0 = smallest →
+1 = largest) is already derived from it and used to interpolate agility
+(maxForce/turnRate). That `_sizeFrac` is the ready-made interpolation handle.
+
+**The feature:**
+- The creature stores a few **size keyframes** — at minimum **smallest** and
+  **largest**, optionally **average** — each a snapshot of the editable shape
+  (spline points + fin params + motion). The rendered creature **blends** between
+  them by its `_sizeFrac`, so a fish's own size picks its shape on that curve.
+- **Creator UI** (near Copy/Paste): **Set smallest / Set average / Set largest**
+  buttons capture the current editor state into that slot; a **Size slider** (or
+  Age — see below) scrubs the preview between them so you can watch the growth.
+- Existing `SIZE_MIN/MAX/SIZE_CURVE` still set the *length distribution*; this adds
+  the *shape morph* across it. Leaving smallest == largest = one fixed shape.
+
+**Things to nail:**
+- **Interpolation needs matching topology** — smallest/largest must share spline
+  point count + fin list to blend (lerp each `[t,w]` and each fin param). Simplest:
+  a "Set …" button stamps the *current* topology into all slots so they always
+  match; otherwise enforce/auto-snap counts.
+- **Size vs Age (open question).** Driver = instantaneous **size** (`_sizeFrac`
+  fixed at spawn, as today) or a real **age** that *grows over time*? Age = a new
+  entity attribute ramping `_sizeFrac` over the creature's life (newborn → adult) +
+  a spawn option ("introduce as newborn / juvenile / adult"). Lean: ship
+  **size-driven** first (reuses `_sizeFrac`, no new state); treat **age/growth over
+  time** as a follow-on.
+- Where keyframes live in `CreatureDef` (e.g. `sizes: { small, large, avg? }`) and
+  how they round-trip through Copy/Paste + `upgradeCreature`.
+
+*Done when:* a class can define distinct small vs large shapes, fish spawn morphed
+to their own size, and the editor's size slider previews the growth.
+
 ### Phase 5 — Menu reorg
 
 - **Fish** section → **class browser**: each class row = wireframe silhouette +
   name + `[−]` / `[+]` (remove/add one of that class to the pond). Clicking the
   silhouette opens the class editor (Shape / Patterns / Appendages / Motion /
   Spawn-mix sub-views).
+- **Size preview screens:** the browser/editor shows a couple of extra preview
+  frames cycling the creature **small → large** (the Phase 4.5 growth), so its size
+  range reads at a glance — not just one silhouette.
 - **Food** gets its own top-level menu section (reserved home; behavior is E12).
 - Rehome the current "Filled" toggle + palette controls into the class editor.
 
 *Done when:* fish are managed per-class from the browser; Food has its own slot;
-the Phase 1–4 editors live inside the class editor.
+the size range is visible; the Phase 1–4.5 editors live inside the class editor.
 
 ### Phase 6 — Patterns (vector regions)
 
