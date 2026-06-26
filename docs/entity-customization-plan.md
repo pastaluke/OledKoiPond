@@ -20,10 +20,10 @@ contain an outline pixel".
 This plan replaces that with **one generic creature schema** (fish first), built
 from **decoupled modules** that compose at render time:
 
-- **Spline** — dynamic-count t-points (`{t, w}`, min 3), editable including the
-  ends; one point flagged as the **tail pivot**.
-- **Motion** — tail swishes from the pivot point (rigid-ish), tip wags most;
-  replaces the single-t-point wobble.
+- **Spline** — dynamic-count t-points (`[t, w]`, min 3), editable including the
+  ends; a slidable **`pivotT`** scalar marks the waist/flex point.
+- **Motion** — the back half flexes/wags from the pivot (propulsion fake) while the
+  front bends only to steer; replaces the single-t-point wobble.
 - **Appendages** — generic "stick-on" objects anchored to a t-point and mirrored
   across the spine (fins now; whiskers / tentacles / limbs later).
 - **Patterns** — **vector** color regions anchored in local body space, each
@@ -77,8 +77,10 @@ everything after it.
 3. **Pattern blobs reference palette color slots.** Each food/palette color entry
    carries **primary + secondary + tertiary**; the body uses primary, blobs use
    secondary/tertiary. Palette variety therefore drives pattern variety for free.
-4. **Tail pivot = a flagged t-point** (not a separate scalar, not auto-detected).
-   Moving that point moves the pivot.
+4. **Pivot = a slidable `pivotT` scalar** with a dedicated draggable handle on the
+   centerline (not auto-detected; *not* a flagged width point — superseded by
+   E13-4, which found `waistFrac` is already this scalar). Moving the handle moves
+   the pivot; flex placement stays decoupled from the silhouette points.
 5. **One generic schema now, fish as first consumer.** Schema-level genericity is
    cheap; we only *implement* fish, but octopus/turtle/food drop in later without
    a data-model rewrite.
@@ -297,10 +299,10 @@ clicking/dragging/adding, ends included, and it persists & renders correctly.
 nonzero-winding fill; rename `FishBase.SHAPE` → `FishBase.CREATURE` and the
 persisted `shape` key → `creature` (legacy upgrader reads the old key/format).
 **Scope note:** `spline.points` stay `[t,w]` tuples in this phase to keep the
-E13-1 editor intact; they become `{t,w,pivot}` objects in **E13-4** when the
-pivot flag is actually needed. Motion behavior is unchanged here
-(`motion.swishAmp` == old `wiggleFrac`; `swishRate`/`swishCurve` carried but
-unused until E13-4).
+E13-1 editor intact — and **remain** tuples through E13-4 (the pivot rides as a
+separate `pivotT` scalar, *not* a per-point flag; see Phase 4). Motion behavior is
+unchanged here (`motion.swishAmp` == old `wiggleFrac`; `swishRate`/`swishCurve`
+carried but unused until E13-4).
 
 **Preview rework (2026-06-22):** the first preview attempt drew the static pane
 as a *width-vs-t graph* stretched to the box — wildly inaccurate vs the real fish.
@@ -374,8 +376,8 @@ the editor → **Copy** the `CreatureDef` to bake.
 
 ### Phase 4 — Spline "muscle sim": pivoted back-half flex + propulsion fake
 
-> **Status: design / research (2026-06-23).** Reframed from "tail swish" into a
-> **universal body-flex driver**. The goal isn't koi-accuracy — it's that *seeing
+> **Status: design LOCKED (2026-06-25), build-ready.** Reframed from "tail swish"
+> into a **universal body-flex driver**. The goal isn't koi-accuracy — it's that *seeing
 > the thing move* is what personifies it. Real koi have tiny fins for their mass;
 > they propel by **flexing the spline**. We won't simulate fluid displacement, but
 > we fake propulsive flex so fish, eels, and fantasy air-swimmers all get it.
@@ -409,21 +411,30 @@ the editor → **Copy** the `CreatureDef` to bake.
 **Code map — where each piece lives today (what E13-4 changes):**
 - `buildCenterline` (`src/entities/fish-base.js`): the tail bézier `T→W` is shaped
   by `W` (bent by `steeringBend·bendWaist`) and `TC` (midpoint wobbled by
-  `swimOsc·motion.swishAmp`). **Change:** the **pivot = the waist `W`** promoted to
-  a flagged t-point (slidable); **replace the `TC` simple-wobble with a traveling
-  wag** rooted at the pivot that inherits the front-half tangent at `W`; back-half
-  rest curvature = continuation of the `W→H` bend, gated on forward momentum.
+  `swimOsc·motion.swishAmp`). **Key finding:** `spline.waistFrac` is *already* the
+  pivot — it's the bézier t-split in `at()`, the axial waist anchor `W`, and sits at
+  ≈0.229 (peduncle) for the koi, independent of the width points. **Change:** rename
+  `waistFrac` → **`pivotT`** (slidable scalar); make the back-half rest curve inherit
+  the front tangent at `W` (C¹) = continuation of the `W→H` bend, gated by the speed
+  gate; **replace the `TC` control-point wobble with an additive lateral wag offset
+  computed per-t inside `at()`** — `amp·env(t)·sin(phase − k·distFromPivot)` — a true
+  traveling wave decoupled from the bézier control points (`k` = peak-count knob).
 - `update()` (`fish-base.js`, steps 4–5): `steeringBend` (the single C-bend) stays
-  the "turn/flow" curve; `swimPhase`/`swimAmp` get repurposed/expanded into the
-  **wag drive** (phase + amplitude), fed by accel/throttle.
+  the "turn/flow" curve but is multiplied by a **ramped smoothstep speed gate**
+  (`V_TURN ≈ 0.15·maxSpeed`) and bounded by the creature's **min/max front-bend**
+  (replaces the global `±1.2` clamp + the Arc sliders); `swimPhase`/`swimAmp` become
+  the **wag drive** (beat rate + amplitude) fed by **`_throttle`**, not `speedFrac`,
+  with **no amplitude floor** (coasting → quiet tail).
 - **Fins ride along free** — they anchor via `centerline.at(t)`, so a flexing back
   half already carries the caudal/anal fins with it.
 
 **Schema (rides here):**
-- `spline.points` `[t,w]` → `{t,w,pivot}` objects; one flagged `pivot` (the waist).
-  Bump `schemaVersion`.
-- `motion` gains wag controls (names TBD): e.g. `wagAmp`, `wagRate`,
-  `wagAccelGain`, `followFront` — superseding `swishAmp/swishRate/swishCurve`
+- `spline.points` **stay `[t,w]` tuples** (E13-1 editor untouched). The pivot is the
+  renamed scalar `spline.waistFrac` → **`spline.pivotT`** (slidable ≈0.12–0.6), *not*
+  a per-point flag. Bump `schemaVersion` → 2; upgrade v1→v2 is just `pivotT = waistFrac`.
+- `motion` gains wag controls: `wagAmp`, `wagRate`, `wagThrottleGain` (the wag is
+  driven by `_throttle`), and `env`/`wagCurve` (the 0→pivot to 1→tail amplitude
+  envelope, reusing the `swishCurve` idea) — superseding `swishAmp/swishRate/swishCurve`
   (the new default koi already runs `swishAmp: 0`).
 - **Trim `upgradeCreature`**: drop the dead legacy flat-`SHAPE` branch, keep a thin
   load boundary (clone + version-route + validate). Rationale: local persistence
@@ -446,24 +457,37 @@ the editor → **Copy** the `CreatureDef` to bake.
   hard-brake into drag — favor edge/separation *steering* over throttle-down
   (tune `EDGE_WEIGHT`/`EDGE_YIELD`/avoid-ahead in `movement/`).
 
-**Open decisions — answer in a FUTURE session (do not finalize now).** Leanings are
-recorded from the principles above; finalize them when E13-4 is actually built:
+**Locked decisions (2026-06-25).** The three previously-deferred decisions were
+firmed up in design session and collapse into two clusters (the doc's single
+"momentum gate" splits by consumer — see below):
 
-1. **Whole-spline vs front-only steering.** *Leaning: the FRONT section creates the
-   turn arc (it bends only to turn, only while moving); the BACK inherits that curve
-   through the pivot and adds the wag.* Finalize the exact split and how the back
-   blends inherited curvature vs. its own wag.
-2. **What drives the wag** — burst throttle, |accel|, or speed. *Leaning
-   throttle/accel, so propulsion ↔ flex.* Finalize the source + response curve.
-3. **Forward-momentum gate** — hard on/off vs ramp with speed. *Note: the gate
-   applies to the front-half TURN too (no turning when stopped), not just the back
-   wag.* Finalize the gating curve.
+1. **Front-turn model (front side of #1 + #3).** The FRONT section creates the turn
+   arc and bends **only to turn, only while moving**. Bend is **reactive** (tracks
+   the *realized* turn rate, today's approach) × a **ramped smoothstep speed gate**
+   `gTurn = smoothstep(0, V_TURN, speed/maxSpeed)`, `V_TURN ≈ 0.15·maxSpeed` (ramped,
+   not hard — a hard cutoff pops). Magnitude is bounded by the creature's **min/max
+   front-bend** (shape definer), replacing the global `±1.2` clamp and the Arc sliders.
+2. **Back-half model (#2 + back side of #1/#3).** The back carries two *superimposed*
+   components: (a) an **inherited rest curve** continuing the front bend through the
+   pivot (C¹ at `W`), gated by the *same* `gTurn`; plus (b) an **additive propulsive
+   wag** `amp·env(t)·sin(phase − k·distFromPivot)`, `env(t)` ramping 0 at the pivot →
+   max at the tail tip, `k` the peak-count/wavelength knob (single peak for koi now).
+   Blend is **additive** — oscillating around the curved baseline gives biased
+   through-turn wag for free.
+3. **Gate splits by consumer (resolves #3).** **Speed** gates the turn (front + the
+   inherited back curve — you can't reorient a near-zero velocity). **Throttle**
+   (`_throttle`) is the wag's own gate *and* driver — amplitude + beat rate both ride
+   `_throttle`, **not** `|accel|` (which carries steering noise) and **not** raw
+   speed; **no amplitude floor**, so a coasting fish glides with a quiet tail. A
+   glide-throttled tail is already near-still, so the back needs no separate speed gate.
 
-**Smaller decisions (can default if unanswered):**
-4. Wag model — single traveling bend now; expose multi-peak (eel) later.
-5. `motion` field names/ranges + editor controls (pivot position, wag amp/rate,
-   accel gain, follow-front) **plus the min/max front-bend in the shape definer**.
-6. Retire `swishAmp` outright, or keep as a fallback.
+**Smaller calls (locked):**
+4. Wag model — single traveling bend now (`k` ≈ one peak across the back); multi-peak
+   (eel) later by raising `k`. Free from the additive-offset formulation.
+5. `motion` field names: `wagAmp`, `wagRate`, `wagThrottleGain`, `wagCurve` (envelope);
+   editor controls = a **draggable pivot handle** on the centerline (drives `pivotT`),
+   wag amp/rate/gain sliders, **plus the min/max front-bend in the shape definer**.
+6. Retire `swishAmp/swishRate/swishCurve` (koi already runs `swishAmp: 0`); no fallback.
 
 *Done when:* a koi visibly flexes its back half to swim (propulsive wag), only turns
 its body while moving (holding a clean single front-bend arc), the pivot is slidable
