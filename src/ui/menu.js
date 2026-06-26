@@ -1228,13 +1228,13 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       info: 'How far the snout reaches ahead of center, as a fraction of length. Larger = longer front half.' },
     { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90,
       info: 'How far the tail tip reaches behind center. Larger = longer back half. (Head + Tail ≈ total nose-to-tail length.)' },
-    { obj: 'spline', key: 'waistFrac', label: 'Waist',       min: 0.05, max: 0.60,
-      info: 'Where the neck between body and tail sits, and where the tail section meets the body. Larger = waist further forward.' },
+    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 0.60,
+      info: 'The waist/flex point: splits the steering front (head side) from the flexing back (tail side). Larger = pivot further forward (more whole-body undulation).' },
   ].forEach((sp) => mkSpine(shapePropHost, sp));
   // Motion — only visible in the live pane (wiggle while swimming; bends while turning).
   [
-    { obj: 'motion', key: 'swishAmp',  label: 'Tail wiggle', min: 0.00, max: 0.50,
-      info: 'How far the tail swings side-to-side while swimming. Only shows in the live pane. 0 = stiff tail.' },
+    { obj: 'motion', key: 'wagAmp',    label: 'Tail wag',    min: 0.00, max: 0.50,
+      info: 'How far the back half flexes side-to-side while swimming (the propulsion wag). Only shows in the live pane. 0 = stiff tail.' },
     { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50,
       info: 'How much the waist bows sideways when the fish turns. Shown by the live pane’s weave. 0 = stays straight.' },
     { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50,
@@ -1267,7 +1267,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       flash('Bad data'); return;
     }
     // Backfill anything a hand-edited blob might omit, so the renderer can't choke.
-    up.motion ??= { swishAmp: 0.156, swishRate: 1, swishCurve: 1 };
+    up.motion ??= { wagAmp: 0, wagRate: 1, wagCurve: 1.4, wagPeaks: 1 };
     if (!Array.isArray(up.appendages)) up.appendages = [];
     if (!up.patterns) up.patterns = { spawnMode: 'mix', active: null, variations: [] };
     liveCreature = up;

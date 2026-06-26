@@ -75,7 +75,7 @@ export function makeWidthFn(points) {
 }
 
 // The body's kinematic skeleton in WORLD units, relative to the fish center. Returns
-// { at(t), waistFrac } where at(t) gives { x, y, nx, ny } — position + unit normal at
+// { at(t), pivotT } where at(t) gives { x, y, nx, ny } — position + unit normal at
 // body parameter t (0=tail tip, 1=snout), bent by steering and wiggled by swim. This is
 // the shared spine the body outline AND (future) appendages + the editor's dots hang off.
 //   headAngle    : head direction (rad; 0=east, π/2=south-screen)
@@ -84,38 +84,38 @@ export function makeWidthFn(points) {
 //   length       : nose-to-tail world units
 //   spline/motion: from a CreatureDef (see FishBase.CREATURE)
 export function buildCenterline(spline, motion, { headAngle, steeringBend, swimOsc, length, swimAmp = 1 }) {
-  const { headFrac, tailFrac, waistFrac, bendWaist, bendBody } = spline;
+  const { headFrac, tailFrac, pivotT, bendWaist, bendBody } = spline;
 
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
 
   const headDist  = length * headFrac;
   const tailDist  = length * tailFrac;
-  const waistDist = tailDist - length * waistFrac;
+  const waistDist = tailDist - length * pivotT;
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
   const Wx = -cosH * waistDist - cosP * steeringBend * length * bendWaist;
   const Wy = -sinH * waistDist - sinP * steeringBend * length * bendWaist;
 
-  const tailWigglePx = length * motion.swishAmp * swimAmp;
+  const tailWigglePx = length * motion.wagAmp * swimAmp;
   const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
   const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
   const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
   const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
 
   // Position + unit normal at body parameter t (0=tail tip, 1=snout). Two quadratic
-  // bézier segments meet at the waist (profile-t === waistFrac).
+  // bézier segments meet at the waist (profile-t === pivotT).
   const at = (t) => {
     let bx, by, dx, dy;
-    if (t <= waistFrac) {
-      const s = waistFrac > 1e-6 ? t / waistFrac : 0;
+    if (t <= pivotT) {
+      const s = pivotT > 1e-6 ? t / pivotT : 0;
       bx = (1-s)*(1-s)*Tx + 2*(1-s)*s*TCx + s*s*Wx;
       by = (1-s)*(1-s)*Ty + 2*(1-s)*s*TCy + s*s*Wy;
       dx = 2*(1-s)*(TCx-Tx) + 2*s*(Wx-TCx);
       dy = 2*(1-s)*(TCy-Ty) + 2*s*(Wy-TCy);
     } else {
-      const s = (t - waistFrac) / (1 - waistFrac);
+      const s = (t - pivotT) / (1 - pivotT);
       bx = (1-s)*(1-s)*Wx + 2*(1-s)*s*BCx + s*s*Hx;
       by = (1-s)*(1-s)*Wy + 2*(1-s)*s*BCy + s*s*Hy;
       dx = 2*(1-s)*(BCx-Wx) + 2*s*(Hx-BCx);
@@ -125,7 +125,7 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimO
     return { x: bx, y: by, nx: -dy/dl, ny: dx/dl };
   };
 
-  return { at, waistFrac };
+  return { at, pivotT };
 }
 
 // Closed body outline ring {x,y} (world units): offset the centerline by ±half-width.
@@ -141,8 +141,8 @@ export function buildBodyOutline(spline, motion, opts) {
     top.push({ x: f.x + f.nx * w, y: f.y + f.ny * w });
     bot.push({ x: f.x - f.nx * w, y: f.y - f.ny * w });
   };
-  for (let i = 0; i <= TAIL_STEPS; i++) push((i / TAIL_STEPS) * spine.waistFrac);
-  for (let i = 1; i <= BODY_STEPS; i++) push(spine.waistFrac + (i / BODY_STEPS) * (1 - spine.waistFrac));
+  for (let i = 0; i <= TAIL_STEPS; i++) push((i / TAIL_STEPS) * spine.pivotT);
+  for (let i = 1; i <= BODY_STEPS; i++) push(spine.pivotT + (i / BODY_STEPS) * (1 - spine.pivotT));
 
   const ring = top.slice();
   for (let i = bot.length - 1; i >= 0; i--) ring.push(bot[i]);
@@ -259,23 +259,25 @@ export function strokeOutlineCells(poly, d) {
   return set;
 }
 
-// Upgrade any stored shape blob (legacy flat SHAPE or a new CreatureDef) to a
-// CreatureDef. Returns null if unrecognizable.
+// Load boundary for any stored CreatureDef: clone, version-route (migrate), return.
+// Returns null if unrecognizable. (The pre-E13-2 flat-SHAPE format is no longer read.)
 export function upgradeCreature(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  if (raw.spline && Array.isArray(raw.spline.points)) return JSON.parse(JSON.stringify(raw));
-  if (!Array.isArray(raw.profile)) return null;   // legacy { headFrac, …, profile }
-  return {
-    schemaVersion: 1,
-    spline: {
-      headFrac: raw.headFrac, tailFrac: raw.tailFrac, waistFrac: raw.waistFrac,
-      bendWaist: raw.bendWaist, bendBody: raw.bendBody,
-      points: raw.profile.map(([t, w]) => [t, w]),
-    },
-    motion: { swishAmp: raw.wiggleFrac ?? 0.156, swishRate: 1.0, swishCurve: 1.0 },
-    appendages: [],
-    patterns: { spawnMode: 'mix', active: null, variations: [] },
-  };
+  if (!raw || typeof raw !== 'object' || !raw.spline || !Array.isArray(raw.spline.points)) return null;
+  const c = JSON.parse(JSON.stringify(raw));   // clone — never mutate the caller's blob
+  // v1 → v2 (E13-4): waistFrac → pivotT scalar; swish* motion → wag* motion.
+  if ((c.schemaVersion ?? 1) < 2) {
+    c.spline.pivotT = c.spline.pivotT ?? c.spline.waistFrac ?? 0.229;
+    delete c.spline.waistFrac;
+    const m = c.motion ?? {};
+    c.motion = {
+      wagAmp:   m.wagAmp   ?? m.swishAmp   ?? 0,
+      wagRate:  m.wagRate  ?? m.swishRate  ?? 1,
+      wagCurve: m.wagCurve ?? m.swishCurve ?? 1.4,
+      wagPeaks: m.wagPeaks ?? 1,
+    };
+    c.schemaVersion = 2;
+  }
+  return c;
 }
 
 // ─── Angle utilities ──────────────────────────────────────────────────────────
@@ -299,16 +301,16 @@ export class FishBase {
 
   /** Creature definition — body geometry + motion + (future) appendages & patterns,
    *  all in one serializable place. Subclasses can override; the live editor mutates
-   *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints (they
-   *  gain a pivot flag and become objects in E13-4). See docs/entity-customization-plan.md. */
+   *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints; the
+   *  pivot rides as the scalar spline.pivotT (E13-4). See docs/entity-customization-plan.md. */
   // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
   // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
   static CREATURE = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     spline: {
       headFrac:  0.7,
       tailFrac:  0.624,
-      waistFrac: 0.229,
+      pivotT:    0.229,
       bendWaist: 0.097,
       bendBody:  0.297,
       points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
@@ -320,7 +322,7 @@ export class FishBase {
         [1.00, 0.10],
       ],
     },
-    motion: { swishAmp: 0, swishRate: 1, swishCurve: 1 },
+    motion: { wagAmp: 0, wagRate: 1, wagCurve: 1.4, wagPeaks: 1 },
     appendages: [
       { kind: 'fin', anchor: 0.08, side: 0, mirror: false, angle: 0, length: 4,
         swayOnTurn: 0.05, flapOnAccel: { amp: 39 },
