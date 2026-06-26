@@ -23,7 +23,6 @@ function _sampleSize(min, max, curve) {
 }
 
 // ─── Spline renderer ──────────────────────────────────────────────────────────
-const SWIM_AMP_FLOOR = 0.06;   // faint idle tail sway kept when a fish is nearly stopped
 
 // Build a half-width(t) function from a profile [[t, halfWidth], ...] using
 // Fritsch–Carlson MONOTONE cubic interpolation: smooth, but with no overshoot, so the
@@ -83,7 +82,7 @@ export function makeWidthFn(points) {
 //   swimOsc      : swim oscillation in [-1, 1]
 //   length       : nose-to-tail world units
 //   spline/motion: from a CreatureDef (see FishBase.CREATURE)
-export function buildCenterline(spline, motion, { headAngle, steeringBend, swimOsc, length, swimAmp = 1 }) {
+export function buildCenterline(spline, motion, { headAngle, steeringBend, swimPhase = 0, length, swimAmp = 1 }) {
   const { headFrac, tailFrac, pivotT, bendWaist, bendBody } = spline;
 
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
@@ -98,14 +97,27 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimO
   const Wx = -cosH * waistDist - cosP * steeringBend * length * bendWaist;
   const Wy = -sinH * waistDist - sinP * steeringBend * length * bendWaist;
 
-  const tailWigglePx = length * motion.wagAmp * swimAmp;
-  const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigglePx;
-  const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigglePx;
+  // Front (body) control: bends to steer. Computed first — the back inherits from it.
   const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
   const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
 
+  // Back (tail) rest control TC: placed so the back's tangent at W is colinear with the
+  // front tangent (BC→W), so the back smoothly CONTINUES the front's steering curve
+  // through the pivot (C¹). No swim wobble baked in — the wag is added per-t in at().
+  const fdx = Wx - BCx, fdy = Wy - BCy;            // tail-ward tangent direction through W
+  const fdl = Math.sqrt(fdx*fdx + fdy*fdy) || 1;
+  const handle = 0.5 * Math.hypot(Wx - Tx, Wy - Ty);
+  const TCx = Wx + (fdx / fdl) * handle;
+  const TCy = Wy + (fdy / fdl) * handle;
+
+  // Propulsive wag: a lateral offset that grows from 0 at the pivot → max at the tail
+  // tip and travels tailward (phase lag wagK·d). Amplitude rides swimAmp (throttle).
+  const wagK    = Math.PI * (motion.wagPeaks ?? 1);
+  const wagBase = length * motion.wagAmp * swimAmp;
+  const wagCurve = motion.wagCurve ?? 1;
+
   // Position + unit normal at body parameter t (0=tail tip, 1=snout). Two quadratic
-  // bézier segments meet at the waist (profile-t === pivotT).
+  // bézier segments meet at the waist (profile-t === pivotT); the back half gets the wag.
   const at = (t) => {
     let bx, by, dx, dy;
     if (t <= pivotT) {
@@ -122,7 +134,14 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimO
       dy = 2*(1-s)*(BCy-Wy) + 2*s*(Hy-BCy);
     }
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
-    return { x: bx, y: by, nx: -dy/dl, ny: dx/dl };
+    const nx = -dy/dl, ny = dx/dl;
+    if (wagBase !== 0 && t < pivotT && pivotT > 1e-6) {
+      const d   = (pivotT - t) / pivotT;            // 0 at pivot → 1 at tail tip
+      const env = Math.pow(d, wagCurve);            // 0 at pivot → C¹ continuity there
+      const wag = wagBase * env * Math.sin(swimPhase - wagK * d);
+      bx += nx * wag; by += ny * wag;
+    }
+    return { x: bx, y: by, nx, ny };
   };
 
   return { at, pivotT };
@@ -270,7 +289,7 @@ export function upgradeCreature(raw) {
     delete c.spline.waistFrac;
     const m = c.motion ?? {};
     c.motion = {
-      wagAmp:   m.wagAmp   ?? m.swishAmp   ?? 0,
+      wagAmp:   m.wagAmp   ?? (m.swishAmp || 0.16),   // old swish was a different mechanism; give the wag a visible default
       wagRate:  m.wagRate  ?? m.swishRate  ?? 1,
       wagCurve: m.wagCurve ?? m.swishCurve ?? 1.4,
       wagPeaks: m.wagPeaks ?? 1,
@@ -322,7 +341,7 @@ export class FishBase {
         [1.00, 0.10],
       ],
     },
-    motion: { wagAmp: 0, wagRate: 1, wagCurve: 1.4, wagPeaks: 1 },
+    motion: { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1 },
     appendages: [
       { kind: 'fin', anchor: 0.08, side: 0, mirror: false, angle: 0, length: 4,
         swayOnTurn: 0.05, flapOnAccel: { amp: 39 },
@@ -581,12 +600,11 @@ export class FishBase {
       this.steeringBend *= Math.pow(0.98, deltaMs / 16);
     }
 
-    // ── 5. Swim oscillation — cadence + amplitude scale with speed, so a coasting
-    //       fish's tail slows and relaxes toward straight; a bursting fish beats hard.
-    const speedFrac = Math.min(1, curSpeed / Math.max(1e-6, maxSpeed));
-    this.swimPhase += c.SWIM_BEAT_RATE * speedFrac * deltaMs;
+    // ── 5. Wag drive — cadence + amplitude ride the propulsion throttle, so a coasting
+    //       fish's tail goes quiet and a bursting fish beats hard. ─────────────────
+    this.swimPhase += c.SWIM_BEAT_RATE * (c.CREATURE.motion.wagRate ?? 1) * this._throttle * deltaMs;
     if (this.swimPhase > Math.PI * 2) this.swimPhase -= Math.PI * 2;
-    this.swimAmp = SWIM_AMP_FLOOR + (1 - SWIM_AMP_FLOOR) * speedFrac;
+    this.swimAmp = this._throttle;
   }
 
   draw(grid) {
@@ -598,7 +616,7 @@ export class FishBase {
     // (Patterns add more parts with their own colors in E13-6.)
     const opts = {
       headAngle: this.heading, steeringBend: this.steeringBend,
-      swimOsc, length: this.length, swimAmp: this.swimAmp,
+      swimOsc, swimPhase: this.swimPhase, length: this.length, swimAmp: this.swimAmp,
     };
     const filled = this.constructor.FILLED, color = this.color;
     const parts = [{ poly: buildBodyOutline(creature.spline, creature.motion, opts), filled, color }];

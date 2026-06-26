@@ -758,7 +758,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   const ptLabel = (i, t) => `Point ${i + 1}  ·  t=${t.toFixed(2)}`;
   const isEnd   = (i) => i === 0 || i === activePoints().length - 1;
-  const restOpts = () => ({ headAngle: 0, steeringBend: 0, swimOsc: 0, length: PREVIEW_LEN, swimAmp: 0 });
+  const restOpts = () => ({ headAngle: 0, steeringBend: 0, swimOsc: 0, swimPhase: 0, length: PREVIEW_LEN, swimAmp: 0 });
 
   // Fit world-space rings (body + fins) into a canvas, preserving aspect (no
   // fish-stretch). Sets the canvas backing size; pad leaves room for the dots.
@@ -835,6 +835,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       headAngle: 0,
       steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND,
       swimOsc: Math.sin(livePhase),
+      swimPhase: livePhase,
       length: PREVIEW_LEN, swimAmp: 1,
     };
     const body = buildBodyOutline(cre.spline, cre.motion, opts);
