@@ -4,8 +4,7 @@
 // Layers on top of the main canvas via a second absolutely-positioned canvas.
 
 import { EDGE_MARGIN } from './movement/behaviors.js';
-
-const WAIST_FRAC = 0.28;
+import { buildCenterline } from './entities/fish-base.js';
 
 // ─── Per-visualization colours (distinct so multiple layers stay separable) ────
 const C_PERCEPTION = 'rgba(120, 200, 255, 0.35)';  // light blue — perception radius
@@ -32,43 +31,6 @@ const PHASE_COLOR = {
   glide: 'rgba(120,200,255,0.95)',  // blue   — coasting
 };
 
-// Recompute all spline control points for a fish.
-// Returns { T, TC, W, BC, H } — all in physical canvas pixels.
-function _splinePoints(fish, scale) {
-  const { x, y, heading, steeringBend, swimPhase, length } = fish;
-  const swimOsc = Math.sin(swimPhase);
-
-  const cosH = Math.cos(heading), sinH = Math.sin(heading);
-  const cosP = -sinH, sinP = cosH;   // right-perpendicular
-
-  const headDist  = length * 0.42;
-  const tailDist  = length * 0.58;
-  const waistDist = tailDist - length * WAIST_FRAC;
-
-  const Hx =  cosH * headDist,    Hy =  sinH * headDist;
-  const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  const Wx = -cosH * waistDist - cosP * steeringBend * length * 0.12;
-  const Wy = -sinH * waistDist - sinP * steeringBend * length * 0.12;
-  const tailWigPx = length * 0.156;
-  const TCx = Tx + (Wx - Tx) * 0.5 + cosP * swimOsc * tailWigPx;
-  const TCy = Ty + (Wy - Ty) * 0.5 + sinP * swimOsc * tailWigPx;
-  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * 0.22;
-  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * 0.22;
-
-  // Convert fish-local logical coords → physical canvas pixels
-  const p = (lx, ly) => ({ px: (x + lx) * scale, py: (y + ly) * scale });
-
-  return {
-    T:  p(Tx,  Ty),
-    TC: p(TCx, TCy),
-    W:  p(Wx,  Wy),
-    BC: p(BCx, BCy),
-    H:  p(Hx,  Hy),
-    // heading unit vector for the arrow
-    cosH, sinH,
-    scale,
-  };
-}
 
 export class DebugOverlay {
   /**
@@ -373,33 +335,54 @@ export class DebugOverlay {
 
   _drawSpline(fish) {
     const { ctx, grid } = this;
-    const pts = _splinePoints(fish, grid.scale);
-    const { T, TC, W, BC, H, cosH, sinH, scale } = pts;
+    const scale = grid.scale;
+    const cre = fish.constructor.CREATURE;
+    // Build the real centerline from the live CreatureDef + fish state, so the overlay
+    // always matches the rendered body (including the traveling wag) — no duplicated math.
+    const spine = buildCenterline(cre.spline, cre.motion, {
+      headAngle:    fish.heading,
+      steeringBend: fish.steeringBend,
+      swimPhase:    fish.swimPhase,
+      length:       fish.length,
+      swimAmp:      fish.swimAmp,
+    });
+    // fish-local centerline point at body param t → physical canvas pixels.
+    const p = (t) => {
+      const f = spine.at(t);
+      return { px: (fish.x + f.x) * scale, py: (fish.y + f.y) * scale };
+    };
 
-    // ── Dashed lines from anchors to their control points ───────────────────
-    ctx.save();
-    ctx.setLineDash([2, 3]);
-    ctx.lineWidth = 0.8;
-    ctx.strokeStyle = 'rgba(255, 220, 0, 0.45)';
+    // ── Main spline: sampled polyline (captures the per-t traveling wag) ──────
+    const STEPS = 48;
     ctx.beginPath();
-    ctx.moveTo(T.px,  T.py);  ctx.lineTo(TC.px, TC.py);
-    ctx.moveTo(W.px,  W.py);  ctx.lineTo(TC.px, TC.py);
-    ctx.moveTo(W.px,  W.py);  ctx.lineTo(BC.px, BC.py);
-    ctx.moveTo(H.px,  H.py);  ctx.lineTo(BC.px, BC.py);
-    ctx.stroke();
-    ctx.restore();
-
-    // ── Main spline: two connected quadratic beziers ─────────────────────────
-    ctx.beginPath();
-    ctx.moveTo(T.px, T.py);
-    ctx.quadraticCurveTo(TC.px, TC.py, W.px, W.py);
-    ctx.quadraticCurveTo(BC.px, BC.py, H.px, H.py);
+    for (let i = 0; i <= STEPS; i++) {
+      const q = p(i / STEPS);
+      i ? ctx.lineTo(q.px, q.py) : ctx.moveTo(q.px, q.py);
+    }
     ctx.strokeStyle = 'rgba(0, 220, 255, 0.85)';
     ctx.lineWidth   = 1.5;
     ctx.setLineDash([]);
     ctx.stroke();
 
+    // ── Anchors: tail T(0) + head H(1) red; pivot W yellow with a 'P' ─────────
+    const T = p(0), W = p(spine.pivotT), H = p(1);
+    ctx.fillStyle = 'rgba(255, 80, 80, 0.85)';
+    for (const pt of [T, H]) {
+      ctx.beginPath();
+      ctx.arc(pt.px, pt.py, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255, 210, 40, 0.95)';
+    ctx.beginPath();
+    ctx.arc(W.px, W.py, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('P', W.px, W.py - 7);
+
     // ── Heading arrow at head ────────────────────────────────────────────────
+    const cosH = Math.cos(fish.heading), sinH = Math.sin(fish.heading);
     const arrowLen = 4 * scale;
     const ax = H.px + cosH * arrowLen;
     const ay = H.py + sinH * arrowLen;
@@ -409,34 +392,16 @@ export class DebugOverlay {
     ctx.strokeStyle = 'rgba(255, 80, 0, 0.9)';
     ctx.lineWidth   = 2;
     ctx.stroke();
-    // arrowhead
-    const arrAngle = Math.atan2(sinH, cosH);
     const aw = 0.45; // half-angle of arrowhead
     ctx.beginPath();
     ctx.moveTo(ax, ay);
-    ctx.lineTo(ax - arrowLen*0.4 * Math.cos(arrAngle - aw),
-               ay - arrowLen*0.4 * Math.sin(arrAngle - aw));
-    ctx.lineTo(ax - arrowLen*0.4 * Math.cos(arrAngle + aw),
-               ay - arrowLen*0.4 * Math.sin(arrAngle + aw));
+    ctx.lineTo(ax - arrowLen*0.4 * Math.cos(fish.heading - aw),
+               ay - arrowLen*0.4 * Math.sin(fish.heading - aw));
+    ctx.lineTo(ax - arrowLen*0.4 * Math.cos(fish.heading + aw),
+               ay - arrowLen*0.4 * Math.sin(fish.heading + aw));
     ctx.closePath();
     ctx.fillStyle = 'rgba(255, 80, 0, 0.9)';
     ctx.fill();
-
-    // ── Anchor points (T, W, H) — red ────────────────────────────────────────
-    ctx.fillStyle = 'rgba(255, 80, 80, 0.85)';
-    for (const pt of [T, W, H]) {
-      ctx.beginPath();
-      ctx.arc(pt.px, pt.py, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // ── Control points (TC, BC) — yellow ─────────────────────────────────────
-    ctx.fillStyle = 'rgba(255, 220, 0, 0.85)';
-    for (const pt of [TC, BC]) {
-      ctx.beginPath();
-      ctx.arc(pt.px, pt.py, 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
   }
 
   _drawFishStats(fish) {
