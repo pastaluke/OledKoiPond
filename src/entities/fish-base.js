@@ -90,12 +90,13 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimP
 
   const headDist  = length * headFrac;
   const tailDist  = length * tailFrac;
-  const waistDist = tailDist - length * pivotT;
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  const Wx = -cosH * waistDist - cosP * steeringBend * length * bendWaist;
-  const Wy = -sinH * waistDist - sinP * steeringBend * length * bendWaist;
+  // Pivot W sits at fraction pivotT between tail tip (0) and nose (1) — a normalized
+  // position, so it can never escape past either end regardless of head/tail offsets.
+  const Wx = Tx + (Hx - Tx) * pivotT - cosP * steeringBend * length * bendWaist;
+  const Wy = Ty + (Hy - Ty) * pivotT - sinP * steeringBend * length * bendWaist;
 
   // Front (body) control: bends to steer. Computed first — the back inherits from it.
   const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
@@ -296,6 +297,14 @@ export function upgradeCreature(raw) {
     };
     c.schemaVersion = 2;
   }
+  // v2 → v3 (E13-4): pivotT becomes a normalized 0..1 position between tail tip and
+  // nose. Was length-scaled (waist = pivotT − tailFrac), which let the waist cross the
+  // head when pivotT > headFrac + tailFrac. Divide by the span to preserve the look.
+  if ((c.schemaVersion ?? 1) < 3) {
+    const span = (c.spline.headFrac ?? 0.7) + (c.spline.tailFrac ?? 0.624);
+    c.spline.pivotT = Math.max(0, Math.min(1, (c.spline.pivotT ?? 0.229) / (span || 1)));
+    c.schemaVersion = 3;
+  }
   return c;
 }
 
@@ -325,11 +334,11 @@ export class FishBase {
   // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
   // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
   static CREATURE = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     spline: {
       headFrac:  0.7,
       tailFrac:  0.624,
-      pivotT:    0.229,
+      pivotT:    0.173,   // normalized tail-tip(0)→nose(1); ≈ old 0.229 length-units
       bendWaist: 0.097,
       bendBody:  0.297,
       points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
