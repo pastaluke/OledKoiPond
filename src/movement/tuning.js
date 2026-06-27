@@ -26,10 +26,9 @@ export const MOVEMENT_PARAMS = [
     desc: 'Overall schooling tendency — scales Alignment + Cohesion together. 0 = solitary loners, 1 = strong schoolers.' },
   { key: 'TURN_RATE_MAX',     label: 'Turn rate',  min: 0.5,     max: 5,      floor: 0.1,     ceil: 12,    step: 0.1,     coarse: 0.5,     decimals: 1,
     desc: 'Max rotation speed (rad/s) for the smallest fish; large fish scale down to ~1/3 of this. Hard ceiling — prevents the spin cycle at low speed. Higher = snappier turns.' },
-  { key: 'MAX_FORCE_MAX',     label: 'Arc (sm)',   min: 0.00002, max: 0.0008, floor: 0.00001, ceil: 0.002, step: 0.00001, coarse: 0.00005, decimals: 5,
-    desc: 'Turn arc tightness of the SMALLEST fish (steering force, px/ms²). Higher = smaller fish carve tighter circles at normal speed. Does not prevent spinning — use Turn rate for that.' },
-  { key: 'MAX_FORCE_MIN',     label: 'Arc (lg)',   min: 0.00002, max: 0.0008, floor: 0.00001, ceil: 0.002, step: 0.00001, coarse: 0.00005, decimals: 5,
-    desc: 'Turn arc tightness of the LARGEST fish (steering force, px/ms²). Higher = large fish carve tighter circles; lower = wide, sweeping arcs.' },
+  // Turn arc is now a per-creature shape attribute (spline.maxBend, Shape editor) —
+  // the global Arc (sm)/(lg) sliders (MAX_FORCE_MAX/MIN) were retired in E13-4.
+  // maxForce remains a fixed internal constant capping all steering behaviors.
   { key: 'SPEED_MAX',         label: 'Max speed',  min: 0.005,   max: 0.08,   floor: 0.002,   ceil: 0.2,   step: 0.001,   coarse: 0.005,   decimals: 3,
     desc: 'Top swimming speed cap (logical px/ms). Higher = faster fish overall.' },
   { key: 'SEPARATION_DIST',   label: 'Sep dist',   min: 0,       max: 40,     floor: 0,       ceil: 120,   step: 1,       coarse: 5,       decimals: 0,

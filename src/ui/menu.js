@@ -51,6 +51,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       <summary>Movement</summary>
       <div class="menu-rows">
         <div class="menu-scroll" id="movement-sliders"></div>
+        <label class="menu-row">
+          <span>Bend drives turn</span>
+          <input type="checkbox" id="toggle-bend-turn">
+        </label>
         <div class="menu-btn-row">
           <button class="menu-action" id="btn-copy-tuning">Copy values</button>
           <button class="menu-action" id="btn-reset-tuning">Reset</button>
@@ -306,7 +310,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
   const save = () => savePersisted({
     params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
-    fish:    { filled: FishClass.FILLED, paletteId: getActivePaletteId() },
+    fish:    { filled: FishClass.FILLED, bendDrivesTurn: FishClass.BEND_DRIVES_TURN, paletteId: getActivePaletteId() },
     creature: JSON.parse(JSON.stringify(liveCreature)),
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge,
@@ -364,6 +368,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     }
     if (persisted.fish) {
       if (typeof persisted.fish.filled   === 'boolean') FishClass.FILLED = persisted.fish.filled;
+      if (typeof persisted.fish.bendDrivesTurn === 'boolean') FishClass.BEND_DRIVES_TURN = persisted.fish.bendDrivesTurn;
       if (typeof persisted.fish.paletteId === 'string') setActivePalette(persisted.fish.paletteId);
     }
     if (persisted.border) {
@@ -509,6 +514,10 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     rowSyncs[p.key] = sync;
     sliderHost.appendChild(row);
   }
+
+  const bendTurnToggle = panel.querySelector('#toggle-bend-turn');
+  bendTurnToggle.checked = FishClass.BEND_DRIVES_TURN;
+  bendTurnToggle.addEventListener('change', (e) => { FishClass.BEND_DRIVES_TURN = e.target.checked; save(); });
 
   // ── Fish section ─────────────────────────────────────────────────────────────
   const fishHost    = panel.querySelector('#fish-sliders');
@@ -842,7 +851,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const cre = liveCreature;
     const opts = {
       headAngle: 0,
-      steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND,
+      // Weave amplitude tracks the creature's Turn bend so the editor reflects it.
+      steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND * (cre.spline.maxBend ?? 1.2),
       swimOsc: Math.sin(livePhase),
       swimPhase: livePhase,
       length: PREVIEW_LEN, swimAmp: 1,
@@ -1249,6 +1259,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       info: 'How much the waist bows sideways when the fish turns. Shown by the live pane’s weave. 0 = stays straight.' },
     { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50,
       info: 'How much the mid-body bows when turning — with Waist bend it shapes the turning C-curve. Shown in the live pane.' },
+    { obj: 'spline', key: 'maxBend',   label: 'Turn bend',   min: 0.10, max: 2.50,
+      info: 'How hard the front can curve to steer (the turn-arc shape attribute). Higher = sharper turns. With "Bend drives turn" on (Movement tab), this also sets the real turn radius.' },
   ].forEach((sp) => mkSpine(shapeMotionHost, sp));
 
   // Copy values — emit the live CreatureDef as JSON (paste into a class override).

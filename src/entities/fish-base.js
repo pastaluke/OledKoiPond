@@ -400,6 +400,11 @@ export class FishBase {
   static MAX_FORCE_MAX = 0.00003;   // smallest fish — tightest arc
   static MAX_FORCE_MIN = 0.00003;   // largest fish  — widest arc
 
+  /** When true, the creature's maxBend drives maxTurnRate (the visible bend and the
+   *  real turn radius agree); when false, turn rate stays the size-interpolated cap
+   *  and only the rendered bend is gated/clamped. Compare toggle (Movement menu). */
+  static BEND_DRIVES_TURN = false;
+
   /** When true, draw() fills the fish body solid rather than outline-only.
    *  Toggled globally from the Fish menu section. */
   static FILLED = false;
@@ -492,6 +497,9 @@ export class FishBase {
    *  Small fish turn faster; large fish sweep wider arcs. Live getter. */
   get maxTurnRate() {
     const c = this.constructor;
+    // Coupled mode: the turn-rate cap is whatever exactly saturates the creature's
+    // maxBend (targetBend = turnRate × 0.8), so the body bend == the real turn.
+    if (c.BEND_DRIVES_TURN) return (c.CREATURE.spline.maxBend ?? 1.2) / 0.8;
     return c.TURN_RATE_MAX - this._sizeFrac * (c.TURN_RATE_MAX - c.TURN_RATE_MIN);
   }
 
