@@ -450,8 +450,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (infoText) wireInfoIcon(row, infoText);
 
     const actions = {
-      'v-dec': () => setVal(getVal() - valueStep),
-      'v-inc': () => setVal(getVal() + valueStep),
+      'v-dec': () => setVal(clamp(getVal() - valueStep, getMin(), getMax())),
+      'v-inc': () => setVal(clamp(getVal() + valueStep, getMin(), getMax())),
       'lo-dec': () => setMin(getMin() - coarse),
       'lo-inc': () => setMin(getMin() + coarse),
       'hi-dec': () => setMax(getMax() - coarse),
@@ -1238,7 +1238,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       info: 'How far the snout reaches ahead of center, as a fraction of length. Larger = longer front half.' },
     { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90,
       info: 'How far the tail tip reaches behind center. Larger = longer back half. (Head + Tail ≈ total nose-to-tail length.)' },
-    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 1.00,
+    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 0.999,
       info: 'The waist/flex point: splits the steering front (head side) from the flexing back (tail side). Larger = pivot further forward (more whole-body undulation).' },
   ].forEach((sp) => mkSpine(shapePropHost, sp));
   // Motion — only visible in the live pane (wiggle while swimming; bends while turning).
