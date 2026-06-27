@@ -822,6 +822,15 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         ctx2.fill();
       }
     });
+
+    // Pivot marker — a yellow 'P' on the body centerline at pivotT (the flex point).
+    const bodySpine = buildCenterline(cre.spline, cre.motion, restOpts());
+    const pf = bodySpine.at(cre.spline.pivotT);
+    ctx2.fillStyle = 'rgb(255,210,40)';
+    ctx2.font = 'bold 12px monospace';
+    ctx2.textAlign = 'center';
+    ctx2.textBaseline = 'middle';
+    ctx2.fillText('P', pf.x * xf.sc + xf.ox, pf.y * xf.sc + xf.oy);
   }
 
   // Live pane: the real fish swimming with a lazy S-weave, so the tail wiggle AND both
@@ -1229,7 +1238,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       info: 'How far the snout reaches ahead of center, as a fraction of length. Larger = longer front half.' },
     { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90,
       info: 'How far the tail tip reaches behind center. Larger = longer back half. (Head + Tail ≈ total nose-to-tail length.)' },
-    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 0.60,
+    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 1.00,
       info: 'The waist/flex point: splits the steering front (head side) from the flexing back (tail side). Larger = pivot further forward (more whole-body undulation).' },
   ].forEach((sp) => mkSpine(shapePropHost, sp));
   // Motion — only visible in the live pane (wiggle while swimming; bends while turning).
