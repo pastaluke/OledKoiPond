@@ -305,6 +305,11 @@ export function upgradeCreature(raw) {
     c.spline.pivotT = Math.max(0, Math.min(1, (c.spline.pivotT ?? 0.229) / (span || 1)));
     c.schemaVersion = 3;
   }
+  // v3 → v4 (E13-4): per-creature max front-bend replaces the global ±1.2 clamp.
+  if ((c.schemaVersion ?? 1) < 4) {
+    c.spline.maxBend = c.spline.maxBend ?? 1.2;
+    c.schemaVersion = 4;
+  }
   return c;
 }
 
@@ -315,6 +320,11 @@ function _normalizeAngle(a) {
   return a;
 }
 function _angleDiff(a, b) { return _normalizeAngle(a - b); }
+// Hermite smoothstep, clamped: 0 below a, 1 above b, eased between.
+function _smoothstep(a, b, x) {
+  const t = Math.max(0, Math.min(1, (x - a) / ((b - a) || 1)));
+  return t * t * (3 - 2 * t);
+}
 
 // ─── FishBase ─────────────────────────────────────────────────────────────────
 export class FishBase {
@@ -334,11 +344,12 @@ export class FishBase {
   // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
   // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
   static CREATURE = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     spline: {
       headFrac:  0.7,
       tailFrac:  0.624,
       pivotT:    0.173,   // normalized tail-tip(0)→nose(1); ≈ old 0.229 length-units
+      maxBend:   1.2,     // max front steering-bend magnitude (was the global ±1.2 clamp)
       bendWaist: 0.097,
       bendBody:  0.297,
       points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
@@ -599,10 +610,14 @@ export class FishBase {
     // ── 4. Heading + steering bend — derived from the actual turn rate, which
     //       drives the body curve in the renderer. ───────────────────────────
     const curSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    const maxBend  = c.CREATURE.spline.maxBend ?? 1.2;
     if (curSpeed > 0.0001) {
       const newHeading = Math.atan2(this.vy, this.vx);
       const turnRate   = _angleDiff(newHeading, this.heading) / deltaMs * 1000; // rad/s
-      const targetBend = Math.max(-1.2, Math.min(1.2, turnRate * 0.8));
+      // Front bends only to turn, only while moving: clamp to the creature's maxBend,
+      // then gate by a ramped speed factor so a near-stopped fish holds straight.
+      const gTurn      = _smoothstep(0, 0.15, curSpeed / maxSpeed);
+      const targetBend = Math.max(-maxBend, Math.min(maxBend, turnRate * 0.8)) * gTurn;
       this.steeringBend += (targetBend - this.steeringBend) * 0.005 * deltaMs;
       this.heading = newHeading;
     } else {
