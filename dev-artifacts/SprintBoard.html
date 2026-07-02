@@ -166,7 +166,40 @@
       font-size: 10px;
       color: rgba(255,255,255,0.25);
       margin-left: auto;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
+
+    /* ── Doc-level marker on cards ── */
+    .card-doc {
+      display: inline-flex;
+      align-items: center;
+      margin-left: auto;          /* pushes doc + id cluster to the right */
+      flex-shrink: 0;
+      color: rgba(255,255,255,0.4);
+      cursor: help;
+      transition: color 0.12s;
+    }
+    .card-doc + .card-id { margin-left: 5px; }   /* id sits just after the icon */
+    .card:hover .card-doc { color: rgba(255,255,255,0.7); }
+    .card-doc svg { display: block; }
+
+    /* ── Doc-marker legend in header ── */
+    .doc-legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: rgba(255,255,255,0.4);
+      font-size: 10px;
+    }
+    .doc-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      cursor: help;
+    }
+    .doc-legend-item svg { display: block; }
+    .doc-legend-label { color: rgba(255,255,255,0.35); letter-spacing: 0.2px; }
 
     .card-title {
       font-size: 12px;
@@ -259,6 +292,8 @@
     <span class="sep"></span>
     <button class="action-btn" id="copy-btn">Copy JSON</button>
     <button class="action-btn" id="reset-btn">Reset</button>
+    <span class="sep"></span>
+    <span class="doc-legend" id="doc-legend" title="Doc markers show what documentation exists for a ticket beyond its board note"></span>
   </div>
 </header>
 
@@ -306,7 +341,7 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E5-3",  "epic":"E5",  "title":"itch.io page copy + screenshots",         "status":"backlog",          "sprint":"",         "notes":"Write store page copy and capture screenshots; depends on E5-2" },
   { "id":"E5-4",  "epic":"E5",  "title":"Orientation-change handling",             "status":"backlog",          "sprint":"",         "notes":"Gracefully reflow canvas and UI when phone rotates" },
   { "id":"E5-5",  "epic":"E5",  "title":"Google Play wrapper",                     "status":"idea-pond",        "sprint":"",         "notes":"Long-term: Trusted Web Activity or similar" },
-  { "id":"E5-6",  "epic":"E5",  "title":"Electron desktop roaming",                "status":"idea-pond",        "sprint":"",         "notes":"Transparent always-on-top window; fish swim across the full desktop surface. Also the Steam distribution path. See TASKS E5-6 for full design notes." },
+  { "id":"E5-6",  "epic":"E5",  "title":"Electron desktop roaming",                "status":"idea-pond",        "sprint":"",         "doc":1, "docRef":"docs/TASKS.md (E5-6)", "notes":"Transparent always-on-top window; fish swim across the full desktop surface. Also the Steam distribution path. See TASKS E5-6 for full design notes." },
 
   { "id":"E6-1",  "epic":"E6",  "title":"Entity plugin API contract",              "status":"idea-pond",        "sprint":"",         "notes":"Define what a third-party entity class is allowed to read and write" },
   { "id":"E6-2",  "epic":"E6",  "title":"Worker-based entity sandbox",             "status":"idea-pond",        "sprint":"",         "notes":"Proof of concept: run one entity type inside a Web Worker; depends on E6-1" },
@@ -354,7 +389,7 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E13-1", "epic":"E13", "title":"Dynamic t-point shape editor",            "status":"live",             "sprint":"",         "notes":"Click-select points in preview, dynamic count (min 3), pinned movable endpoints, +pt/−pt insert-halfway, drag, arrow nudges. Shipped 2026-06-21" },
   { "id":"E13-2", "epic":"E13", "title":"Generic CreatureDef schema + parts renderer", "status":"live",         "sprint":"",         "notes":"FishBase.SHAPE → CREATURE {spline,motion,appendages,patterns}; monotone-cubic width; nonzero-winding fill; buildCenterline; two-pane accurate+animated editor with zoom. Fixes faceting/gaps/see-through. Shipped 2026-06-22" },
   { "id":"E13-3", "epic":"E13", "title":"Appendages (fins) + fin editor",          "status":"live",             "sprint":"",         "notes":"buildFinOutline (mini-outline via makeWidthFn, anchored via centerline.at); koi tail → centered caudal fan; Edit Body/Fin selector, placement sliders, draggable fin profile dots; Copy/Paste values. Shipped 2026-06-23" },
-  { "id":"E13-4", "epic":"E13", "title":"Spline muscle-sim (pivoted flex)",        "status":"ready-for-design", "sprint":"",         "notes":"DESIGN/RESEARCH. Sliding waist pivot; back half flexes/wags (propulsion fake), front bends only to turn + only while moving; canoe-paddle fin asymmetry; arc→shape definer; glide-depth→1. Decisions #1–3 (steering split/wag drive/momentum gate) deferred to a future session. Rides {t,w,pivot} schema bump + upgradeCreature trim. See plan doc Phase 4" },
+  { "id":"E13-4", "epic":"E13", "title":"Spline muscle-sim (pivoted flex)",        "status":"ready-for-design", "sprint":"",         "doc":2, "docRef":"docs/E13-4-build-spec.md", "notes":"DESIGN/RESEARCH. Sliding waist pivot; back half flexes/wags (propulsion fake), front bends only to turn + only while moving; canoe-paddle fin asymmetry; arc→shape definer; glide-depth→1. Decisions #1–3 (steering split/wag drive/momentum gate) deferred to a future session. Rides {t,w,pivot} schema bump + upgradeCreature trim. See plan doc Phase 4" },
   { "id":"E13-9", "epic":"E13", "title":"Creature class registry (class-as-data)", "status":"ready-for-design", "sprint":"",         "notes":"FOUNDATION. One FishBase engine; species (koi/turtle) = data records in a registry, individuals = instances referencing a species — not JS subclasses (so species are authorable/importable without code). Sim spawns a mix, per-species counts + independent add/remove; tuning per-species; editor/persistence target selected species. Concretizes E4-5. Sequence before E13-5" },
   { "id":"E13-8", "epic":"E13", "title":"Creature size & growth variance",         "status":"ready-for-design", "sprint":"",         "notes":"Size keyframes (Set smallest/avg/largest) blended by the existing _sizeFrac; size slider previews the morph. Decided: size-driven first (age/growth-over-time is a follow-on with persistent individuals). Sequence before E13-5" },
   { "id":"E13-5", "epic":"E13", "title":"Menu reorg — class browser",              "status":"backlog",          "sprint":"",         "notes":"Fish section → class browser (silhouette + name + −/+ per class); size-preview screens small→large; Food gets its own home; rehome shape/pattern/appendage editors into the class editor. Depends on E13-9" },
@@ -397,6 +432,31 @@ const EPIC_NAMES = {
   E13: 'Entity Customization', B1: 'iOS Fullscreen Bug',
 };
 
+// ── Doc-level markers ──────────────────────────────────────────────
+// A ticket's `doc` field (1 | 2 | 3) flags what documentation exists for it
+// beyond its SprintBoard note. Optional `docRef` names the file/location and
+// shows in the hover tooltip.
+//   1 · single page   → documented elsewhere; minimal planning (no epic needed)
+//   2 · stack of docs  → implementation details exist (part of an epic); not started
+//   3 · stack + media  → level 2 PLUS other media (art, audio, diagrams)
+const DOC_ICONS = {
+  1: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8.5z"/><path d="M13.5 3v5.5H19"/><path d="M9 13h6M9 16.5h5"/></svg>',
+  2: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5V4.5a1.4 1.4 0 0 1 1.4-1.4H13"/><path d="M6.5 16V7a1.4 1.4 0 0 1 1.4-1.4H16"/><rect x="9" y="9" width="11" height="12" rx="1.5"/></svg>',
+  3: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.2V3.4a1.3 1.3 0 0 1 1.3-1.3H11"/><path d="M4.7 13.7V5.4a1.3 1.3 0 0 1 1.3-1.3H13"/><rect x="7" y="7" width="10.5" height="11.5" rx="1.4"/><path d="M18.5 15v6M15.5 18h6"/></svg>',
+};
+const DOC_TITLES = {
+  1: 'Documented elsewhere — minimal planning (epic not required)',
+  2: 'Implementation details exist (part of an epic) — not started yet',
+  3: 'Implementation details + other media (art, audio, diagrams)',
+};
+
+function docBadge(t) {
+  const icon = DOC_ICONS[t.doc];
+  if (!icon) return '';
+  const title = DOC_TITLES[t.doc] + (t.docRef ? ' · ' + t.docRef : '');
+  return `<span class="card-doc" title="${escHtml(title)}" aria-label="${escHtml(DOC_TITLES[t.doc])}">${icon}</span>`;
+}
+
 let tickets = [];
 let activeEpic = 'all';
 
@@ -429,6 +489,7 @@ function makeCard(t) {
     `<div class="card-body">` +
       `<div class="card-meta">` +
         `<span class="card-epic" style="color:${color}">${escHtml(t.epic)} · ${escHtml(EPIC_NAMES[t.epic] || '')}</span>` +
+        docBadge(t) +
         `<span class="card-id">${escHtml(t.id)}</span>` +
       `</div>` +
       `<div class="card-title">${escHtml(t.title)}</div>` +
@@ -522,7 +583,21 @@ function showToast(msg) {
   showToast._t = setTimeout(() => el.classList.remove('show'), 2800);
 }
 
+function renderLegend() {
+  const el = document.getElementById('doc-legend');
+  if (!el) return;
+  const labels = { 1: 'min', 2: 'spec', 3: 'spec + media' };
+  el.innerHTML = '<span class="doc-legend-label" style="letter-spacing:0.4px">DOCS</span>' +
+    [1, 2, 3].map(lvl =>
+      `<span class="doc-legend-item" title="${escHtml(DOC_TITLES[lvl])}">` +
+        DOC_ICONS[lvl] +
+        `<span class="doc-legend-label">${labels[lvl]}</span>` +
+      `</span>`
+    ).join('');
+}
+
 load();
+renderLegend();
 renderBoard();
 </script>
 </body>
