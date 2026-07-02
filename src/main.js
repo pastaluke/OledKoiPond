@@ -13,6 +13,7 @@ import { Compositor } from './renderer/compositor.js';
 import { GlassShapes } from './renderer/glass-shapes.js';
 import { KeyNavManager } from './ui/key-nav.js';
 import { RippleField } from './fluid/ripple-field.js';
+import { Rain } from './fluid/rain.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -30,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const compositor  = new Compositor(canvas, glCanvas);
   const glassShapes = new GlassShapes(compositor);
   const rippleField = new RippleField(grid);
+  const rain        = new Rain();
   const sim     = new Simulation(grid);
   const overlay = new DebugOverlay(debugCanvas, grid);
   overlay.glassShapes = glassShapes;
@@ -190,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, rippleField });
+  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, rippleField, rain });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
@@ -201,6 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     grid.clear();
     sim.update(deltaMs);
+    rain.update(deltaMs, rippleField, grid);
     rippleField.update();
     sim.draw();
     rippleField.draw(grid);

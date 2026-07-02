@@ -11,6 +11,7 @@ import {
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
+import { RAIN_DEFAULTS } from '../fluid/rain.js';
 import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
@@ -25,7 +26,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../grid.js').Grid} refs.grid
  * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav, rippleField }) {
+export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav, rippleField, rain }) {
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
   const defaults = snapshot(FishClass);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
@@ -168,6 +169,21 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       </div>
     </details>
     <details>
+      <summary>Rain</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Rain</span>
+          <input type="checkbox" id="toggle-rain-enabled">
+        </label>
+        <div id="rain-sliders"></div>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-rain-reset">Reset</button>
+          <button class="menu-action" id="btn-rain-copy">Copy</button>
+          <button class="menu-action" id="btn-rain-paste">Paste</button>
+        </div>
+      </div>
+    </details>
+    <details>
       <summary>Border</summary>
       <div class="menu-rows">
         <label class="menu-row">
@@ -306,6 +322,23 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     return true;
   };
 
+  // ── Rain settings (de)serialisation ──────────────────────────────────────────
+  // Mirrors the water helpers: one shape feeds persistence, Copy, and Paste/Reset.
+  const rainSnapshot = () => rain ? {
+    enabled: rain.enabled, frequency: rain.frequency,
+    strength: rain.strength, stddev: rain.stddev,
+  } : undefined;
+
+  // Apply a (possibly partial / untrusted) rain blob, clamping every field.
+  const applyRainSettings = (rv) => {
+    if (!rain || rv === null || typeof rv !== 'object' || Array.isArray(rv)) return false;
+    if (typeof rv.enabled === 'boolean') rain.enabled   = rv.enabled;
+    if (Number.isFinite(rv.frequency))   rain.frequency = clamp(rv.frequency, 0, 30);
+    if (Number.isFinite(rv.strength))    rain.strength  = clamp(rv.strength, 0.1, 5);
+    if (Number.isFinite(rv.stddev))      rain.stddev    = clamp(rv.stddev, 0, 3);
+    return true;
+  };
+
   // ── Persistence ─────────────────────────────────────────────────────────────
   // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
   const save = () => savePersisted({
@@ -319,6 +352,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
                specularMode: compositor.specularMode, specularCurve: compositor.specularCurve },
     glassShapes: glassShapes.serialize(),
     water: waterSnapshot(),
+    rain: rainSnapshot(),
   });
 
   function setFishCount(n) {
@@ -394,6 +428,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     }
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
     if (persisted.water) applyWaterSettings(persisted.water);
+    if (persisted.rain) applyRainSettings(persisted.rain);
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -1469,6 +1504,77 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       catch { flash(waterPasteBtn, 'Bad data'); return; }
       if (applyWaterSettings(parsed)) { syncWaterUI(); save(); flash(waterPasteBtn, 'Pasted!'); }
       else flash(waterPasteBtn, 'Bad data');
+    });
+  }
+
+  // ── Rain controls ────────────────────────────────────────────────────────────
+  if (rain) {
+    const rainSliderHost  = panel.querySelector('#rain-sliders');
+    const rainEnableToggle = panel.querySelector('#toggle-rain-enabled');
+
+    rainEnableToggle.checked = rain.enabled;
+    rainEnableToggle.addEventListener('change', (e) => { rain.enabled = e.target.checked; save(); });
+
+    const rainRowSyncs = [];
+    const mkR = (cfg) => {
+      const { row, sync } = makeRow({ hasBounds: false, ...cfg });
+      rainSliderHost.appendChild(row);
+      rainRowSyncs.push(sync);
+    };
+    const syncRainUI = () => {
+      rainEnableToggle.checked = rain.enabled;
+      rainRowSyncs.forEach((s) => s());
+    };
+
+    mkR({
+      label: 'Frequency', decimals: 1, valueStep: 0.5,
+      infoText: 'Average droplets per second. Drops fall at random times, so low values give a sparse, irregular patter.',
+      getVal: () => rain.frequency, getMin: () => 0, getMax: () => 30,
+      setVal: (v) => { rain.frequency = clamp(v, 0, 30); save(); },
+    });
+    mkR({
+      label: 'Strength', decimals: 1, valueStep: 0.1,
+      infoText: 'Average ripple amplitude of each droplet — how hard a drop hits the water.',
+      getVal: () => rain.strength, getMin: () => 0.1, getMax: () => 5.0,
+      setVal: (v) => { rain.strength = clamp(v, 0.1, 5.0); save(); },
+    });
+    mkR({
+      label: 'Std dev', decimals: 2, valueStep: 0.05,
+      infoText: 'How much droplet strength varies drop to drop. 0 = every drop identical; higher = a more natural mix of big and small drops.',
+      getVal: () => rain.stddev, getMin: () => 0, getMax: () => 3.0,
+      setVal: (v) => { rain.stddev = clamp(v, 0, 3.0); save(); },
+    });
+
+    const rainFlash = (btn, msg) => {
+      const prev = btn.textContent;
+      btn.textContent = msg;
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    };
+
+    const rainResetBtn = panel.querySelector('#btn-rain-reset');
+    rainResetBtn.addEventListener('click', () => {
+      applyRainSettings(RAIN_DEFAULTS);
+      syncRainUI();
+      save();
+    });
+
+    const rainCopyBtn = panel.querySelector('#btn-rain-copy');
+    rainCopyBtn.addEventListener('click', async () => {
+      const json = JSON.stringify(rainSnapshot(), null, 2);
+      try { await navigator.clipboard.writeText(json); rainFlash(rainCopyBtn, 'Copied!'); }
+      catch { console.log('[koi rain]\n' + json); rainFlash(rainCopyBtn, 'Logged'); }
+    });
+
+    const rainPasteBtn = panel.querySelector('#btn-rain-paste');
+    rainPasteBtn.addEventListener('click', async () => {
+      let text;
+      try { text = await navigator.clipboard.readText(); }
+      catch { rainFlash(rainPasteBtn, 'No access'); return; }
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { rainFlash(rainPasteBtn, 'Bad data'); return; }
+      if (applyRainSettings(parsed)) { syncRainUI(); save(); rainFlash(rainPasteBtn, 'Pasted!'); }
+      else rainFlash(rainPasteBtn, 'Bad data');
     });
   }
 
