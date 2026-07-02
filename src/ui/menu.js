@@ -325,17 +325,18 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // ── Rain settings (de)serialisation ──────────────────────────────────────────
   // Mirrors the water helpers: one shape feeds persistence, Copy, and Paste/Reset.
   const rainSnapshot = () => rain ? {
-    enabled: rain.enabled, frequency: rain.frequency,
+    enabled: rain.enabled, frequency: rain.frequency, freqStddev: rain.freqStddev,
     strength: rain.strength, stddev: rain.stddev,
   } : undefined;
 
   // Apply a (possibly partial / untrusted) rain blob, clamping every field.
   const applyRainSettings = (rv) => {
     if (!rain || rv === null || typeof rv !== 'object' || Array.isArray(rv)) return false;
-    if (typeof rv.enabled === 'boolean') rain.enabled   = rv.enabled;
-    if (Number.isFinite(rv.frequency))   rain.frequency = clamp(rv.frequency, 0, 30);
-    if (Number.isFinite(rv.strength))    rain.strength  = clamp(rv.strength, 0.1, 5);
-    if (Number.isFinite(rv.stddev))      rain.stddev    = clamp(rv.stddev, 0, 3);
+    if (typeof rv.enabled === 'boolean') rain.enabled    = rv.enabled;
+    if (Number.isFinite(rv.frequency))   rain.frequency  = clamp(rv.frequency, 0, 30);
+    if (Number.isFinite(rv.freqStddev))  rain.freqStddev = clamp(rv.freqStddev, 0, 15);
+    if (Number.isFinite(rv.strength))    rain.strength   = clamp(rv.strength, 0.1, 5);
+    if (Number.isFinite(rv.stddev))      rain.stddev     = clamp(rv.stddev, 0, 3);
     return true;
   };
 
@@ -1533,13 +1534,19 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       setVal: (v) => { rain.frequency = clamp(v, 0, 30); save(); },
     });
     mkR({
+      label: 'Freq std dev', decimals: 1, valueStep: 0.5,
+      infoText: 'How much the drop rate gusts and lulls around its average over time. 0 = perfectly steady; higher = rain that swells and fades in waves.',
+      getVal: () => rain.freqStddev, getMin: () => 0, getMax: () => 15,
+      setVal: (v) => { rain.freqStddev = clamp(v, 0, 15); save(); },
+    });
+    mkR({
       label: 'Strength', decimals: 1, valueStep: 0.1,
       infoText: 'Average ripple amplitude of each droplet — how hard a drop hits the water.',
       getVal: () => rain.strength, getMin: () => 0.1, getMax: () => 5.0,
       setVal: (v) => { rain.strength = clamp(v, 0.1, 5.0); save(); },
     });
     mkR({
-      label: 'Std dev', decimals: 2, valueStep: 0.05,
+      label: 'Strength std dev', decimals: 2, valueStep: 0.05,
       infoText: 'How much droplet strength varies drop to drop. 0 = every drop identical; higher = a more natural mix of big and small drops.',
       getVal: () => rain.stddev, getMin: () => 0, getMax: () => 3.0,
       setVal: (v) => { rain.stddev = clamp(v, 0, 3.0); save(); },

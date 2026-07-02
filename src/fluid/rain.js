@@ -21,19 +21,26 @@
  */
 export const RAIN_DEFAULTS = Object.freeze({
   enabled: false,
-  frequency: 2.0,   // mean droplets per second
-  strength: 1.2,    // mean droplet amplitude injected into the ripple field
-  stddev: 0.5,      // std deviation of droplet amplitude (Gaussian spread)
+  frequency: 2.0,    // mean droplets per second
+  freqStddev: 0.6,   // std deviation of the drop rate — how much rain gusts/lulls
+  strength: 1.2,     // mean droplet amplitude injected into the ripple field
+  stddev: 0.5,       // std deviation of droplet amplitude (Gaussian spread)
 });
+
+// Mean-reversion rate of the frequency wander, in 1/seconds. ~0.4 gives gusts
+// that swell and fade over a couple of seconds — reads as rain, not strobing.
+const FREQ_THETA = 0.4;
 
 export class Rain {
   constructor() {
     const d = RAIN_DEFAULTS;
-    this.enabled   = d.enabled;
-    this.frequency = d.frequency; // drops/second (mean of the Poisson process)
-    this.strength  = d.strength;  // mean amplitude per drop
-    this.stddev    = d.stddev;    // amplitude std-dev; 0 = every drop identical
-    this._spare    = null;        // cached second Box–Muller sample
+    this.enabled    = d.enabled;
+    this.frequency  = d.frequency;  // drops/second (mean of the Poisson process)
+    this.freqStddev = d.freqStddev; // rate std-dev; 0 = perfectly steady rate
+    this.strength   = d.strength;   // mean amplitude per drop
+    this.stddev     = d.stddev;     // amplitude std-dev; 0 = every drop identical
+    this._spare     = null;         // cached second Box–Muller sample
+    this._freqNoise = 0;            // current offset of the drop rate from its mean
   }
 
   /**
@@ -61,12 +68,27 @@ export class Rain {
     if (!this.enabled || this.frequency <= 0 || !rippleField) return;
     const dtS = dtMs / 1000;
 
+    // Let the instantaneous drop rate gust around the mean via a mean-reverting
+    // (Ornstein–Uhlenbeck) random walk, so rain swells and lulls instead of
+    // holding a flat average. `freqStddev` is the stationary std deviation of
+    // that wander; scaling the noise by √(2·θ) makes the steady-state spread
+    // match it regardless of θ. `_freqNoise` is clamped so a rare tail can't
+    // drive the rate more than one std-dev below the mean into a long dead zone.
+    if (this.freqStddev > 0) {
+      const sigma = this.freqStddev * Math.sqrt(2 * FREQ_THETA);
+      this._freqNoise += -FREQ_THETA * this._freqNoise * dtS
+                       + sigma * Math.sqrt(dtS) * this._gaussian();
+    } else {
+      this._freqNoise = 0;
+    }
+    const rate = Math.max(0, this.frequency + this._freqNoise);
+
     // Expected drops this frame = rate × elapsed time. Spawn the whole part
     // outright and the fractional part with matching probability, so the average
     // rate is frame-rate independent and a low frequency still yields the odd,
     // randomly-placed drop. Cap the whole part so a long tab-stall can't unleash
     // a burst on the next frame.
-    const expected  = this.frequency * dtS;
+    const expected  = rate * dtS;
     const whole     = Math.min(Math.floor(expected), 20);
     const frac      = expected - Math.floor(expected);
     const count     = whole + (Math.random() < frac ? 1 : 0);
