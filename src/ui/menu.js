@@ -48,7 +48,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     <div class="menu-rows">
       <button class="menu-row menu-action" id="btn-fullscreen">Fullscreen</button>
     </div>
-    <details open>
+    <details>
       <summary>Movement</summary>
       <div class="menu-rows">
         <div class="menu-scroll" id="movement-sliders"></div>
