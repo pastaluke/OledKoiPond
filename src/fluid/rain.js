@@ -67,13 +67,19 @@ export class Rain {
   update(dtMs, rippleField, grid) {
     if (!this.enabled || this.frequency <= 0 || !rippleField) return;
     const dtS = dtMs / 1000;
+    // A zero or negative frame delta carries no elapsed time — and the very
+    // first requestAnimationFrame timestamp can precede our start time, making
+    // it negative. Skip it: √dt below would otherwise be √(−x) = NaN and
+    // permanently poison the rate wander (NaN → no drops ever again).
+    if (!(dtS > 0)) return;
 
     // Let the instantaneous drop rate gust around the mean via a mean-reverting
     // (Ornstein–Uhlenbeck) random walk, so rain swells and lulls instead of
     // holding a flat average. `freqStddev` is the stationary std deviation of
     // that wander; scaling the noise by √(2·θ) makes the steady-state spread
-    // match it regardless of θ. `_freqNoise` is clamped so a rare tail can't
-    // drive the rate more than one std-dev below the mean into a long dead zone.
+    // match it regardless of θ. Mean-reversion keeps `_freqNoise` bounded on
+    // its own; the finite-check is a cheap guard against ever getting stuck.
+    if (!Number.isFinite(this._freqNoise)) this._freqNoise = 0;
     if (this.freqStddev > 0) {
       const sigma = this.freqStddev * Math.sqrt(2 * FREQ_THETA);
       this._freqNoise += -FREQ_THETA * this._freqNoise * dtS
