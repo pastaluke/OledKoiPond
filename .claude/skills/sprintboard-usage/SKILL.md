@@ -84,9 +84,12 @@ optional; a card can show a doc icon and the media icon together.
 
 | value | icon | meaning |
 |-------|------|---------|
-| `1` | single page | documented elsewhere; minimal planning (no epic needed) |
-| `2` | stack of docs | implementation details exist (in an epic); not started yet |
-| `3` | stack + centered plus | highly detailed implementation design — **added to the knowledge graph** |
+| `1` | single page | lightly documented — referenced in a shared doc (GDD / TASKS); no dedicated design doc |
+| `2` | stack of docs | has a dedicated design / implementation doc (build spec, epic plan) |
+| `3` | stack + centered plus | highly detailed design — **added to the knowledge graph** (reserved; unused until the graph exists) |
+
+These describe *documentation*, independent of the ticket's status — a shipped
+ticket can still carry `doc:2` because its design doc exists.
 
 - Optional `docRef` (string) names the source file; shows in the hover tooltip.
 
