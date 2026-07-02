@@ -358,7 +358,7 @@ ColorConfig {
 - Tap-to-feed interaction (fish attracted to tap point)
 - Day/night cycle (very subtle color temperature shift)
 - Sound: optional ambient water sounds
-- Custom entity authoring tool (in-app pixel editor) — now planned as **E13 · Entity Customization**; architecture in `docs/entity-customization-plan.md`
+- Custom entity authoring tool (in-app pixel editor) — now planned as **E13 · Entity Customization**; architecture in `docs/epics/E13/entity-customization-plan.md`
 - Google Play wrapper
 - Steam / Electron wrapper
 - **Desktop roaming** — Fish (and other entities) escape the browser window and swim freely across the entire desktop, rendering on top of all other applications. Requires an Electron shell with a transparent, frameless, always-on-top, click-through `BrowserWindow` (`transparent: true`, `frame: false`, `alwaysOnTop: true`, `setIgnoreMouseEvents(true, { forward: true })`). The pond canvas expands to fill the full display resolution; the black OLED background becomes invisible against the OS desktop, leaving only the glowing fish silhouettes drifting across whatever is on screen. Fish can optionally "react" to the edges of visible app windows (treated like soft pond walls). Clicking on a fish still works via hit-testing in the Electron main process before forwarding the event. Full plan: TASKS E5-6.

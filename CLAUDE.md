@@ -26,6 +26,12 @@ self-contained with enough context to act without back-referencing the
 conversation. Do not start implementing during plan mode, even if the path is
 obvious.
 
+## Project tracking (SprintBoard, epics, artifacts)
+The board is `dev-artifacts/SprintBoard.html` (its `BAKED_DATA` block is the single
+hand-edited source of truth). Epic/idea docs live under `docs/epics/<E#>/` and
+`docs/idea-pond/`. When finishing work, adding/moving tickets, creating an epic, or
+filing artifacts, follow **`.claude/skills/sprintboard-usage/SKILL.md`**.
+
 ## Future feature convention
 When the user says **"future feature: [description]"**, append it to the
 **Future / Backlog** list in `docs/GDD.md`. Capture the description faithfully;

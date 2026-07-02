@@ -1,6 +1,12 @@
 # SprintBoard — Design Plan
 
-**Status:** Plan (not yet implemented)  
+> **⚠️ Historical.** This is the original design plan. The board was built and has
+> since evolved. The `tickets.json` + `build-board.js` pipeline described below was
+> **retired** — `dev-artifacts/SprintBoard.html` (its `BAKED_DATA` block) is now the
+> single hand-edited source of truth. For the current workflow, icons, and ticket
+> schema, see **`.claude/skills/sprintboard-usage/SKILL.md`**.
+
+**Status:** Superseded (kept for history)  
 **Artifact type:** Developer tooling — not part of the game build
 
 ---

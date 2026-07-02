@@ -224,6 +224,64 @@
       color: rgba(255,255,255,0.32);
       line-height: 1.45;
     }
+    /* Collapsed cards clamp the note to 2 lines so the board stays a scanner */
+    .card:not(.expanded) .card-notes {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* ── Expand toggle ── */
+    .card-expand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      width: 100%;
+      margin-top: 6px;
+      padding: 3px 0 1px;
+      border: none;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      background: transparent;
+      color: rgba(255,255,255,0.3);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      transition: color 0.12s;
+    }
+    .card-expand:hover { color: rgba(255,255,255,0.6); }
+    .card-expand .chev { font-size: 9px; transition: transform 0.15s; }
+    .card.expanded .card-expand .chev { transform: rotate(180deg); }
+    .card.expanded .card-expand .lbl-more::after { content: 'Less'; }
+    .card:not(.expanded) .card-expand .lbl-more::after { content: 'Details'; }
+
+    /* ── Expanded detail panel ── */
+    .card-detail {
+      display: none;
+      margin-top: 7px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      font-size: 11px;
+      line-height: 1.5;
+      color: rgba(255,255,255,0.5);
+    }
+    .card.expanded .card-detail { display: block; }
+    .card-detail .fld { margin-bottom: 6px; }
+    .card-detail .fld:last-child { margin-bottom: 0; }
+    .card-detail .k {
+      display: block;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: rgba(255,255,255,0.3);
+      margin-bottom: 1px;
+    }
+    .card-detail .dates { display: flex; flex-wrap: wrap; gap: 2px 14px; color: rgba(255,255,255,0.4); }
+    .card-detail ul { margin: 0; padding-left: 15px; }
+    .card-detail li { margin-bottom: 1px; }
+    .card-detail li.bug { color: rgba(255,150,150,0.72); }
 
     .card.hidden { display: none; }
 
@@ -287,6 +345,7 @@
     <button class="filter-btn" data-epic="E10" style="color:#66ee88;border-color:#66ee8833">E10 Attract</button>
     <button class="filter-btn" data-epic="E11" style="color:#cc88ff;border-color:#cc88ff33">E11 Shaders</button>
     <button class="filter-btn" data-epic="E12" style="color:#ff8866;border-color:#ff886633">E12 Food</button>
+    <button class="filter-btn" data-epic="E13" style="color:#ffb000;border-color:#ffb00033">E13 Custom</button>
     <span class="sep"></span>
     <button class="filter-btn" data-epic="B1"  style="color:#ff5555;border-color:#ff555533">B1 iOS</button>
     <span class="sep"></span>
@@ -301,7 +360,9 @@
 <div id="toast"></div>
 
 <script>
-// Edit tickets.json, then run: node dev-artifacts/build-board.js
+// This file is the single source of truth — edit the BAKED_DATA array below by hand.
+// (The old tickets.json + build-board.js pipeline has been retired; see
+//  .claude/skills/sprintboard-usage/SKILL.md for the current workflow.)
 const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E1-1",  "epic":"E1",  "title":"PWA manifest + icons",                    "status":"ready-for-design", "sprint":"Sprint 2", "notes":"manifest.json + icons; overlaps E5-1 and B1-2 — do all three together" },
   { "id":"E1-2",  "epic":"E1",  "title":"iOS home-screen meta tags",               "status":"ready-for-design", "sprint":"Sprint 2", "notes":"apple-mobile-web-app-capable + theme-color; overlaps B1-3 — do together" },
@@ -386,10 +447,10 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E12-4", "epic":"E12", "title":"Shader cross-fade",                       "status":"backlog",          "sprint":"",         "notes":"globalAlpha cross-fade between shaderFrom and shaderTo over fixed 1.5s; depends on E12-3" },
   { "id":"E12-5", "epic":"E12", "title":"Special shimmer pellet → rainbow",        "status":"backlog",          "sprint":"",         "notes":"rollColor isSpecial signal; eating sets rainbowEffect='time'; retires the special color bag" },
 
-  { "id":"E13-1", "epic":"E13", "title":"Dynamic t-point shape editor",            "status":"live",             "sprint":"",         "notes":"Click-select points in preview, dynamic count (min 3), pinned movable endpoints, +pt/−pt insert-halfway, drag, arrow nudges. Shipped 2026-06-21" },
+  { "id":"E13-1", "epic":"E13", "title":"Dynamic t-point shape editor",            "status":"live",             "sprint":"",         "doc":3, "docRef":"docs/epics/E13/entity-customization-plan.md", "notes":"Click-select points in preview, dynamic count (min 3), pinned movable endpoints, +pt/−pt insert-halfway, drag, arrow nudges. Shipped 2026-06-21", "desc":"In-preview editor for a creature's outline: select, add, remove, and nudge spline t-points directly on the shape rather than through numeric fields.", "ended":"2026-06-21", "tech":"Preview canvas hit-tests t-points; dynamic point array (min 3) with pinned but movable endpoints; +pt/−pt insert at the halfway point of the selected segment; drag + arrow-key nudge on the selected point.", "open":["Should point count have an upper cap for performance on low-end devices?"] },
   { "id":"E13-2", "epic":"E13", "title":"Generic CreatureDef schema + parts renderer", "status":"live",         "sprint":"",         "notes":"FishBase.SHAPE → CREATURE {spline,motion,appendages,patterns}; monotone-cubic width; nonzero-winding fill; buildCenterline; two-pane accurate+animated editor with zoom. Fixes faceting/gaps/see-through. Shipped 2026-06-22" },
   { "id":"E13-3", "epic":"E13", "title":"Appendages (fins) + fin editor",          "status":"live",             "sprint":"",         "notes":"buildFinOutline (mini-outline via makeWidthFn, anchored via centerline.at); koi tail → centered caudal fan; Edit Body/Fin selector, placement sliders, draggable fin profile dots; Copy/Paste values. Shipped 2026-06-23" },
-  { "id":"E13-4", "epic":"E13", "title":"Spline muscle-sim (pivoted flex)",        "status":"ready-for-design", "sprint":"",         "doc":2, "docRef":"docs/E13-4-build-spec.md", "notes":"DESIGN/RESEARCH. Sliding waist pivot; back half flexes/wags (propulsion fake), front bends only to turn + only while moving; canoe-paddle fin asymmetry; arc→shape definer; glide-depth→1. Decisions #1–3 (steering split/wag drive/momentum gate) deferred to a future session. Rides {t,w,pivot} schema bump + upgradeCreature trim. See plan doc Phase 4" },
+  { "id":"E13-4", "epic":"E13", "title":"Spline muscle-sim (pivoted flex)",        "status":"ready-for-design", "sprint":"",         "doc":2, "docRef":"docs/epics/E13/E13-4-build-spec.md", "notes":"DESIGN/RESEARCH. Sliding waist pivot; back half flexes/wags (propulsion fake), front bends only to turn + only while moving; canoe-paddle fin asymmetry; arc→shape definer; glide-depth→1. Decisions #1–3 (steering split/wag drive/momentum gate) deferred to a future session. Rides {t,w,pivot} schema bump + upgradeCreature trim. See plan doc Phase 4" },
   { "id":"E13-9", "epic":"E13", "title":"Creature class registry (class-as-data)", "status":"ready-for-design", "sprint":"",         "notes":"FOUNDATION. One FishBase engine; species (koi/turtle) = data records in a registry, individuals = instances referencing a species — not JS subclasses (so species are authorable/importable without code). Sim spawns a mix, per-species counts + independent add/remove; tuning per-species; editor/persistence target selected species. Concretizes E4-5. Sequence before E13-5" },
   { "id":"E13-8", "epic":"E13", "title":"Creature size & growth variance",         "status":"ready-for-design", "sprint":"",         "notes":"Size keyframes (Set smallest/avg/largest) blended by the existing _sizeFrac; size slider previews the morph. Decided: size-driven first (age/growth-over-time is a follow-on with persistent individuals). Sequence before E13-5" },
   { "id":"E13-5", "epic":"E13", "title":"Menu reorg — class browser",              "status":"backlog",          "sprint":"",         "notes":"Fish section → class browser (silhouette + name + −/+ per class); size-preview screens small→large; Food gets its own home; rehome shape/pattern/appendage editors into the class editor. Depends on E13-9" },
@@ -473,6 +534,31 @@ function docBadge(t) {
   return out;
 }
 
+// ── Expanded ticket detail ──────────────────────────────────────────
+// All fields optional; only present ones render. `open`/`bugs` accept a
+// string or an array of strings.
+function listHtml(v, cls) {
+  const arr = Array.isArray(v) ? v : [v];
+  return `<ul>${arr.map(x => `<li${cls ? ` class="${cls}"` : ''}>${escHtml(x)}</li>`).join('')}</ul>`;
+}
+
+function cardDetail(t) {
+  let out = '';
+  if (t.desc) out += `<div class="fld"><span class="k">Description</span>${escHtml(t.desc)}</div>`;
+
+  const dates = [];
+  if (t.created) dates.push(`Created ${escHtml(t.created)}`);
+  if (t.started) dates.push(`Started ${escHtml(t.started)}`);
+  if (t.ended)   dates.push(`Ended ${escHtml(t.ended)}`);
+  if (dates.length) out += `<div class="fld dates">${dates.map(d => `<span>${d}</span>`).join('')}</div>`;
+
+  if (t.tech) out += `<div class="fld"><span class="k">Technical summary</span>${escHtml(t.tech)}</div>`;
+  if (t.open && t.open.length) out += `<div class="fld"><span class="k">Open questions</span>${listHtml(t.open)}</div>`;
+  if (t.bugs && t.bugs.length) out += `<div class="fld"><span class="k">Known bugs / issues</span>${listHtml(t.bugs, 'bug')}</div>`;
+
+  return out ? `<div class="card-detail">${out}</div>` : '';
+}
+
 let tickets = [];
 let activeEpic = 'all';
 
@@ -500,6 +586,10 @@ function makeCard(t) {
   card.draggable = true;
   card.dataset.id = t.id;
 
+  const detailHtml = cardDetail(t);
+  const notesLong  = !!t.notes && t.notes.length > 90;   // roughly > 2 clamped lines
+  const expandable = !!detailHtml || notesLong;
+
   card.innerHTML =
     `<div class="card-banner" style="background:${color}"></div>` +
     `<div class="card-body">` +
@@ -511,6 +601,8 @@ function makeCard(t) {
       `<div class="card-title">${escHtml(t.title)}</div>` +
       (t.sprint ? `<span class="card-sprint">${escHtml(t.sprint)}</span>` : '') +
       (t.notes  ? `<div class="card-notes">${escHtml(t.notes)}</div>`   : '') +
+      detailHtml +
+      (expandable ? `<button class="card-expand" type="button" draggable="false"><span class="lbl-more"></span><span class="chev">▾</span></button>` : '') +
     `</div>`;
 
   card.addEventListener('dragstart', e => {
@@ -518,6 +610,14 @@ function makeCard(t) {
     card.classList.add('dragging');
   });
   card.addEventListener('dragend', () => card.classList.remove('dragging'));
+
+  const expandBtn = card.querySelector('.card-expand');
+  if (expandBtn) {
+    expandBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      card.classList.toggle('expanded');
+    });
+  }
   return card;
 }
 
@@ -579,7 +679,7 @@ document.getElementById('controls').addEventListener('click', e => {
 // Copy JSON
 document.getElementById('copy-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(JSON.stringify(tickets, null, 2))
-    .then(() => showToast('JSON copied — paste into tickets.json, then run build-board.js'))
+    .then(() => showToast('JSON copied — paste between the BEGIN_TICKETS / END_TICKETS markers in SprintBoard.html'))
     .catch(() => showToast('Copy failed — check browser permissions'));
 });
 

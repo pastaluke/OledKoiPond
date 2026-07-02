@@ -1770,7 +1770,7 @@ disappear once B1 ships to home-screen users. Poetic.
 
 The fish/entity authoring overhaul: a generic, decoupled creature schema (spline
 + motion + appendages + patterns) with direct-manipulation editors, fish first.
-Full architecture, decisions, and rationale: **`docs/entity-customization-plan.md`**.
+Full architecture, decisions, and rationale: **`docs/epics/E13/entity-customization-plan.md`**.
 
 > Feeds **E4-5** (data-driven entity config) and **E6** (Creator Workshop sharing).
 > Shares the palette color-triplet bump with **E11**; the triplet is consumed by

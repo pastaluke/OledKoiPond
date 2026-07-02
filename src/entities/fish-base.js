@@ -340,7 +340,7 @@ export class FishBase {
   /** Creature definition — body geometry + motion + (future) appendages & patterns,
    *  all in one serializable place. Subclasses can override; the live editor mutates
    *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints; the
-   *  pivot rides as the scalar spline.pivotT (E13-4). See docs/entity-customization-plan.md. */
+   *  pivot rides as the scalar spline.pivotT (E13-4). See docs/epics/E13/entity-customization-plan.md. */
   // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
   // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
   static CREATURE = {
