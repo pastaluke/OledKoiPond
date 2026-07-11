@@ -129,6 +129,19 @@ export class Grid {
   }
 
   /**
+   * Batched cell drawing (E14-2): when painting many cells of ONE color (a fish
+   * part), building + parsing the `rgb()` fillStyle string per cell dominates.
+   * Call beginCells(r,g,b) once, then drawCellFast(cx,cy) per cell.
+   */
+  beginCells(r, g, b) {
+    this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+    this._cellSize = Math.ceil(this.cellScale);
+  }
+  drawCellFast(cx, cy) {
+    this.ctx.fillRect(Math.round(cx * this.cellScale), Math.round(cy * this.cellScale), this._cellSize, this._cellSize);
+  }
+
+  /**
    * Draws a single WORLD-UNIT pixel at (lx, ly). Convenience wrapper over drawCell for
    * callers that think in world units; the cell it lands on depends on density.
    * @param {number} lx - Logical (world-unit) x coordinate.

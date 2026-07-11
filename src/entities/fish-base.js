@@ -73,6 +73,29 @@ export function makeWidthFn(points) {
   };
 }
 
+// Width-fn cache (E14-2): building the Fritsch–Carlson tangents + closure every
+// frame for every part dominated the movement math. Cache per points-array with a
+// self-validating flat snapshot — the editors mutate point values in place, so a
+// 12-float compare (cheaper than one tangent solve) detects staleness with no
+// cooperation needed from callers.
+const _widthFnCache = new WeakMap();
+export function cachedWidthFn(points) {
+  let e = _widthFnCache.get(points);
+  const n2 = points.length * 2;
+  if (e && e.snap.length === n2) {
+    let clean = true;
+    for (let i = 0, j = 0; i < points.length; i++) {
+      if (e.snap[j++] !== points[i][0] || e.snap[j++] !== points[i][1]) { clean = false; break; }
+    }
+    if (clean) return e.fn;
+  }
+  const snap = new Float64Array(n2);
+  for (let i = 0, j = 0; i < points.length; i++) { snap[j++] = points[i][0]; snap[j++] = points[i][1]; }
+  e = { snap, fn: makeWidthFn(points) };
+  _widthFnCache.set(points, e);
+  return e.fn;
+}
+
 // The body's kinematic skeleton in WORLD units, relative to the fish center. Returns
 // { at(t), pivotT } where at(t) gives { x, y, nx, ny } — position + unit normal at
 // body parameter t (0=tail tip, 1=snout), bent by steering and wiggled by swim. This is
@@ -151,7 +174,7 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimP
 // Closed body outline ring {x,y} (world units): offset the centerline by ±half-width.
 // top edge tail→head, then bottom edge head→tail. Caller scales to cells + rasterizes.
 export function buildBodyOutline(spline, motion, opts) {
-  const widthAt = makeWidthFn(spline.points);
+  const widthAt = cachedWidthFn(spline.points);
   const spine = buildCenterline(spline, motion, opts);
   const TAIL_STEPS = 30, BODY_STEPS = 66;   // resolution-independent polygon; density applied by the rasterizer
 
@@ -191,14 +214,14 @@ export function finSpineFrame(spline, motion, fin, sideSign, opts) {
     return { Rx: f.x, Ry: f.y, Dx: -Tx * c + Ty * s, Dy: -Tx * s - Ty * c };   // (-T) rotated
   }
   const Nsx = f.nx * sideSign, Nsy = f.ny * sideSign;
-  const bw = makeWidthFn(spline.points)(fin.anchor);
+  const bw = cachedWidthFn(spline.points)(fin.anchor);
   const rot = sideSign * (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
   const c = Math.cos(rot), s = Math.sin(rot);
   return { Rx: f.x + Nsx * bw, Ry: f.y + Nsy * bw, Dx: Nsx * c - Nsy * s, Dy: Nsx * s + Nsy * c };
 }
 
 export function buildFinOutline(spline, motion, fin, sideSign, opts) {
-  const finW = makeWidthFn(fin.profile);
+  const finW = cachedWidthFn(fin.profile);
   const { Rx, Ry, Dx, Dy } = finSpineFrame(spline, motion, fin, sideSign, opts);
   const Px = -Dy, Py = Dx;   // fin-spine perpendicular
 
@@ -226,13 +249,23 @@ export function buildAppendageOutlines(creature, opts) {
   return out;
 }
 
-// Nonzero-winding scanline fill of a world-unit polygon → Set of "cx,cy" display cells
-// (cell centers at integer coords). Overlapping sub-loops stay filled — no holes.
+// Cell-set rasterizers (E14-2). Cells are packed into INTEGER keys —
+// key = (cy + 2048) * 4096 + (cx + 2048) — instead of "cx,cy" strings: integer
+// Set ops avoid the string allocation + parse per cell per part per frame that
+// dominated draw(). Coordinates are fish-relative display cells, well within
+// ±2048. Both functions return a SHARED Set, valid only until the next call —
+// consume immediately (decode: cx = (k & 4095) - 2048, cy = (k >>> 12) - 2048).
+export const CELL_OFF = 2048, CELL_SHIFT = 12, CELL_MASK = 4095;
+const _cellSet = new Set();
+
+// Nonzero-winding scanline fill of a world-unit polygon → shared Set of packed
+// cells (cell centers at integer coords). Overlapping sub-loops stay filled.
 export function fillOutlineCells(poly, d) {
   const pts = poly.map((p) => ({ x: p.x * d, y: p.y * d }));
   let minY = Infinity, maxY = -Infinity;
   for (const p of pts) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
-  const set = new Set();
+  const set = _cellSet;
+  set.clear();
   const yLo = Math.ceil(minY), yHi = Math.floor(maxY), n = pts.length;
   for (let cy = yLo; cy <= yHi; cy++) {
     const xs = [];
@@ -245,27 +278,29 @@ export function fillOutlineCells(poly, d) {
     if (xs.length < 2) continue;
     xs.sort((p, q) => p.x - q.x);
     let wind = 0;
+    const rowBase = (cy + CELL_OFF) << CELL_SHIFT;
     for (let i = 0; i < xs.length - 1; i++) {
       wind += xs[i].dir;
       if (wind !== 0) {
         const xa = Math.ceil(xs[i].x), xb = Math.floor(xs[i + 1].x);
-        for (let cx = xa; cx <= xb; cx++) set.add(`${cx},${cy}`);
+        for (let cx = xa; cx <= xb; cx++) set.add(rowBase + cx + CELL_OFF);
       }
     }
   }
   return set;
 }
 
-// Connected-segment outline of a world-unit polygon → Set of "cx,cy" cells (Bresenham
-// between consecutive ring vertices, so the stroke is gap-free).
+// Connected-segment outline of a world-unit polygon → shared Set of packed cells
+// (Bresenham between consecutive ring vertices, so the stroke is gap-free).
 export function strokeOutlineCells(poly, d) {
-  const set = new Set();
+  const set = _cellSet;
+  set.clear();
   const line = (x0, y0, x1, y1) => {
     const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
     const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
     let err = dx + dy;
     for (;;) {
-      set.add(`${x0},${y0}`);
+      set.add(((y0 + CELL_OFF) << CELL_SHIFT) + x0 + CELL_OFF);
       if (x0 === x1 && y0 === y1) break;
       const e2 = 2 * err;
       if (e2 >= dy) { err += dy; x0 += sx; }
@@ -585,11 +620,13 @@ export class FishBase {
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     for (const part of parts) {
       const { r, g, b } = part.color;
+      // Shared packed-int cell set (see rasterizers) — consumed before the next part.
       const cells = part.filled ? fillOutlineCells(part.poly, D) : strokeOutlineCells(part.poly, D);
+      grid.beginCells(r, g, b);   // one fillStyle per part, not per cell (E14-2)
       for (const key of cells) {
-        const ci = key.indexOf(',');
-        const cx = +key.slice(0, ci), cy = +key.slice(ci + 1);
-        grid.drawCell(ocx + cx, ocy + cy, r, g, b);
+        const cx = (key & CELL_MASK) - CELL_OFF;
+        const cy = (key >>> CELL_SHIFT) - CELL_OFF;
+        grid.drawCellFast(ocx + cx, ocy + cy);
       }
     }
   }

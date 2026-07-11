@@ -5,6 +5,7 @@
 
 import { EDGE_MARGIN } from './movement/behaviors.js';
 import { buildCenterline } from './entities/fish-base.js';
+import { PERF } from './sim/perf.js';
 
 // ─── Per-visualization colours (distinct so multiple layers stay separable) ────
 const C_PERCEPTION = 'rgba(120, 200, 255, 0.35)';  // light blue — perception radius
@@ -95,6 +96,33 @@ export class DebugOverlay {
 
     if (this.attractPoint) this._drawAttractPoint();
     if (this.keyNav)       this._drawKeyNavCursor();
+
+    if (PERF.enabled) this._drawPerfHud();
+  }
+
+  // ─── Perf HUD (E14-2) — per-phase frame ms + p50/p95, top-left ────────────────
+  _drawPerfHud() {
+    const { ctx } = this;
+    const lines = [`n=${PERF.entityCount}`];
+    let total = 0;
+    for (const name of PERF.phases) {
+      const ms = PERF.ms(name);
+      total += ms;
+      lines.push(`${name.padEnd(7)} ${ms.toFixed(2)} ms`);
+    }
+    const { p50, p95 } = PERF.percentiles();
+    lines.push(`work    ${total.toFixed(2)} ms`);
+    lines.push(`frame p50 ${p50.toFixed(2)} / p95 ${p95.toFixed(2)}`);
+
+    const pad = 6, lh = 13;
+    ctx.save();
+    ctx.font = '11px ui-monospace, monospace';
+    const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(6, 6, w, lines.length * lh + pad * 2 - 4);
+    ctx.fillStyle = 'rgba(120,255,160,0.95)';
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], 6 + pad, 6 + pad + (i + 0.75) * lh);
+    ctx.restore();
   }
 
   // ─── Glass shape handles — faint outer (rim) + inner (band) rings ─────────────

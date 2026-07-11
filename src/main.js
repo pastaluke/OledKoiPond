@@ -7,6 +7,7 @@ import { Grid         } from './grid.js';
 import { Simulation   } from './simulation.js';
 import { FishBase     } from './entities/fish-base.js';
 import { getSpecies   } from './species/species-registry.js';
+import { PERF         } from './sim/perf.js';
 import { DebugOverlay } from './debug-overlay.js';
 import { initMenu     } from './ui/menu.js';
 import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index.js';
@@ -202,17 +203,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const deltaMs = Math.min(now - lastTime, 100);
     lastTime = now;
 
+    // Perf HUD phase marks (src/sim/perf.js) — every call is a no-op while the
+    // Debug-menu toggle is off.
+    PERF.frameStart();
+    PERF.entityCount = sim.entities.length;
+
     grid.clear();
-    sim.update(deltaMs);
-    rain.update(deltaMs, rippleField, grid);
-    rippleField.update();
-    sim.draw();
-    rippleField.draw(grid);
-    grid.drawBorder();
-    keyNav.frame(deltaMs / 1000);
-    overlay.draw(sim.entities);
-    glassShapes.update(deltaMs, compositor.aspect);
-    compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0);
+    PERF.begin('sim');     sim.update(deltaMs);                          PERF.end('sim');
+    PERF.begin('water');   rain.update(deltaMs, rippleField, grid);
+                           rippleField.update();                         PERF.end('water');
+    PERF.begin('draw');    sim.draw();                                   PERF.end('draw');
+    PERF.begin('overlay'); rippleField.draw(grid);
+                           grid.drawBorder();
+                           keyNav.frame(deltaMs / 1000);
+                           overlay.draw(sim.entities);
+                           glassShapes.update(deltaMs, compositor.aspect); PERF.end('overlay');
+    PERF.begin('gpu');     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0); PERF.end('gpu');
+    PERF.frameEnd();
 
     requestAnimationFrame(frame);
   }

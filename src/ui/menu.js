@@ -7,6 +7,7 @@ import {
 } from '../movement/tuning.js';
 import { FishBase } from '../entities/fish-base.js';
 import { getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpeciesRecord } from '../species/species-registry.js';
+import { PERF } from '../sim/perf.js';
 import {
   getAllPalettes, isBuiltin,
   setActivePalette, getActivePaletteId, getActivePalette,
@@ -16,7 +17,7 @@ import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
 import { RAIN_DEFAULTS } from '../fluid/rain.js';
 import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
-const FISH_MIN = 0, FISH_MAX = 40;
+const FISH_MIN = 0, FISH_MAX = 150;   // cap raised 40 → 150 by the E14-2 perf work
 const KOI_ID = 'koi';   // the selected species (single-species v1 — E13-5 adds a browser)
 const LONG_PRESS_MS = 450;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -254,6 +255,10 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
         <label class="menu-row">
           <span>Wander Target</span>
           <input type="checkbox" id="toggle-wander"${overlay.wanderEnabled ? ' checked' : ''}>
+        </label>
+        <label class="menu-row">
+          <span>Perf HUD</span>
+          <input type="checkbox" id="toggle-perf">
         </label>
       </div>
     </details>
@@ -2061,5 +2066,10 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   // Wander Target toggle
   panel.querySelector('#toggle-wander').addEventListener('change', (e) => {
     overlay.wanderEnabled = e.target.checked;
+  });
+
+  // Perf HUD toggle (E14-2) — per-phase frame ms + p50/p95, drawn by the overlay.
+  panel.querySelector('#toggle-perf').addEventListener('change', (e) => {
+    PERF.enabled = e.target.checked;
   });
 }
