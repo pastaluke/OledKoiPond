@@ -39,7 +39,7 @@ export class Simulation {
 
     for (let i = 0; i < n; i++) {
       const fish = entities[i];
-      const rSq  = (fish.constructor.PERCEPTION_RADIUS ?? 0) ** 2;
+      const rSq  = (fish.species?.tuning.perceptionRadius ?? 0) ** 2;
 
       // O(n²) neighborhood query — fine for small ponds (n < ~30)
       const neighbors = [];

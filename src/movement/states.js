@@ -30,25 +30,25 @@ export const STATES = {
     // (SCHOOL_WEIGHT 0) still avoids collisions and wanders, but never flocks.
     // Separation is left unscaled — fish always avoid bumping.
     behaviors(fish, ctx) {
-      const c = fish.constructor;
-      const school = c.SCHOOL_WEIGHT;
+      const t = fish.species.tuning;
+      const school = t.school;
 
       // Edge yielding: once inside the wall band, fade the behaviors that fight
       // containment (wander + the social trio) so edge steering can turn the fish
       // cleanly without competition. Ramps with depth into the band → organic, and
-      // avoids raising EDGE_WEIGHT globally (which looks jarring away from walls).
+      // avoids raising the edge weight globally (which looks jarring away from walls).
       // Separation + edges keep full authority.
       const ef    = (ctx && ctx.bounds) ? edgeFactor(fish, ctx.bounds) : 0;
-      const yield_ = 1 - ef * c.EDGE_YIELD;
-      const attractW = ctx.attractPoint ? (c.ATTRACT_WEIGHT ?? 3.0) : 0;
+      const yield_ = 1 - ef * t.edgeYield;
+      const attractW = ctx.attractPoint ? (t.attract ?? 3.0) : 0;
 
       return {
-        separation: c.SEPARATION_WEIGHT,
-        alignment:  c.ALIGNMENT_WEIGHT * school * yield_,
-        cohesion:   c.COHESION_WEIGHT  * school * yield_,
+        separation: t.separation,
+        alignment:  t.alignment * school * yield_,
+        cohesion:   t.cohesion  * school * yield_,
         // Suppress wander while attracted — attract replaces it as the directional goal.
-        wander:     attractW ? 0 : c.WANDER_WEIGHT * yield_,
-        edges:      c.EDGE_WEIGHT,
+        wander:     attractW ? 0 : t.wander * yield_,
+        edges:      t.edge,
         attract:    attractW,
       };
     },

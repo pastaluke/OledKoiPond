@@ -7,7 +7,7 @@
 //
 // ctx = { neighbors: FishBase[], bounds: {width, height}, dt: ms }
 // Each fish exposes: x, y, vx, vy, heading, maxSpeed, maxForce, length,
-//                    _wanderTheta, and constructor statics.
+//                    _wanderTheta, and its live species record (fish.species).
 //
 // See docs/boids-movement-reference.md for the math and the full catalog.
 
@@ -43,10 +43,10 @@ function seek(fish, tx, ty, targetSpeed) { return steer(fish, tx - fish.x, ty - 
 
 export const BEHAVIORS = {
   // Steer away from crowding. Inverse-distance weighted so closer neighbors push
-  // harder. Uses the small SEPARATION_DIST radius (neighbors come pre-filtered to
-  // PERCEPTION_RADIUS by the Simulation).
+  // harder. Uses the small separationDist radius (neighbors come pre-filtered to
+  // perceptionRadius by the Simulation).
   separation(fish, ctx) {
-    const sepDist = fish.constructor.SEPARATION_DIST;
+    const sepDist = fish.species.tuning.separationDist;
     let sx = 0, sy = 0, count = 0;
     for (const o of ctx.neighbors) {
       const dx = fish.x - o.x, dy = fish.y - o.y;

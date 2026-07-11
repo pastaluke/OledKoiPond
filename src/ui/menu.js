@@ -2,9 +2,11 @@
 // Hamburger menu UI — small floating panel, not full-screen.
 
 import {
-  MOVEMENT_PARAMS, snapshot, applyValues, defaultRanges,
-  loadPersisted, savePersisted, toCodeSnippet,
+  MOVEMENT_PARAMS, LEGACY_PARAM_KEYS, snapshot, applyValues, applyLegacyValues,
+  defaultRanges, loadPersisted, savePersisted,
 } from '../movement/tuning.js';
+import { FishBase } from '../entities/fish-base.js';
+import { getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpeciesRecord } from '../species/species-registry.js';
 import {
   getAllPalettes, isBuiltin,
   setActivePalette, getActivePaletteId, getActivePalette,
@@ -15,6 +17,7 @@ import { RAIN_DEFAULTS } from '../fluid/rain.js';
 import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 40;
+const KOI_ID = 'koi';   // the selected species (single-species v1 — E13-5 adds a browser)
 const LONG_PRESS_MS = 450;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -24,11 +27,13 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../debug-overlay.js').DebugOverlay} refs.overlay
  * @param {import('../simulation.js').Simulation} refs.sim
  * @param {import('../grid.js').Grid} refs.grid
- * @param {typeof import('../entities/fish-base.js').FishBase} refs.FishClass - spawned fish type to tune
  */
-export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShapes, keyNav, rippleField, rain }) {
+export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain }) {
+  // The live species record the Movement + Shape sections bind to. Mutations are
+  // read fresh each frame by every living fish (species-registry live-read model).
+  const species = getSpecies(KOI_ID);
   // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
-  const defaults = snapshot(FishClass);
+  const defaults = snapshot(species);
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
   const ranges = defaultRanges();
   const fmt = (v, d) => Number(v).toFixed(d);
@@ -342,12 +347,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   // ── Persistence ─────────────────────────────────────────────────────────────
   // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
+  // E14-1: species records (tuning + body together) replace the old separate
+  // `params` + `creature` keys; the load path below still reads legacy blobs.
   const save = () => savePersisted({
-    params: snapshot(FishClass), ranges, fishCount: sim.entities.length,
-    fish:    { filled: FishClass.FILLED, bendDrivesTurn: FishClass.BEND_DRIVES_TURN, paletteId: getActivePaletteId() },
-    creature: JSON.parse(JSON.stringify(liveCreature)),
+    species: JSON.parse(JSON.stringify(getAllSpecies())),
+    ranges, fishCount: sim.entities.length,
+    fish:    { filled: FishBase.FILLED, bendDrivesTurn: FishBase.BEND_DRIVES_TURN, paletteId: getActivePaletteId() },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
-    border:  { ...grid.border, hardBorder: FishClass.HARD_BORDER, glassEdge: compositor.glassEdge,
+    border:  { ...grid.border, hardBorder: FishBase.HARD_BORDER, glassEdge: compositor.glassEdge,
                borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
                borderBevel: compositor.borderBevel, borderSpecular: compositor.borderSpecular,
                specularMode: compositor.specularMode, specularCurve: compositor.specularCurve },
@@ -358,14 +365,16 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
 
   function setFishCount(n) {
     n = clamp(Math.round(n), FISH_MIN, FISH_MAX);
-    while (sim.entities.length < n) sim.add(new FishClass(grid));
+    while (sim.entities.length < n) sim.add(new FishBase(grid, species));
     while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
   }
 
-  // ── Creature state — live mutable copy of FishClass.CREATURE ─────────────────
-  // Captured before persisted restore so Reset can return to code defaults.
-  const defaultCreature = JSON.parse(JSON.stringify(FishClass.CREATURE));
-  let liveCreature      = JSON.parse(JSON.stringify(FishClass.CREATURE));
+  // ── Creature state ────────────────────────────────────────────────────────────
+  // The editors mutate `liveCreature` and commit via `species.body = liveCreature`
+  // (living fish read species.body fresh each frame). defaultCreature is the
+  // pristine builtin body for the Shape Reset button.
+  const defaultCreature = getSpeciesDefaults(KOI_ID).body;
+  let liveCreature      = species.body;
 
   // ── Display knobs (owned by the Grid) ─────────────────────────────────────────
   const DENSITY_RANGE = { min: 1, max: 4 };    // display cells per world unit
@@ -382,7 +391,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   if (persisted) {
     if (persisted.ranges) {
       for (const p of MOVEMENT_PARAMS) {
-        const r = persisted.ranges[p.key];
+        // Legacy blobs keyed ranges by the old class-static names.
+        const r = persisted.ranges[p.key] ?? persisted.ranges[LEGACY_PARAM_KEYS[p.key]];
         if (r && Number.isFinite(r.min) && Number.isFinite(r.max)) {
           const min = clamp(r.min, p.floor, p.ceil);
           const max = clamp(Math.max(r.max, min + p.step), p.floor, p.ceil);
@@ -390,9 +400,21 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         }
       }
     }
-    applyValues(FishClass, persisted.params);
+    if (Array.isArray(persisted.species)) {
+      // E14-1 blob: species records carry tuning + body together.
+      for (const raw of persisted.species) {
+        const up = upgradeSpecies(raw);
+        if (up) applySpeciesRecord(up);
+      }
+    } else {
+      // Legacy blob (pre-E14-1): class-static param names + a separate creature blob.
+      applyLegacyValues(species, persisted.params);
+      const upgraded = upgradeCreature(persisted.creature ?? persisted.shape);
+      if (upgraded) species.body = upgraded;
+    }
+    liveCreature = species.body;   // re-sync the editor handle after either path
     for (const p of MOVEMENT_PARAMS) {
-      FishClass[p.key] = clamp(FishClass[p.key], ranges[p.key].min, ranges[p.key].max);
+      species.tuning[p.key] = clamp(species.tuning[p.key], ranges[p.key].min, ranges[p.key].max);
     }
     if (Number.isFinite(persisted.fishCount)) setFishCount(persisted.fishCount);
     if (persisted.display) {
@@ -402,8 +424,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       applyGrid();
     }
     if (persisted.fish) {
-      if (typeof persisted.fish.filled   === 'boolean') FishClass.FILLED = persisted.fish.filled;
-      if (typeof persisted.fish.bendDrivesTurn === 'boolean') FishClass.BEND_DRIVES_TURN = persisted.fish.bendDrivesTurn;
+      if (typeof persisted.fish.filled   === 'boolean') FishBase.FILLED = persisted.fish.filled;
+      if (typeof persisted.fish.bendDrivesTurn === 'boolean') FishBase.BEND_DRIVES_TURN = persisted.fish.bendDrivesTurn;
       if (typeof persisted.fish.paletteId === 'string') setActivePalette(persisted.fish.paletteId);
     }
     if (persisted.border) {
@@ -411,7 +433,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       if (typeof b.enabled    === 'boolean') grid.border.enabled  = b.enabled;
       if (Number.isFinite(b.width))          grid.border.width    = clamp(b.width,   0.5, 10);
       if (Number.isFinite(b.opacity))        grid.border.opacity  = clamp(b.opacity, 0,   1);
-      if (typeof b.hardBorder === 'boolean') FishClass.HARD_BORDER = b.hardBorder;
+      if (typeof b.hardBorder === 'boolean') FishBase.HARD_BORDER = b.hardBorder;
       if (typeof b.glassEdge  === 'boolean') compositor.setGlassEdge(b.glassEdge, {
         chromatic:    Number.isFinite(b.borderChromatic)      ? b.borderChromatic : undefined,
         refraction:   Number.isFinite(b.borderRefr)           ? b.borderRefr      : undefined,
@@ -420,12 +442,6 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         specularMode: Number.isFinite(b.specularMode)         ? b.specularMode    : undefined,
         specularCurve: Number.isFinite(b.specularCurve)       ? b.specularCurve   : undefined,
       });
-    }
-    // Accept the new `creature` blob or upgrade a legacy `shape` blob in place.
-    const upgraded = upgradeCreature(persisted.creature ?? persisted.shape);
-    if (upgraded) {
-      liveCreature = upgraded;
-      FishClass.CREATURE = liveCreature;
     }
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
     if (persisted.water) applyWaterSettings(persisted.water);
@@ -534,17 +550,17 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       valueStep: p.step,
       coarse: p.coarse,
       hasBounds: true,
-      getVal: () => FishClass[p.key],
-      setVal: (v) => { FishClass[p.key] = clamp(v, rng.min, rng.max); },
+      getVal: () => species.tuning[p.key],
+      setVal: (v) => { species.tuning[p.key] = clamp(v, rng.min, rng.max); },
       getMin: () => rng.min,
       getMax: () => rng.max,
       setMin: (v) => {
         rng.min = clamp(v, p.floor, rng.max - p.step);
-        FishClass[p.key] = clamp(FishClass[p.key], rng.min, rng.max);
+        species.tuning[p.key] = clamp(species.tuning[p.key], rng.min, rng.max);
       },
       setMax: (v) => {
         rng.max = clamp(v, rng.min + p.step, p.ceil);
-        FishClass[p.key] = clamp(FishClass[p.key], rng.min, rng.max);
+        species.tuning[p.key] = clamp(species.tuning[p.key], rng.min, rng.max);
       },
     });
     rowSyncs[p.key] = sync;
@@ -552,14 +568,14 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   }
 
   const bendTurnToggle = panel.querySelector('#toggle-bend-turn');
-  bendTurnToggle.checked = FishClass.BEND_DRIVES_TURN;
-  bendTurnToggle.addEventListener('change', (e) => { FishClass.BEND_DRIVES_TURN = e.target.checked; save(); });
+  bendTurnToggle.checked = FishBase.BEND_DRIVES_TURN;
+  bendTurnToggle.addEventListener('change', (e) => { FishBase.BEND_DRIVES_TURN = e.target.checked; save(); });
 
   // ── Fish section ─────────────────────────────────────────────────────────────
   const fishHost    = panel.querySelector('#fish-sliders');
   const filledToggle = panel.querySelector('#toggle-filled');
-  filledToggle.checked = FishClass.FILLED;
-  filledToggle.addEventListener('change', (e) => { FishClass.FILLED = e.target.checked; save(); });
+  filledToggle.checked = FishBase.FILLED;
+  filledToggle.addEventListener('change', (e) => { FishBase.FILLED = e.target.checked; save(); });
 
   const palSel       = panel.querySelector('#palette-select');
   const palColorList = panel.querySelector('#pal-color-list');
@@ -927,7 +943,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
         pr[idx][0] = clamp(Math.round(v * 100) / 100, tMin, tMax);
         const opt = shapePointSel.options[idx];
         if (opt) opt.textContent = ptLabel(idx, pr[idx][0]);
-        FishClass.CREATURE = liveCreature;
+        species.body = liveCreature;
         redrawShapePreview();
         save();
       },
@@ -948,7 +964,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       getVal: () => pr[idx][1],
       setVal: (v) => {
         pr[idx][1] = clamp(Math.round(v * 100) / 100, 0, W_MAX);
-        FishClass.CREATURE = liveCreature;
+        species.body = liveCreature;
         redrawShapePreview();
         save();
       },
@@ -1015,7 +1031,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const newW = Math.round(((pr[selectedIdx][1] + pr[nbr][1]) / 2) * 100) / 100;
     const insertAt = side < 0 ? selectedIdx : selectedIdx + 1;
     pr.splice(insertAt, 0, [newT, newW]);
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     buildShapePointSel();
     selectPoint(insertAt);
     save();
@@ -1026,7 +1042,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const pr = activePoints();
     if (isEnd(selectedIdx) || pr.length <= MIN_POINTS) return;
     pr.splice(selectedIdx, 1);
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     buildShapePointSel();
     selectPoint(Math.min(selectedIdx, pr.length - 1));
     save();
@@ -1040,7 +1056,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       pr[i][0] = clamp(Math.round((pr[i][0] + dt) * 100) / 100, tMin, tMax);
     }
     if (dw) pr[i][1] = clamp(Math.round((pr[i][1] + dw) * 100) / 100, 0, W_MAX);
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     syncSelected();
     save();
   }
@@ -1052,7 +1068,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // ── Edit target (Body / Fin N) ──────────────────────────────────────────────
   const btnFinAdd    = panel.querySelector('#btn-fin-add');
   const btnFinRemove = panel.querySelector('#btn-fin-remove');
-  const commitFin = () => { FishClass.CREATURE = liveCreature; redrawShapePreview(); save(); };
+  const commitFin = () => { species.body = liveCreature; redrawShapePreview(); save(); };
 
   function buildTargetSel() {
     shapeTargetSel.innerHTML = '';
@@ -1121,7 +1137,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       kind: 'fin', anchor: 0.78, side: 1, mirror: true, angle: 35, length: 4,
       swayOnTurn: 0.4, flapOnAccel: { amp: 12 }, profile: [[0.0, 0.2], [0.5, 1.1], [1.0, 0.5]],
     });
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     buildTargetSel();
     selectTarget(liveCreature.appendages.length - 1);
     save();
@@ -1129,7 +1145,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   btnFinRemove.addEventListener('click', () => {
     if (targetIsBody()) return;
     liveCreature.appendages.splice(editSel, 1);
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     buildTargetSel();
     selectTarget('body');
     save();
@@ -1175,7 +1191,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     const f = tgt.at(a);
     const w = Math.abs((wx - f.x) * f.nx + (wy - f.y) * f.ny);   // perpendicular distance
     pr[i][1] = clamp(Math.round(w * 100) / 100, 0, W_MAX);
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     syncSelected();
   };
 
@@ -1270,7 +1286,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
       getVal: () => liveCreature[sp.obj][sp.key],
       setVal: (v) => {
         liveCreature[sp.obj][sp.key] = Math.round(v * 1000) / 1000;
-        FishClass.CREATURE = liveCreature;
+        species.body = liveCreature;
         redrawShapePreview();
         save();
       },
@@ -1291,6 +1307,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   [
     { obj: 'motion', key: 'wagAmp',    label: 'Tail wag',    min: 0.00, max: 0.50,
       info: 'How far the back half flexes side-to-side while swimming (the propulsion wag). Only shows in the live pane. 0 = stiff tail.' },
+    { obj: 'motion', key: 'wagFreqMul', label: 'Wag speed',  min: 0.25, max: 4.00,
+      info: 'Tail-beat frequency multiplier — how fast the tail wags, independent of how hard the fish is propelling. 1 = default cadence; higher = faster beats at the same effort. (Amplitude is Tail wag.)' },
     { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50,
       info: 'How much the waist bows sideways when the fish turns. Shown by the live pane’s weave. 0 = stays straight.' },
     { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50,
@@ -1329,7 +1347,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
     if (!Array.isArray(up.appendages)) up.appendages = [];
     if (!up.patterns) up.patterns = { spawnMode: 'mix', active: null, variations: [] };
     liveCreature = up;
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     editSel = 'body';
     buildTargetSel();
     selectTarget('body');
@@ -1340,7 +1358,7 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // Reset shape
   panel.querySelector('#btn-reset-shape').addEventListener('click', () => {
     liveCreature = JSON.parse(JSON.stringify(defaultCreature));
-    FishClass.CREATURE = liveCreature;
+    species.body = liveCreature;
     editSel = 'body';
     buildTargetSel();
     selectTarget('body');
@@ -1592,8 +1610,8 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   borderToggle.addEventListener('change', (e) => { grid.border.enabled = e.target.checked; save(); });
 
   const hardBorderToggle = panel.querySelector('#toggle-hard-border');
-  hardBorderToggle.checked = FishClass.HARD_BORDER;
-  hardBorderToggle.addEventListener('change', (e) => { FishClass.HARD_BORDER = e.target.checked; save(); });
+  hardBorderToggle.checked = FishBase.HARD_BORDER;
+  hardBorderToggle.addEventListener('change', (e) => { FishBase.HARD_BORDER = e.target.checked; save(); });
 
   const glassEdgeToggle = panel.querySelector('#toggle-glass-edge');
   glassEdgeToggle.checked = compositor.glassEdge;
@@ -1913,21 +1931,23 @@ export function initMenu({ overlay, sim, grid, FishClass, compositor, glassShape
   // ── Copy / Reset ─────────────────────────────────────────────────────────────
   const copyBtn = panel.querySelector('#btn-copy-tuning');
   copyBtn.addEventListener('click', async () => {
-    const snippet = toCodeSnippet(FishClass);
+    // E14-1: export the whole species record (tuning + body together) — paste-able
+    // back through a future import, or baked into species-registry.js builtins.
+    const snippet = JSON.stringify(species, null, 2);
     try { await navigator.clipboard.writeText(snippet); }
-    catch { console.log('[koi tuning]\n' + snippet); }   // fallback if clipboard blocked
+    catch { console.log('[koi species]\n' + snippet); }   // fallback if clipboard blocked
     const prev = copyBtn.textContent;
     copyBtn.textContent = 'Copied!';
     setTimeout(() => { copyBtn.textContent = prev; }, 1200);
   });
 
   panel.querySelector('#btn-reset-tuning').addEventListener('click', () => {
-    applyValues(FishClass, defaults);
+    applyValues(species, defaults);
     const dr = defaultRanges();
     for (const p of MOVEMENT_PARAMS) {
       ranges[p.key].min = dr[p.key].min;
       ranges[p.key].max = dr[p.key].max;
-      FishClass[p.key] = clamp(FishClass[p.key], ranges[p.key].min, ranges[p.key].max);
+      species.tuning[p.key] = clamp(species.tuning[p.key], ranges[p.key].min, ranges[p.key].max);
       rowSyncs[p.key]();
     }
     save();

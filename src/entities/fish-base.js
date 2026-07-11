@@ -310,6 +310,18 @@ export function upgradeCreature(raw) {
     c.spline.maxBend = c.spline.maxBend ?? 1.2;
     c.schemaVersion = 4;
   }
+  // v4 → v5 (E14-1): wag frequency user multiplier — decouples visible tail-beat
+  // rate from the throttle-only scaling. 1 = unchanged.
+  if ((c.schemaVersion ?? 1) < 5) {
+    c.motion ??= {};
+    c.motion.wagFreqMul = c.motion.wagFreqMul ?? 1;
+    c.schemaVersion = 5;
+  }
+  // Normalize (all versions): backfill optional blocks so no consumer — renderer,
+  // editors, registry — ever meets a hand-edited/ancient blob missing them.
+  if (!Array.isArray(c.appendages)) c.appendages = [];
+  if (!c.patterns) c.patterns = { spawnMode: 'mix', active: null, variations: [] };
+  c.motion = { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1, wagFreqMul: 1, ...c.motion };
   return c;
 }
 
@@ -327,79 +339,12 @@ function _smoothstep(a, b, x) {
 }
 
 // ─── FishBase ─────────────────────────────────────────────────────────────────
+// The single creature engine class (E13-9 / E14-1): everything that used to be a
+// per-subclass static lives on the SPECIES RECORD passed to the constructor
+// (src/species/species-registry.js). All species reads go through `this.species`
+// fresh each frame, so menu edits to the shared record apply to living fish
+// instantly — the same live-read semantics the class statics had.
 export class FishBase {
-  // ── Subclasses SHOULD override these statics ───────────────────────────────
-  static TYPE_ID    = 'fish';
-  static SIZE_MIN   = 10;
-  static SIZE_MAX   = 18;
-  /** Size distribution: number = power exponent, 'normal' = bell curve */
-  static SIZE_CURVE = 1.0;
-  static SPEED_MAX  = 0.03;   // logical px/ms
-  static COLORS     = [{ r: 200, g: 200, b: 200 }];
-
-  /** Creature definition — body geometry + motion + (future) appendages & patterns,
-   *  all in one serializable place. Subclasses can override; the live editor mutates
-   *  FishClass.CREATURE directly. spline.points are [t, halfWidth] breakpoints; the
-   *  pivot rides as the scalar spline.pivotT (E13-4). See docs/epics/E13/entity-customization-plan.md. */
-  // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
-  // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
-  static CREATURE = {
-    schemaVersion: 4,
-    spline: {
-      headFrac:  0.7,
-      tailFrac:  0.624,
-      pivotT:    0.173,   // normalized tail-tip(0)→nose(1); ≈ old 0.229 length-units
-      maxBend:   1.2,     // max front steering-bend magnitude (was the global ±1.2 clamp)
-      bendWaist: 0.097,
-      bendBody:  0.297,
-      points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
-        [0.00, 0.44],
-        [0.16, 1.83],
-        [0.49, 2.90],
-        [0.66, 3.63],
-        [0.95, 1.71],
-        [1.00, 0.10],
-      ],
-    },
-    motion: { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1 },
-    appendages: [
-      { kind: 'fin', anchor: 0.08, side: 0, mirror: false, angle: 0, length: 4,
-        swayOnTurn: 0.05, flapOnAccel: { amp: 39 },
-        profile: [[0, 0], [0.21, 0.97], [0.5, 1.71], [1, 3.02]] },
-      { kind: 'fin', anchor: 0.7, side: 1, mirror: true, angle: 72, length: 5,
-        swayOnTurn: 0.25, flapOnAccel: { amp: 12 },
-        profile: [[0, 0.21], [0.5, 1.1], [1, 0.5]] },
-      { kind: 'fin', anchor: 1, side: 1, mirror: true, angle: 30, length: 7.5,
-        swayOnTurn: 0, flapOnAccel: { amp: 0 },
-        profile: [[0, 0.14], [0.19, 0.37], [1, 0]] },
-    ],
-    patterns: { spawnMode: 'mix', active: null, variations: [] },
-  };
-
-  // Schooling (boids) — SCHOOL_WEIGHT 0=solitary, 1=strong schooler.
-  // Scales the alignment + cohesion forces (separation always applies).
-  static SCHOOL_WEIGHT     = 0.5;
-  static PERCEPTION_RADIUS = 20;   // px — boids neighborhood radius (used by Simulation)
-  static SEPARATION_DIST   = 8;    // px — desired minimum gap between fish
-
-  // Steering-behavior weights (per-frame force composition, see movement/states.js).
-  static SEPARATION_WEIGHT = 0.40;
-  static ALIGNMENT_WEIGHT  = 0.35;   // effective weight = this × SCHOOL_WEIGHT
-  static COHESION_WEIGHT   = 0.65;   // effective weight = this × SCHOOL_WEIGHT
-  static WANDER_WEIGHT     = 0.40;
-  static EDGE_WEIGHT       = 0.80;
-  static ATTRACT_WEIGHT    = 3.0;
-  /** Inside the wall-avoidance band, fade wander + alignment + cohesion by up to
-   *  this fraction (0 = no change, 1 = those fully off at the wall) so edge steering
-   *  isn't overpowered by schooling/wander near walls. Ramps with depth into band. */
-  static EDGE_YIELD        = 0.45;
-
-  /** Max steering force (logical px/ms²), interpolated by size: small fish are
-   *  nimbler (higher force → tighter turn arcs), large fish sweep wider. Low relative
-   *  to SPEED_MAX → smooth, fish-like arcs rather than snappy banking. */
-  static MAX_FORCE_MAX = 0.00003;   // smallest fish — tightest arc
-  static MAX_FORCE_MIN = 0.00003;   // largest fish  — widest arc
-
   /** When true, the creature's maxBend drives maxTurnRate (the visible bend and the
    *  real turn radius agree); when false, turn rate stays the size-interpolated cap
    *  and only the rendered bend is gated/clamped. Compare toggle (Movement menu). */
@@ -410,49 +355,30 @@ export class FishBase {
   static FILLED = false;
 
   /** When true, fish are hard-clamped to the world bounds each frame (safety net).
-   *  When false, only the EDGE_WEIGHT force keeps them away from walls — fish can
-   *  overshoot at high speed or with EDGE_WEIGHT lowered. */
+   *  When false, only the edge force keeps them away from walls — fish can
+   *  overshoot at high speed or with the edge weight lowered. */
   static HARD_BORDER = true;
 
-  /** Hard per-frame turn-rate cap (rad/s), interpolated by size.
-   *  Prevents the spin cycle at low speed where boids forces dominate a near-zero
-   *  velocity vector and whip the heading every frame. Separate from MAX_FORCE —
-   *  this is a ceiling on how fast the heading can rotate, not how hard it can push. */
-  static TURN_RATE_MAX = 2.4;   // rad/s — fastest turn (smallest fish)
-  static TURN_RATE_MIN = 0.8;   // rad/s — slowest turn (largest fish)
-
-  // ── Burst-and-coast cruise throttle ─────────────────────────────────────────
-  // Each fish pulses a throttle T∈[~0,1] on its own randomized cadence:
-  //   burst (T→1, propel) → glide (T→0, coast) → near-stop → burst …
-  // T scales cruiseSpeed (the target speed of the propulsive behaviors) and the drag,
-  // so the fish accelerates in bursts then coasts down. See update()/_updateThrottle.
-  // Safety behaviors (separation/edges) ignore T and keep full authority.
-  static CRUISE_GLIDE_MIN = 0.0;    // glide throttle floor (fraction of maxSpeed)
-  static CRUISE_GLIDE_MAX = 0.19;   // glide throttle ceiling — re-sampled per glide
-  static CRUISE_BURST_MIN = 0.85;   // burst throttle ∈ [this, 1.0] — re-sampled per burst
-  static GLIDE_MS_MIN = 700;        // glide (coast) duration range, ms
-  static GLIDE_MS_MAX = 3900;
-  static BURST_MS_MIN = 250;        // burst (propel) duration range, ms
-  static BURST_MS_MAX = 2600;
-  static THROTTLE_EASE_MS = 300;    // smoothing time-constant easing T toward its target
-  static GLIDE_DRAG = 1.00;         // per-second velocity multiplier at full glide (T=0)
-  static SWIM_BEAT_RATE = 0.012;    // tail-beat rate (rad/ms) at full speed
-
-  constructor(grid) {
-    const cls = this.constructor;
+  /**
+   * @param {import('../grid.js').Grid} grid
+   * @param {object} species - live species record (see species-registry.js)
+   */
+  constructor(grid, species) {
+    this.species = species;
+    const { sizes } = species;
     const { logicalW, logicalH } = grid;
 
-    this.length = _sampleSize(cls.SIZE_MIN, cls.SIZE_MAX, cls.SIZE_CURVE);
+    this.length = _sampleSize(sizes.min, sizes.max, sizes.curve);
     this.half   = this.length / 2;
 
     // Size fraction 0 (smallest) → 1 (largest), used to scale agility.
     const sizeFrac = Math.max(0, Math.min(1,
-      (this.length - cls.SIZE_MIN) / Math.max(1, cls.SIZE_MAX - cls.SIZE_MIN)
+      (this.length - sizes.min) / Math.max(1, sizes.max - sizes.min)
     ));
     // Per-fish steering variation: small fish turn harder; slight speed jitter so the
     // school never moves as a rigid block. Stored as fractions and combined with the
-    // class statics in the maxForce/maxSpeed getters, so live menu-slider edits to
-    // those statics take effect on existing fish immediately.
+    // species tuning in the maxForce/maxSpeed getters, so live menu-slider edits to
+    // the record take effect on existing fish immediately.
     this._sizeFrac    = sizeFrac;                    // 0 (smallest) → 1 (largest)
     this._speedJitter = 0.85 + Math.random() * 0.3;  // per-fish speed multiplier
 
@@ -474,7 +400,7 @@ export class FishBase {
     this._throttle  = 0.3 + Math.random() * 0.7;
     this._thrTarget = this._throttle;
     this._phase     = Math.random() < 0.5 ? 'burst' : 'glide';
-    this._thrHold   = Math.random() * cls.GLIDE_MS_MAX;   // random initial offset
+    this._thrHold   = Math.random() * species.tuning.glideMsMax;   // random initial offset
 
     // Movement state machine + wander angle (consumed by movement/ behaviors).
     this.state           = 'swim';
@@ -486,26 +412,25 @@ export class FishBase {
     this.color = rollColor(getActivePalette(), getSpecialPalette());
   }
 
-  /** Max steering force for this fish (logical px/ms²), interpolated by size from
-   *  the class statics. Computed live so menu-slider edits apply instantly. */
+  /** Max steering force for this fish (logical px/ms²). A fixed internal constant
+   *  per species (the size-interpolated Arc sliders were retired in E13-4). Live. */
   get maxForce() {
-    const c = this.constructor;
-    return c.MAX_FORCE_MAX - this._sizeFrac * (c.MAX_FORCE_MAX - c.MAX_FORCE_MIN);
+    return this.species.tuning.forceMax;
   }
 
   /** Hard turn-rate ceiling (rad/s) for this fish, interpolated by size.
    *  Small fish turn faster; large fish sweep wider arcs. Live getter. */
   get maxTurnRate() {
-    const c = this.constructor;
+    const t = this.species.tuning;
     // Coupled mode: the turn-rate cap is whatever exactly saturates the creature's
     // maxBend (targetBend = turnRate × 0.8), so the body bend == the real turn.
-    if (c.BEND_DRIVES_TURN) return (c.CREATURE.spline.maxBend ?? 1.2) / 0.8;
-    return c.TURN_RATE_MAX - this._sizeFrac * (c.TURN_RATE_MAX - c.TURN_RATE_MIN);
+    if (FishBase.BEND_DRIVES_TURN) return (this.species.body.spline.maxBend ?? 1.2) / 0.8;
+    return t.turnRateMax - this._sizeFrac * (t.turnRateMax - t.turnRateMin);
   }
 
-  /** Max speed for this fish (logical px/ms), class static × per-fish jitter. Live. */
+  /** Max speed for this fish (logical px/ms), species tuning × per-fish jitter. Live. */
   get maxSpeed() {
-    return this.constructor.SPEED_MAX * this._speedJitter;
+    return this.species.tuning.speedMax * this._speedJitter;
   }
 
   /** Throttled cruise speed (logical px/ms) the propulsive behaviors aim for. The
@@ -515,24 +440,24 @@ export class FishBase {
   }
 
   /** Advance the burst/glide cycle: hold the current phase for a randomized duration,
-   *  then flip and re-sample a fresh target level + hold from the class ranges. The live
-   *  throttle eases toward the target (exponential smoothing) for organic motion. Every
-   *  fish rolls its own values each cycle, so no two breathe in lockstep. */
+   *  then flip and re-sample a fresh target level + hold from the species ranges. The
+   *  live throttle eases toward the target (exponential smoothing) for organic motion.
+   *  Every fish rolls its own values each cycle, so no two breathe in lockstep. */
   _updateThrottle(deltaMs) {
-    const c = this.constructor;
+    const t = this.species.tuning;
     this._thrHold -= deltaMs;
     if (this._thrHold <= 0) {
       if (this._phase === 'glide') {
         this._phase     = 'burst';
-        this._thrTarget = c.CRUISE_BURST_MIN + Math.random() * (1 - c.CRUISE_BURST_MIN);
-        this._thrHold   = c.BURST_MS_MIN + Math.random() * (c.BURST_MS_MAX - c.BURST_MS_MIN);
+        this._thrTarget = t.burstMin + Math.random() * (1 - t.burstMin);
+        this._thrHold   = t.burstMsMin + Math.random() * (t.burstMsMax - t.burstMsMin);
       } else {
         this._phase     = 'glide';
-        this._thrTarget = c.CRUISE_GLIDE_MIN + Math.random() * (c.CRUISE_GLIDE_MAX - c.CRUISE_GLIDE_MIN);
-        this._thrHold   = c.GLIDE_MS_MIN + Math.random() * (c.GLIDE_MS_MAX - c.GLIDE_MS_MIN);
+        this._thrTarget = t.coastMin + Math.random() * (t.coastThrottle - t.coastMin);
+        this._thrHold   = t.glideMsMin + Math.random() * (t.glideMsMax - t.glideMsMin);
       }
     }
-    const k = 1 - Math.exp(-deltaMs / Math.max(1, c.THROTTLE_EASE_MS));
+    const k = 1 - Math.exp(-deltaMs / Math.max(1, t.throttleEaseMs));
     this._throttle += (this._thrTarget - this._throttle) * k;
   }
 
@@ -544,7 +469,7 @@ export class FishBase {
    */
   update(deltaMs, grid, neighbors, attractPoint = null) {
     const { logicalW, logicalH } = grid;
-    const c = this.constructor;
+    const { tuning, body } = this.species;
     const maxSpeed = this.maxSpeed;
 
     // ── 0. Advance the burst/glide cruise throttle (drives cruiseSpeed + drag + tail) ──
@@ -575,11 +500,12 @@ export class FishBase {
     this.vx += ax * deltaMs;
     this.vy += ay * deltaMs;
 
-    // Burst-and-coast drag: ~none at burst (T=1), strong at glide (T→0). Bleeds
-    // built-up momentum so the fish coasts down to a near-stop instead of gliding
-    // on forever (the integrator is otherwise frictionless).
-    const dragPerSec = c.GLIDE_DRAG + (1 - c.GLIDE_DRAG) * this._throttle;
-    const drag = Math.pow(dragPerSec, deltaMs / 1000);
+    // Water drag — the medium (E14-1). Per-species velocity retention per second,
+    // ALWAYS on (no throttle gating): the water doesn't care whether the fish is
+    // bursting or coasting. tuning.drag = 1.0 → frictionless (the pre-E14 default
+    // behavior, since the old GLIDE_DRAG also defaulted to 1.0); lower values bleed
+    // momentum so coasts end in a near-stop instead of gliding on forever.
+    const drag = Math.pow(tuning.drag, deltaMs / 1000);
     this.vx *= drag;
     this.vy *= drag;
 
@@ -610,7 +536,7 @@ export class FishBase {
     // ── 3. Move + optional hard boundary clamp ──────────────────────────────
     this.x += this.vx * deltaMs;
     this.y += this.vy * deltaMs;
-    if (c.HARD_BORDER) {
+    if (FishBase.HARD_BORDER) {
       this.x = Math.max(this.half, Math.min(logicalW - this.half, this.x));
       this.y = Math.max(this.half, Math.min(logicalH - this.half, this.y));
     }
@@ -618,7 +544,7 @@ export class FishBase {
     // ── 4. Heading + steering bend — derived from the actual turn rate, which
     //       drives the body curve in the renderer. ───────────────────────────
     const curSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    const maxBend  = c.CREATURE.spline.maxBend ?? 1.2;
+    const maxBend  = body.spline.maxBend ?? 1.2;
     if (curSpeed > 0.0001) {
       const newHeading = Math.atan2(this.vy, this.vx);
       const turnRate   = _angleDiff(newHeading, this.heading) / deltaMs * 1000; // rad/s
@@ -633,8 +559,10 @@ export class FishBase {
     }
 
     // ── 5. Wag drive — cadence + amplitude ride the propulsion throttle, so a coasting
-    //       fish's tail goes quiet and a bursting fish beats hard. ─────────────────
-    this.swimPhase += c.SWIM_BEAT_RATE * (c.CREATURE.motion.wagRate ?? 1) * this._throttle * deltaMs;
+    //       fish's tail goes quiet and a bursting fish beats hard. wagFreqMul (CREATURE
+    //       v5) is the user's frequency knob, orthogonal to the throttle. ────────────
+    this.swimPhase += tuning.swimBeatRate * (body.motion.wagRate ?? 1)
+                    * (body.motion.wagFreqMul ?? 1) * this._throttle * deltaMs;
     if (this.swimPhase > Math.PI * 2) this.swimPhase -= Math.PI * 2;
     this.swimAmp = this._throttle;
   }
@@ -642,7 +570,7 @@ export class FishBase {
   draw(grid) {
     const D       = grid.density;
     const swimOsc = Math.sin(this.swimPhase);
-    const creature = this.constructor.CREATURE;
+    const creature = this.species.body;
 
     // Parts-based render: body + appendages, each a closed polygon rasterized below.
     // (Patterns add more parts with their own colors in E13-6.)
@@ -650,7 +578,7 @@ export class FishBase {
       headAngle: this.heading, steeringBend: this.steeringBend,
       swimOsc, swimPhase: this.swimPhase, length: this.length, swimAmp: this.swimAmp,
     };
-    const filled = this.constructor.FILLED, color = this.color;
+    const filled = FishBase.FILLED, color = this.color;
     const parts = [{ poly: buildBodyOutline(creature.spline, creature.motion, opts), filled, color }];
     for (const poly of buildAppendageOutlines(creature, opts)) parts.push({ poly, filled, color });
 

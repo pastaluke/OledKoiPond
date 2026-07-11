@@ -1,11 +1,12 @@
 /**
  * @file main.js
- * Entry point: wires up the Grid, Simulation, spawns Koi, drives animation loop.
+ * Entry point: wires up the Grid, Simulation, spawns koi, drives animation loop.
  */
 
 import { Grid         } from './grid.js';
 import { Simulation   } from './simulation.js';
-import { Koi          } from './entities/koi.js';
+import { FishBase     } from './entities/fish-base.js';
+import { getSpecies   } from './species/species-registry.js';
 import { DebugOverlay } from './debug-overlay.js';
 import { initMenu     } from './ui/menu.js';
 import { rollColor, getActivePalette, getSpecialPalette } from './palettes/index.js';
@@ -46,8 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const ariaLive = document.getElementById('aria-live');
   if (ariaLive) keyNav.setAriaLive(ariaLive);
 
-  // ── Spawn koi ────────────────────────────────────────────────────────────
-  for (let i = 0; i < KOI_COUNT; i++) sim.add(new Koi(grid));
+  // ── Spawn koi (species-as-data: one engine class + the builtin koi record) ──
+  for (let i = 0; i < KOI_COUNT; i++) sim.add(new FishBase(grid, getSpecies('koi')));
 
   // ── Reposition entities proportionally when the grid is resized ──────────
   // Registered BEFORE the menu so menu-driven display-knob changes (world size /
@@ -192,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, FishClass: Koi, compositor, glassShapes, keyNav, rippleField, rain });
+  initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();

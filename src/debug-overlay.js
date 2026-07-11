@@ -161,7 +161,7 @@ export class DebugOverlay {
   _drawPerception(fish) {
     const { ctx, grid } = this;
     const scale = grid.scale;
-    const r = (fish.constructor.PERCEPTION_RADIUS ?? 0) * scale;
+    const r = (fish.species?.tuning.perceptionRadius ?? 0) * scale;
     if (r <= 0) return;
     ctx.save();
     ctx.strokeStyle = C_PERCEPTION;
@@ -176,7 +176,7 @@ export class DebugOverlay {
   _drawSeparation(fish) {
     const { ctx, grid } = this;
     const scale = grid.scale;
-    const r = (fish.constructor.SEPARATION_DIST ?? 0) * scale;
+    const r = (fish.species?.tuning.separationDist ?? 0) * scale;
     if (r <= 0) return;
     ctx.save();
     ctx.strokeStyle = C_SEPARATION;
@@ -236,7 +236,7 @@ export class DebugOverlay {
     ctx.beginPath();
     for (let i = 0; i < entities.length; i++) {
       const a = entities[i];
-      const rSq = (a.constructor.PERCEPTION_RADIUS ?? 0) ** 2;
+      const rSq = (a.species?.tuning.perceptionRadius ?? 0) ** 2;
       if (rSq <= 0) continue;
       for (let j = i + 1; j < entities.length; j++) {
         const b = entities[j];
@@ -336,7 +336,7 @@ export class DebugOverlay {
   _drawSpline(fish) {
     const { ctx, grid } = this;
     const scale = grid.scale;
-    const cre = fish.constructor.CREATURE;
+    const cre = fish.species.body;
     // Build the real centerline from the live CreatureDef + fish state, so the overlay
     // always matches the rendered body (including the traveling wag) — no duplicated math.
     const spine = buildCenterline(cre.spline, cre.motion, {
