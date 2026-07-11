@@ -8,6 +8,7 @@ import {
 import { FishBase } from '../entities/fish-base.js';
 import { getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpeciesRecord } from '../species/species-registry.js';
 import { PERF } from '../sim/perf.js';
+import { getStyle } from '../movement/move-styles.js';
 import {
   getAllPalettes, isBuiltin,
   setActivePalette, getActivePaletteId, getActivePalette,
@@ -58,6 +59,11 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       <summary>Movement</summary>
       <div class="menu-rows">
         <div class="menu-scroll" id="movement-sliders"></div>
+        <div class="menu-row" style="display:block">
+          <span style="font-size:11px;opacity:0.7">Move-style preview</span>
+          <canvas id="style-preview" class="shape-preview"></canvas>
+          <div id="style-preview-label" style="font:11px monospace;opacity:0.75;text-align:center;margin-top:-2px"></div>
+        </div>
         <label class="menu-row">
           <span>Bend drives turn</span>
           <input type="checkbox" id="toggle-bend-turn">
@@ -927,6 +933,59 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (on && !liveRAF) { livePrevTs = 0; liveRAF = requestAnimationFrame(drawLivePreview); }
     else if (!on && liveRAF) { cancelAnimationFrame(liveRAF); liveRAF = 0; }
   }
+
+  // ── Move-style preview (E14-3) ────────────────────────────────────────────────
+  // Cycles the selected species through each of its styles; within a style, sweeps
+  // the cruise throttle low→high→low so you can watch the tail cadence + amplitude
+  // respond, using the SAME wag formula as the sim (freq/amp floors per style, ×
+  // the creature's Wag speed). Directly shows what Wag speed / Coast throttle do.
+  const stylePrev      = panel.querySelector('#style-preview');
+  const stylePrevLabel = panel.querySelector('#style-preview-label');
+  const STYLE_BEAT = 0.010;         // base beat rate (rad/ms) for the preview sweep
+  let styleRAF = 0, stylePhase = 0, styleSwimPhase = 0, stylePrevTs = 0, styleClock = 0;
+  function drawStylePreview(ts) {
+    const dt = stylePrevTs ? ts - stylePrevTs : 16;
+    stylePrevTs = ts;
+    styleClock += dt;
+
+    const styleIds = (species.styles || []).map((s) => s.styleId);
+    const perStyleMs = 3200;                                   // time spent showing each style
+    const idx = styleIds.length ? Math.floor(styleClock / perStyleMs) % styleIds.length : 0;
+    const style = getStyle(styleIds[idx] || 'flow');
+    // Throttle sweep 0→1→0 across this style's window (triangular).
+    const u = (styleClock % perStyleMs) / perStyleMs;          // 0..1 within the style
+    const throttle = 1 - Math.abs(u * 2 - 1);                  // 0 →1 →0
+
+    const wf = style.wag || { freqFloor: 0, ampFloor: 0 };
+    const freqScale = wf.freqFloor + (1 - wf.freqFloor) * throttle;
+    const wagMul = species.body.motion.wagFreqMul ?? 1;
+    styleSwimPhase += STYLE_BEAT * wagMul * freqScale * dt;
+    const swimAmp = wf.ampFloor + (1 - wf.ampFloor) * throttle;
+
+    const cre = species.body;
+    const opts = {
+      headAngle: 0, steeringBend: 0,
+      swimOsc: Math.sin(styleSwimPhase), swimPhase: styleSwimPhase,
+      length: PREVIEW_LEN, swimAmp,
+    };
+    const body = buildBodyOutline(cre.spline, cre.motion, opts);
+    const fins = buildAppendageOutlines(cre, opts);
+    const xf = fitPoly(stylePrev, [body, ...fins]);
+    const ctx2 = stylePrev.getContext('2d');
+    ctx2.clearRect(0, 0, xf.W, xf.H);
+    for (const fp of fins) strokePoly(ctx2, fp, xf, 'rgba(120,255,160,0.08)', 'rgba(120,255,160,0.4)');
+    strokePoly(ctx2, body, xf, 'rgba(120,255,160,0.10)', 'rgba(120,255,160,0.55)');
+
+    stylePrevLabel.textContent = `${style.name}  ·  throttle ${throttle.toFixed(2)}  ·  wag×${wagMul.toFixed(2)}`;
+    styleRAF = requestAnimationFrame(drawStylePreview);
+  }
+  function setStylePreview(on) {
+    if (on && !styleRAF) { stylePrevTs = 0; styleRAF = requestAnimationFrame(drawStylePreview); }
+    else if (!on && styleRAF) { cancelAnimationFrame(styleRAF); styleRAF = 0; }
+  }
+  // Run the preview only while the Movement section is open.
+  panel.querySelector('#movement-sliders').closest('details')
+    .addEventListener('toggle', (e) => setStylePreview(e.target.open));
 
   function buildShapeSliders(idx) {
     shapeTHost.innerHTML = '';

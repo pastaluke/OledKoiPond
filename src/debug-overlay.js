@@ -21,15 +21,20 @@ const C_CUR   = 'rgba(80,255,120,0.95)';    // green — current value
 const C_MAX   = 'rgba(255,100,100,0.95)';   // red   — maximum value
 const C_LABEL = 'rgba(200,200,200,0.80)';   // dim white — label text
 
+// Move-style colours (E14-3) — the active locomotion style.
 const STATE_COLOR = {
-  swim:      'rgba(100,210,255,0.95)',  // cyan  — baseline ambient swimming
-  socialize: 'rgba(255,210,60,0.95)',   // amber — (future triggered state)
+  flow:      'rgba(100,210,255,0.95)',  // cyan   — idle flowing
+  burst:     'rgba(255,140,40,0.95)',   // orange — bursting (e.g. toward attract)
+  feed:      'rgba(120,255,160,0.95)',  // green  — (future) feeding
+  school:    'rgba(255,210,60,0.95)',   // amber  — (future) schooling
 };
 
-// Burst-and-coast throttle phase colours (orthogonal to STATE above).
+// Gait phase colours (orthogonal to the style above): propelling vs coasting.
 const PHASE_COLOR = {
   burst: 'rgba(255,140,40,0.95)',   // orange — propelling
-  glide: 'rgba(120,200,255,0.95)',  // blue   — coasting
+  press: 'rgba(255,180,90,0.95)',   // light orange — gentle press
+  coast: 'rgba(120,200,255,0.95)',  // blue   — coasting
+  glide: 'rgba(120,200,255,0.95)',
 };
 
 
@@ -436,12 +441,12 @@ export class DebugOverlay {
     const { ctx, grid } = this;
     const scale = grid.scale;
 
-    // ── High-level state-machine state (swim today; socialize/feed/… later) ──
-    const state      = fish.state ?? 'swim';
-    const stateColor = STATE_COLOR[state] ?? STATE_COLOR.swim;
+    // ── Active move style (E14-3): flow / burst / feed / school … ──
+    const state      = fish._styleId ?? 'flow';
+    const stateColor = STATE_COLOR[state] ?? STATE_COLOR.flow;
 
-    // ── Burst-and-coast throttle: phase, ms left in phase, eased throttle level ──
-    const phase      = fish._phase ?? 'glide';
+    // ── Gait phase, ms left in phase, eased throttle level ──
+    const phase      = fish._phaseName ?? 'coast';
     const phaseColor = PHASE_COLOR[phase] ?? C_LABEL;
     const holdMs     = Math.max(0, Math.round(fish._thrHold ?? 0));
     const throttle   = fish._throttle ?? 0;

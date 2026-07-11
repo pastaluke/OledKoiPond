@@ -97,12 +97,21 @@ const KOI_TUNING = {
   swimBeatRate:   0.012,  // tail-beat rate (rad/ms) at full speed
 };
 
+// Move-style priority list (E14-3): the arbiter walks this top-down; the first
+// entry whose trigger passes is the active style, and the LAST entry is the idle
+// default. Koi burst toward a held attract point, otherwise flow.
+const KOI_STYLES = [
+  { styleId: 'burst', trigger: 'attract' },
+  { styleId: 'flow',  trigger: 'always'  },
+];
+
 const BUILTIN_SPECIES = [
   {
     schemaVersion: 1,
     id: 'koi', name: 'Koi', builtin: true,
     body:   KOI_BODY,
     tuning: KOI_TUNING,
+    styles: KOI_STYLES,
     sizes:  { min: 12, max: 22, curve: 'normal' },   // most koi mid-sized; extremes rare
   },
 ];
@@ -156,6 +165,9 @@ export function upgradeSpecies(raw) {
     builtin: isBuiltinSpecies(c.id),
     body: body ?? base.body,
     tuning: { ...base.tuning, ...(typeof c.tuning === 'object' && c.tuning !== null ? _numericOnly(c.tuning) : {}) },
+    // Move-style priority list (E14-3). Keep a valid stored list, else the builtin's.
+    styles: (Array.isArray(c.styles) && c.styles.every((s) => s && typeof s.styleId === 'string'))
+      ? c.styles : _clone(base.styles),
     sizes: {
       min:   Number.isFinite(c.sizes?.min) ? c.sizes.min : base.sizes.min,
       max:   Number.isFinite(c.sizes?.max) ? c.sizes.max : base.sizes.max,
@@ -177,6 +189,7 @@ export function applySpeciesRecord(upgraded) {
   const live = getSpecies(upgraded.id);
   live.body   = upgraded.body;
   live.tuning = upgraded.tuning;
+  live.styles = upgraded.styles;
   live.sizes  = upgraded.sizes;
   live.name   = upgraded.name;
   return live;

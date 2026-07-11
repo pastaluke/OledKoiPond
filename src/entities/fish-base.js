@@ -6,7 +6,7 @@
 // unchanged and consumes only x, y, heading, steeringBend, swimPhase, length, color.
 
 import { BEHAVIORS } from '../movement/behaviors.js';
-import { STATES, nextState } from '../movement/states.js';
+import { pickStyle, stepGait, styleWeights, defaultStyleId } from '../movement/move-styles.js';
 import { rollColor, getActivePalette, getSpecialPalette } from '../palettes/index.js';
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
@@ -360,6 +360,9 @@ export function upgradeCreature(raw) {
   return c;
 }
 
+// Fallback wag floors when a style omits them (frequency/amplitude ride throttle).
+const ZERO_WAG = { freqFloor: 0, ampFloor: 0 };
+
 // ─── Angle utilities ──────────────────────────────────────────────────────────
 function _normalizeAngle(a) {
   while (a >  Math.PI) a -= 2 * Math.PI;
@@ -431,14 +434,18 @@ export class FishBase {
     this.swimPhase    = Math.random() * Math.PI * 2;   // stagger fish
     this.swimAmp      = 1;                              // tail amplitude (set by speed each frame)
 
-    // Burst-and-coast throttle state — seeded random so fish breathe out of phase.
+    // Gait throttle state (E14-3) — seeded random so fish breathe out of phase.
+    // The active move style owns the gait loop; _phaseIdx indexes its phases,
+    // -1 = "sample a fresh phase on the next step".
     this._throttle  = 0.3 + Math.random() * 0.7;
     this._thrTarget = this._throttle;
-    this._phase     = Math.random() < 0.5 ? 'burst' : 'glide';
+    this._phaseIdx  = -1;
+    this._phaseName = 'coast';
     this._thrHold   = Math.random() * species.tuning.glideMsMax;   // random initial offset
 
-    // Movement state machine + wander angle (consumed by movement/ behaviors).
-    this.state           = 'swim';
+    // Move-style arbiter state (E14-3): current style + ms spent in it (hysteresis).
+    this._styleId  = defaultStyleId(species);
+    this._styleMs  = Math.random() * 1000;   // stagger so switches don't sync
     this._wanderTheta    = Math.random() * Math.PI * 2;
     this._wanderOmega    = 0;   // smoothly-evolving wander rotation rate (rad/ms)
     this._neighborCount  = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
@@ -474,28 +481,6 @@ export class FishBase {
     return this.maxSpeed * this._throttle;
   }
 
-  /** Advance the burst/glide cycle: hold the current phase for a randomized duration,
-   *  then flip and re-sample a fresh target level + hold from the species ranges. The
-   *  live throttle eases toward the target (exponential smoothing) for organic motion.
-   *  Every fish rolls its own values each cycle, so no two breathe in lockstep. */
-  _updateThrottle(deltaMs) {
-    const t = this.species.tuning;
-    this._thrHold -= deltaMs;
-    if (this._thrHold <= 0) {
-      if (this._phase === 'glide') {
-        this._phase     = 'burst';
-        this._thrTarget = t.burstMin + Math.random() * (1 - t.burstMin);
-        this._thrHold   = t.burstMsMin + Math.random() * (t.burstMsMax - t.burstMsMin);
-      } else {
-        this._phase     = 'glide';
-        this._thrTarget = t.coastMin + Math.random() * (t.coastThrottle - t.coastMin);
-        this._thrHold   = t.glideMsMin + Math.random() * (t.glideMsMax - t.glideMsMin);
-      }
-    }
-    const k = 1 - Math.exp(-deltaMs / Math.max(1, t.throttleEaseMs));
-    this._throttle += (this._thrTarget - this._throttle) * k;
-  }
-
   /**
    * Update physics for one frame.
    * @param {number}    deltaMs   - frame time (ms)
@@ -507,21 +492,19 @@ export class FishBase {
     const { tuning, body } = this.species;
     const maxSpeed = this.maxSpeed;
 
-    // ── 0. Advance the burst/glide cruise throttle (drives cruiseSpeed + drag + tail) ──
-    this._updateThrottle(deltaMs);
-
-    // Fish within PERCEPTION_RADIUS this frame. Retained for later use (social-state
-    // triggers, density-aware behavior, tuning) — not currently displayed.
+    // Fish within PERCEPTION_RADIUS this frame — read before the arbiter so the
+    // neighborCount trigger sees the current count.
     this._neighborCount = neighbors.length;
 
-    // ── 1. Compose steering forces from the active state's behaviors ─────────
-    // Reset orbit chirality on the first frame after attraction ends so the next
-    // approach picks a fresh random direction (the attract behavior resets it during
-    // approach, but it can't run when weight=0 — this covers the cleared-point case).
+    // ── 0. Arbiter picks the active move style; its gait loop drives the cruise
+    //       throttle (→ cruiseSpeed + drag + tail). (E14-3) ────────────────────
     if (!attractPoint && this._orbitChirality) this._orbitChirality = 0;
     const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs, attractPoint };
-    this.state = nextState(this, ctx);
-    const weights = STATES[this.state].behaviors(this, ctx);
+    const style = pickStyle(this, ctx, deltaMs);
+    stepGait(this, style, deltaMs);
+
+    // ── 1. Compose steering forces from the active style's behavior weights ───
+    const weights = styleWeights(this, ctx, style);
     let ax = 0, ay = 0;
     for (const name in weights) {
       const w = weights[name];
@@ -593,13 +576,16 @@ export class FishBase {
       this.steeringBend *= Math.pow(0.98, deltaMs / 16);
     }
 
-    // ── 5. Wag drive — cadence + amplitude ride the propulsion throttle, so a coasting
-    //       fish's tail goes quiet and a bursting fish beats hard. wagFreqMul (CREATURE
-    //       v5) is the user's frequency knob, orthogonal to the throttle. ────────────
+    // ── 5. Wag drive — cadence + amplitude scale with the propulsion throttle, but
+    //       the active style's freq/amp FLOORS keep a coasting fish subtly alive
+    //       (flow) or go fully quiet (burst). wagFreqMul (CREATURE v5) is the user's
+    //       frequency knob, orthogonal to throttle and style. (E14-3) ──────────────
+    const wf = style.wag || ZERO_WAG;
+    const freqScale = wf.freqFloor + (1 - wf.freqFloor) * this._throttle;
     this.swimPhase += tuning.swimBeatRate * (body.motion.wagRate ?? 1)
-                    * (body.motion.wagFreqMul ?? 1) * this._throttle * deltaMs;
+                    * (body.motion.wagFreqMul ?? 1) * freqScale * deltaMs;
     if (this.swimPhase > Math.PI * 2) this.swimPhase -= Math.PI * 2;
-    this.swimAmp = this._throttle;
+    this.swimAmp = wf.ampFloor + (1 - wf.ampFloor) * this._throttle;
   }
 
   draw(grid) {
