@@ -80,4 +80,5 @@ per-individual shaders, sim LOD, multi-pond saves.
 - [x] Codebase audit (movement/sim, render, schema/persistence) — findings in architecture.md §2
 - [x] `architecture.md` + `implementation-plan.md` written
 - [x] SprintBoard: E14 epic + tickets E14-1..8, cross-links updated
-- [ ] Implementation (start at P1 / ticket E14-1)
+- [x] Paste-ready session prompts for all 3 implementation waves: `session-prompts.md`
+- [ ] Implementation — Wave 1 (P1→P2, one session) → Wave 2 (P3-5 ∥ P7a, two sessions) → Wave 3 (P6→P7b)
