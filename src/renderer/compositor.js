@@ -1,7 +1,26 @@
 // src/renderer/compositor.js
-// WebGL compositing pass: uploads the Canvas2D pond texture each frame and
-// draws a fullscreen quad. The Y-flip between Canvas2D (top-left origin)
-// and WebGL (bottom-left origin) is baked into the vertex shader UV output.
+// WebGL compositing. Historically a single fullscreen pass: upload the Canvas2D
+// pond texture each frame and draw a fullscreen quad through one post shader.
+//
+// E14 Phase 7a grows this into a TWO-STAGE pass graph (architecture §3.4 / §5.3):
+//
+//   pond canvas ──upload──▶ sceneTex ──[cartridge frag]──▶ FBO_A ─┐
+//                                      (skipped if none)          ├─▶ [post frag] ──▶ screen
+//   rippleField._src ──uploadWave──▶ waveTex ────────────────────┘
+//
+//   • Stage A runs the active shader cartridge (terminal / gbc / paper-water) on
+//     the scene into one FBO. With NO cartridge, stage A is skipped and the post
+//     stage samples the pond texture directly — today's exact path, pixel-identical.
+//   • Stage B is the unchanged post shader (water refraction, border glass, glass
+//     shapes, per-species batch mask, chroma-key).
+//
+// Texture units: 0 = pond scene, 1 = wave height field, 2 = FBO_A colour,
+//                3 = per-species batch mask.
+//
+// The Y-flip between Canvas2D (top-left origin) and WebGL (bottom-left origin) is
+// baked into the vertex shaders. Stage B keeps today's flipped-V mapping; stage A
+// uses a NON-flipped V so that FBO_A[uv] == scene[uv] for a pass-through cartridge
+// (this is what makes the cartridge-off path byte-identical — see VERT_A below).
 //
 // Glass effects — border edge and freeform shapes — share a physically-based
 // displacement model inspired by liquidGL (MIT © NaughtyDuk):
@@ -13,12 +32,34 @@
 /** Max simultaneous glass shapes the fragment shader loops over. */
 export const MAX_SHAPES = 4;
 
+/**
+ * Max per-species shader batches (E14-7, F9/E11 infra). Mirrors MAX_SHAPES: a
+ * small fixed cap keeps the mask bookkeeping bounded. v1 ships one batch (glass).
+ */
+export const MAX_BATCHES = 4;
+
+// Stage B (post) vertex shader — flipped V so the top-left-origin pond texture
+// samples upright. Unchanged from the original single-pass shader.
 const VERT = `
 attribute vec2 aPos;
 varying vec2 vUv;
 void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
   vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+}`.trim();
+
+// Stage A (cartridge) vertex shader — NON-flipped V. Rendering a fullscreen quad
+// into FBO_A writes texel (s,t) at framebuffer NDC y = 2t-1; with vUv.y = t the
+// cartridge samples the scene at that same texture coordinate, so a pass-through
+// cartridge yields FBO_A[uv] == scene[uv] and stage B is unchanged. Cartridges
+// treat vUv as scene/texture-space UV (their scanline/dither/LCD patterns are
+// periodic, so the top/bottom-origin distinction is immaterial).
+const VERT_A = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  gl_Position = vec4(aPos, 0.0, 1.0);
+  vUv = vec2(aPos.x * 0.5 + 0.5, aPos.y * 0.5 + 0.5);
 }`.trim();
 
 const FRAG = `
@@ -59,6 +100,14 @@ uniform sampler2D uWaveTex;
 uniform bool  uWaterEnabled;
 uniform float uWaterRefr;
 uniform float uWaveSpecStr;
+
+// Per-species shader batch (E14-7, F9/E11 infra) — masked glass refraction.
+// uBatchMask.r is the coverage of glass-shaded entities; the mask gradient gives
+// an inward normal, refracting the scene through the border-glass channel-split.
+uniform sampler2D uBatchMask;
+uniform bool  uBatchEnabled;
+uniform float uBatchRefr;
+uniform float uBatchChroma;
 
 // ── Shared utilities ───────────────────────────────────────────────────────────
 
@@ -247,6 +296,30 @@ void main() {
     }
   }
 
+  // ── Per-species shader batch (E14-7): masked glass refraction ──────────────────
+  // The mask marks pixels covered by glass-shaded entities. Its gradient is the
+  // inward surface normal; we refract + channel-split the scene through it (the
+  // same border-glass math) and add a rim glint from the static light field.
+  if (uBatchEnabled) {
+    float m = texture2D(uBatchMask, uv).r;
+    if (m > 0.003) {
+      float mR = texture2D(uBatchMask, uv + vec2(px.x, 0.0)).r;
+      float mD = texture2D(uBatchMask, uv + vec2(0.0, px.y)).r;
+      vec2 grad = vec2(m - mR, m - mD);
+      vec2 dir  = length(grad) > 1e-4 ? normalize(grad) : vec2(0.0);
+      float disp = uBatchRefr * m;
+      vec2 s = clamp(uv + dir * disp, vec2(0.001), vec2(0.999));
+      float cs = uBatchChroma * m;
+      vec3 refr = vec3(
+        texture2D(uTex, clamp(s + dir * cs * 1.5 * px, vec2(0.001), vec2(0.999))).r,
+        texture2D(uTex, s).g,
+        texture2D(uTex, clamp(s - dir * cs * 1.5 * px, vec2(0.001), vec2(0.999))).b);
+      c.rgb = mix(c.rgb, refr, m);
+      float rim = pow(clamp(length(grad) * 6.0, 0.0, 1.0), 1.5);
+      c.rgb += envLight(uv) * rim * 0.5;
+    }
+  }
+
   float a = uChromaKey
     ? step(uThreshold, dot(c.rgb, vec3(0.299, 0.587, 0.114)))
     : 1.0;
@@ -276,9 +349,7 @@ export class Compositor {
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
     gl.bufferData(gl.ARRAY_BUFFER,
       new Float32Array([-1,-1,  1,-1,  -1,1,  1,1]), gl.STATIC_DRAW);
-    const aPos = gl.getAttribLocation(this._prog, 'aPos');
-    gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    this._setupQuadAttrib(this._prog);
 
     // Texture unit 0 — pond canvas
     const tex = this._tex = gl.createTexture();
@@ -300,12 +371,31 @@ export class Compositor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     // Seed 1×1 black pixel so it's valid before first wave upload
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array([128]));
+
+    // Texture unit 3 — per-species batch mask (E14-7). Seed 1×1 black.
+    gl.activeTexture(gl.TEXTURE3);
+    const batchTex = this._batchTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, batchTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array([0]));
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
 
+    // FBO_A (stage A render target) — allocated lazily, resized in frame().
+    this._fbo = null; this._fboTex = null; this._fboW = 0; this._fboH = 0;
+    // Active cartridge program record (or null = baseline path); cache by id.
+    this._cartridge   = null;
+    this._cartPrograms = new Map();
+
     const loc = (name) => gl.getUniformLocation(this._prog, name);
-    gl.uniform1i(loc('uTex'), 0);
+    this._uTex        = loc('uTex');
+    gl.uniform1i(this._uTex, 0);
     gl.uniform1i(loc('uWaveTex'), 1);
+    gl.uniform1i(loc('uBatchMask'), 3);
     this._uChromaKey  = loc('uChromaKey');
     this._uThreshold  = loc('uThreshold');
     this._uRes        = loc('uRes');
@@ -327,6 +417,9 @@ export class Compositor {
     this._uWaterEnabled = loc('uWaterEnabled');
     this._uWaterRefr    = loc('uWaterRefr');
     this._uWaveSpecStr  = loc('uWaveSpecStr');
+    this._uBatchEnabled = loc('uBatchEnabled');
+    this._uBatchRefr    = loc('uBatchRefr');
+    this._uBatchChroma  = loc('uBatchChroma');
 
     gl.uniform1i(this._uChromaKey, 0);
     gl.uniform1f(this._uThreshold, 0.01);
@@ -353,6 +446,20 @@ export class Compositor {
     this._waterRefr     = 0.006;
     this._waterSpecStr  = 0.0;
     this._waveW = 0; this._waveH = 0;
+    gl.uniform1i(this._uBatchEnabled, 0);
+    gl.uniform1f(this._uBatchRefr, 0.010);
+    gl.uniform1f(this._uBatchChroma, 3.0);
+    this._batchEnabled = false;
+    this._batchRefr    = 0.010;
+    this._batchChroma  = 3.0;
+  }
+
+  /** Bind the shared fullscreen-quad buffer to a program's aPos attribute. */
+  _setupQuadAttrib(prog) {
+    const gl = this._gl;
+    const aPos = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
   }
 
   /** Aspect ratio (width / height) of the output framebuffer. */
@@ -361,17 +468,130 @@ export class Compositor {
     return gl.drawingBufferWidth / gl.drawingBufferHeight;
   }
 
+  // ── Cartridge stage (E14-7) ────────────────────────────────────────────────────
+
+  /** Whether the active cartridge consumes the wave height texture. */
+  get wantsWave() { return !!(this._cartridge && this._cartridge.wantsWave); }
+
   /**
-   * Upload the pond canvas as a texture and draw the fullscreen quad.
+   * Select the active shader cartridge (or null to disable — baseline path).
+   * Programs are compiled once per cartridge id and cached.
+   * @param {?{id,name,frag,wantsWave,params}} cart
+   */
+  setCartridge(cart) {
+    const gl = this._gl;
+    if (!cart || !cart.frag) { this._cartridge = null; return; }
+    let entry = this._cartPrograms.get(cart.id);
+    if (!entry) { entry = this._compileCartridge(cart); this._cartPrograms.set(cart.id, entry); }
+    this._cartridge = entry;
+    gl.useProgram(entry.program);
+    gl.uniform1i(entry.uTex, 0);
+    gl.uniform1i(entry.uWaveTex, 1);
+    gl.useProgram(this._prog);
+  }
+
+  /** Live-update the active cartridge's param uniforms by name. */
+  setCartridgeParams(values) {
+    if (!this._cartridge || !values) return;
+    const gl = this._gl, e = this._cartridge;
+    gl.useProgram(e.program);
+    for (const k in e.paramLocs) if (Number.isFinite(values[k])) gl.uniform1f(e.paramLocs[k], values[k]);
+    gl.useProgram(this._prog);
+  }
+
+  /** Compile + link a cartridge fragment behind the shared preamble. */
+  _compileCartridge(cart) {
+    const gl = this._gl;
+    const keys = Object.keys(cart.params || {});
+    const header =
+      'precision highp float;\n' +
+      'varying vec2 vUv;\n' +
+      'uniform sampler2D uTex;\n' +
+      'uniform sampler2D uWaveTex;\n' +
+      'uniform vec2 uRes;\n' +
+      'uniform float uTime;\n' +
+      keys.map((k) => `uniform float ${k};`).join('\n') + '\n';
+    const prog = _link(gl, VERT_A, header + cart.frag);
+    gl.useProgram(prog);
+    this._setupQuadAttrib(prog);
+    const paramLocs = {};
+    for (const k of keys) paramLocs[k] = gl.getUniformLocation(prog, k);
+    // Seed defaults so a freshly-compiled cartridge isn't all-zero before the
+    // menu pushes values.
+    for (const k of keys) gl.uniform1f(paramLocs[k], cart.params[k].default);
+    gl.useProgram(this._prog);
+    return {
+      id: cart.id, program: prog, wantsWave: !!cart.wantsWave, paramLocs,
+      uTex:     gl.getUniformLocation(prog, 'uTex'),
+      uWaveTex: gl.getUniformLocation(prog, 'uWaveTex'),
+      uRes:     gl.getUniformLocation(prog, 'uRes'),
+      uTime:    gl.getUniformLocation(prog, 'uTime'),
+    };
+  }
+
+  /** (Re)allocate the stage-A render target to the current drawing-buffer size. */
+  _ensureFbo(w, h) {
+    const gl = this._gl;
+    if (this._fbo && this._fboW === w && this._fboH === h) return;
+    gl.activeTexture(gl.TEXTURE2);
+    if (!this._fboTex) {
+      this._fboTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this._fboTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    } else {
+      gl.bindTexture(gl.TEXTURE_2D, this._fboTex);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (!this._fbo) this._fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this._fboTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._fboW = w; this._fboH = h;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex);
+  }
+
+  /**
+   * Upload the pond canvas as a texture and draw the fullscreen quad. When a
+   * cartridge is active, stage A renders it into FBO_A first, then the post
+   * stage samples FBO_A; with no cartridge the post stage samples the pond
+   * directly (byte-identical to the original single pass).
    * @param {number} [bandPx=0] - Border band width in physical pixels for the glass effect.
    */
   frame(bandPx = 0) {
     const gl = this._gl;
-    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-    gl.uniform2f(this._uRes, gl.drawingBufferWidth, gl.drawingBufferHeight);
-    gl.uniform1f(this._uTime, (performance.now() - this._startTime) / 1000);
-    gl.uniform1f(this._uBorderPx, bandPx);
+    const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+    const time = (performance.now() - this._startTime) / 1000;
+
+    // Upload the pond scene to unit 0.
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this._pond);
+
+    let postSrcUnit = 0;
+    if (this._cartridge) {
+      this._ensureFbo(W, H);
+      const e = this._cartridge;
+      gl.useProgram(e.program);
+      gl.uniform2f(e.uRes, W, H);
+      gl.uniform1f(e.uTime, time);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._fbo);
+      gl.viewport(0, 0, W, H);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      postSrcUnit = 2;
+    }
+
+    // Post stage → screen.
+    gl.useProgram(this._prog);
+    gl.uniform1i(this._uTex, postSrcUnit);
+    gl.viewport(0, 0, W, H);
+    gl.uniform2f(this._uRes, W, H);
+    gl.uniform1f(this._uTime, time);
+    gl.uniform1f(this._uBorderPx, bandPx);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -400,6 +620,39 @@ export class Compositor {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this._tex);
   }
+
+  // ── Per-species batch mask (E14-7, F9/E11 infra) ────────────────────────────────
+
+  /**
+   * Upload a coverage mask (a Canvas2D silhouette of the batch's entities) as a
+   * luminance texture on unit 3, and enable the masked glass pass.
+   * @param {HTMLCanvasElement} canvas - mask (white where covered, black elsewhere)
+   */
+  uploadBatchMask(canvas) {
+    const gl = this._gl;
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this._batchTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, canvas);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this._tex);
+  }
+
+  /**
+   * Enable/disable the per-species batch glass pass and set its parameters.
+   * @param {boolean} enabled
+   * @param {{ refr?: number, chroma?: number }} [opts]
+   */
+  setBatch(enabled, { refr = this._batchRefr, chroma = this._batchChroma } = {}) {
+    const gl = this._gl;
+    this._batchEnabled = enabled;
+    this._batchRefr    = refr;
+    this._batchChroma  = chroma;
+    gl.uniform1i(this._uBatchEnabled, enabled ? 1 : 0);
+    gl.uniform1f(this._uBatchRefr,    refr);
+    gl.uniform1f(this._uBatchChroma,  chroma);
+  }
+
+  get batchEnabled() { return this._batchEnabled; }
 
   /**
    * Enable/disable the water refraction pass and set its parameters.
