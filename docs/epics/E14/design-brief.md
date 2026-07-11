@@ -81,4 +81,8 @@ per-individual shaders, sim LOD, multi-pond saves.
 - [x] `architecture.md` + `implementation-plan.md` written
 - [x] SprintBoard: E14 epic + tickets E14-1..8, cross-links updated
 - [x] Paste-ready session prompts for all 3 implementation waves: `session-prompts.md`
-- [ ] Implementation — Wave 1 (P1→P2, one session) → Wave 2 (P3-5 ∥ P7a, two sessions) → Wave 3 (P6→P7b)
+- [x] **Wave 1 SHIPPED 2026-07-11** (E14-1 species registry + honest settings; E14-2 perf:
+      hash exact vs brute force, draw −37..40%, update O(n·k), HUD, cap 150). Measured
+      numbers in the E14-2 board ticket. Remaining draw lever: ImageData cell blit
+      (fold into P6, which touches the draw path).
+- [ ] Wave 2 (P3-5 ∥ P7a, two parallel sessions — see session-prompts.md) → Wave 3 (P6→P7b)
