@@ -208,14 +208,21 @@ export function finSpineFrame(spline, motion, fin, sideSign, opts) {
   const Tx = f.ny, Ty = -f.nx;   // unit tangent toward the head
   const swayDeg = (fin.swayOnTurn || 0) * (opts.steeringBend || 0) * FIN_SWAY_DEG;
   const flapDeg = (fin.flapOnAccel?.amp || 0) * (opts.swimOsc || 0) * (opts.swimAmp ?? 1);
+  // Omni fin channels (E14-4): while maneuvering, body-frame thrust deflects fins.
+  // Backpaddle (reverse thrust) sweeps every fin forward; a sidestep (lateral
+  // thrust) breaks symmetry (added OUTSIDE the sideSign flip so the two pectorals
+  // scull oppositely). Both fade with the maneuver fraction → no cruise change.
+  const man    = opts.maneuver || 0;
+  const revDeg = man * Math.max(0, -(opts.finFwd || 0)) * FIN_REV_DEG;
+  const latDeg = man * (opts.finLat || 0) * FIN_LAT_DEG;
   if (sideSign === 0) {
-    const rot = (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
+    const rot = (fin.angle + swayDeg + flapDeg + revDeg + latDeg) * Math.PI / 180;
     const c = Math.cos(rot), s = Math.sin(rot);
     return { Rx: f.x, Ry: f.y, Dx: -Tx * c + Ty * s, Dy: -Tx * s - Ty * c };   // (-T) rotated
   }
   const Nsx = f.nx * sideSign, Nsy = f.ny * sideSign;
   const bw = cachedWidthFn(spline.points)(fin.anchor);
-  const rot = sideSign * (fin.angle + swayDeg + flapDeg) * Math.PI / 180;
+  const rot = (sideSign * (fin.angle + swayDeg + flapDeg + revDeg) + latDeg) * Math.PI / 180;
   const c = Math.cos(rot), s = Math.sin(rot);
   return { Rx: f.x + Nsx * bw, Ry: f.y + Nsy * bw, Dx: Nsx * c - Nsy * s, Dy: Nsx * s + Nsy * c };
 }
@@ -375,6 +382,21 @@ function _smoothstep(a, b, x) {
   const t = Math.max(0, Math.min(1, (x - a) / ((b - a) || 1)));
   return t * t * (3 - 2 * t);
 }
+function _lerp(a, b, t) { return a + (b - a) * t; }
+// Interpolate a→b along the SHORTEST arc by fraction t (for blending headings).
+function _angleLerp(a, b, t) { return a + _angleDiff(b, a) * t; }
+
+// Omni low-speed maneuvering (E14-4) ─────────────────────────────────────────
+// Fallback block for records predating E14-4 (species-registry backfills the real
+// one; this only guards a hand-built record with no omni field).
+const DEFAULT_OMNI = { lo: 0.05, hi: 0.18, finTurnRate: 6.0,
+  finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 } };
+// Omni fin-channel gains (deg): how far body-frame thrust deflects fins while
+// maneuvering. Backpaddle sweeps fins forward; a sidestep spreads them asymmetrically.
+const FIN_REV_DEG = 34, FIN_LAT_DEG = 40;
+// Feed etiquette (E14-5): after eating, a fish can't eat again for this long — the
+// decaying eatCooldownMs ranks rivals (smaller = hungrier = higher priority).
+const EAT_COOLDOWN_MS = 5000;
 
 // ─── FishBase ─────────────────────────────────────────────────────────────────
 // The single creature engine class (E13-9 / E14-1): everything that used to be a
@@ -446,6 +468,22 @@ export class FishBase {
     // Move-style arbiter state (E14-3): current style + ms spent in it (hysteresis).
     this._styleId  = defaultStyleId(species);
     this._styleMs  = Math.random() * 1000;   // stagger so switches don't sync
+
+    // Omni intent (E14-4): explicit facing override in radians (null = auto from
+    // motion) + face-only flag (suppress translation, just rotate — the etiquette
+    // showcase). Styles (E14-5) + scripted scenarios set these; default is auto.
+    this._intentFace     = null;
+    this._intentFaceOnly = false;
+    this._intentManaged  = false;   // true when a style set the intent (so it clears cleanly)
+    // Body-frame thrust (normalized −1..1) + maneuver fraction, published each frame
+    // by the actuator for the fin-animation channels in draw().
+    this._finFwd    = 0;
+    this._finLat    = 0;
+    this._maneuver  = 0;
+    // Feed etiquette (E14-5): decaying re-eat timer + this frame's perceived-food info.
+    this.eatCooldownMs   = 0;
+    this._foodInfo       = null;
+
     this._wanderTheta    = Math.random() * Math.PI * 2;
     this._wanderOmega    = 0;   // smoothly-evolving wander rotation rate (rad/ms)
     this._neighborCount  = 0;   // fish within PERCEPTION_RADIUS, refreshed each update()
@@ -481,13 +519,104 @@ export class FishBase {
     return this.maxSpeed * this._throttle;
   }
 
+  /** Steer toward (tx, ty) at targetSpeed (Reynolds seek), truncated to maxForce.
+   *  Returns a fresh {x, y} force — used by the feed/inspect approach (E14-5). */
+  _seekForce(tx, ty, targetSpeed) {
+    const dx = tx - this.x, dy = ty - this.y;
+    const mag = Math.hypot(dx, dy);
+    if (mag < 1e-9) return { x: 0, y: 0 };
+    const s = targetSpeed / mag;
+    let fx = dx * s - this.vx, fy = dy * s - this.vy;
+    const fmag = Math.hypot(fx, fy), maxF = this.maxForce;
+    if (fmag > maxF) { const k = maxF / fmag; fx *= k; fy *= k; }
+    return { x: fx, y: fy };
+  }
+
+  /** Nearest live pellet within perception + the count of neighbors near it that
+   *  are hungrier (strictly smaller eatCooldownMs). Drives the feed trigger +
+   *  etiquette (architecture §4.4). Returns { pellet, dist, smaller } or null. */
+  _perceiveFood(ctx) {
+    const food = ctx.food;
+    if (!food || !food.length) return null;
+    const R = this.species.tuning.perceptionRadius, R2 = R * R;
+    let best = null, bestD2 = R2;
+    for (let i = 0; i < food.length; i++) {
+      const p = food[i];
+      if (!p.alive) continue;
+      const dx = p.x - this.x, dy = p.y - this.y, d2 = dx * dx + dy * dy;
+      if (d2 <= bestD2) { bestD2 = d2; best = p; }
+    }
+    if (!best) return null;
+    // Rivals = neighbors within perception of the pellet with a smaller eat-cooldown.
+    let smaller = 0;
+    const my = this.eatCooldownMs, ns = ctx.neighbors;
+    for (let i = 0; i < ns.length; i++) {
+      const o = ns[i];
+      const dx = o.x - best.x, dy = o.y - best.y;
+      if (dx * dx + dy * dy <= R2 && (o.eatCooldownMs ?? 0) < my) smaller++;
+    }
+    return { pellet: best, dist: Math.sqrt(bestD2), smaller };
+  }
+
+  /** Feed actuation (E14-5): 0 hungrier rivals → approach + eat; exactly 1 → hold
+   *  and face the food (the omni face-only showcase). Returns a force delta or null. */
+  _actuateFeed() {
+    const fi = this._foodInfo;
+    if (!fi) { this._clearManagedIntent(); return null; }   // safety — trigger gates entry
+    const { pellet, dist, smaller } = fi;
+    const ang = Math.atan2(pellet.y - this.y, pellet.x - this.x);
+    if (smaller >= 1) {
+      // Defer: face the food and hold position, letting the hungrier fish eat.
+      this._intentFace = ang; this._intentFaceOnly = true; this._intentManaged = true;
+      return { fx: 0, fy: 0, replace: true };
+    }
+    // Hungriest here → approach; eat when the mouth reaches the pellet.
+    this._intentFace = null; this._intentFaceOnly = false; this._intentManaged = true;
+    if (dist <= this.half + pellet.radius + 1) {
+      pellet.alive = false;
+      this.eatCooldownMs = EAT_COOLDOWN_MS;
+      return { fx: 0, fy: 0, replace: true };
+    }
+    const f = this._seekForce(pellet.x, pellet.y, this.maxSpeed);
+    return { fx: f.x, fy: f.y, replace: false };
+  }
+
+  /** Inspect actuation (E14-5): approach the nearest near-stationary neighbor to a
+   *  standoff, then hold and face it (shared maneuvering base with feed). */
+  _actuateInspect(ctx) {
+    const R = this.species.tuning.perceptionRadius, R2 = R * R;
+    let best = null, bestD2 = R2;
+    const ns = ctx.neighbors;
+    for (let i = 0; i < ns.length; i++) {
+      const o = ns[i];
+      if (Math.hypot(o.vx || 0, o.vy || 0) >= 0.12 * (o.maxSpeed || 1)) continue;
+      const dx = o.x - this.x, dy = o.y - this.y, d2 = dx * dx + dy * dy;
+      if (d2 <= bestD2) { bestD2 = d2; best = o; }
+    }
+    if (!best) { this._clearManagedIntent(); return null; }
+    const dist = Math.sqrt(bestD2);
+    const ang = Math.atan2(best.y - this.y, best.x - this.x);
+    const standoff = this.length * 2.5;
+    if (dist <= standoff) {
+      this._intentFace = ang; this._intentFaceOnly = true; this._intentManaged = true;
+      return { fx: 0, fy: 0, replace: true };
+    }
+    this._intentFace = null; this._intentFaceOnly = false; this._intentManaged = true;
+    const f = this._seekForce(best.x, best.y, this.maxSpeed * 0.6);
+    return { fx: f.x, fy: f.y, replace: false };
+  }
+
+  _clearManagedIntent() {
+    if (this._intentManaged) { this._intentFace = null; this._intentFaceOnly = false; this._intentManaged = false; }
+  }
+
   /**
    * Update physics for one frame.
    * @param {number}    deltaMs   - frame time (ms)
    * @param {object}    grid      - Grid instance with logicalW / logicalH
    * @param {FishBase[]} neighbors - fish within PERCEPTION_RADIUS (from Simulation)
    */
-  update(deltaMs, grid, neighbors, attractPoint = null) {
+  update(deltaMs, grid, neighbors, attractPoint = null, food = null) {
     const { logicalW, logicalH } = grid;
     const { tuning, body } = this.species;
     const maxSpeed = this.maxSpeed;
@@ -495,11 +624,15 @@ export class FishBase {
     // Fish within PERCEPTION_RADIUS this frame — read before the arbiter so the
     // neighborCount trigger sees the current count.
     this._neighborCount = neighbors.length;
+    // Eat-cooldown decays every frame (E14-5) — the rival-ranking timer.
+    if (this.eatCooldownMs > 0) this.eatCooldownMs = Math.max(0, this.eatCooldownMs - deltaMs);
 
     // ── 0. Arbiter picks the active move style; its gait loop drives the cruise
     //       throttle (→ cruiseSpeed + drag + tail). (E14-3) ────────────────────
     if (!attractPoint && this._orbitChirality) this._orbitChirality = 0;
-    const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs, attractPoint };
+    const ctx = { neighbors, bounds: { width: logicalW, height: logicalH }, dt: deltaMs, attractPoint, food };
+    // Perceive food BEFORE the arbiter so the foodReady trigger can read _foodInfo.
+    this._foodInfo = this._perceiveFood(ctx);
     const style = pickStyle(this, ctx, deltaMs);
     stepGait(this, style, deltaMs);
 
@@ -513,43 +646,85 @@ export class FishBase {
       ax += f.x * w;
       ay += f.y * w;
     }
-
-    // ── 2. Integrate (delta-time scaled), apply drag, clamp to max speed ─────
-    this.vx += ax * deltaMs;
-    this.vy += ay * deltaMs;
-
-    // Water drag — the medium (E14-1). Per-species velocity retention per second,
-    // ALWAYS on (no throttle gating): the water doesn't care whether the fish is
-    // bursting or coasting. tuning.drag = 1.0 → frictionless (the pre-E14 default
-    // behavior, since the old GLIDE_DRAG also defaulted to 1.0); lower values bleed
-    // momentum so coasts end in a near-stop instead of gliding on forever.
-    const drag = Math.pow(tuning.drag, deltaMs / 1000);
-    this.vx *= drag;
-    this.vy *= drag;
-
-    // Clamp to full maxSpeed (unthrottled ceiling, so bursts can reach top speed).
-    const sp = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    if (sp > maxSpeed) {
-      this.vx = (this.vx / sp) * maxSpeed;
-      this.vy = (this.vy / sp) * maxSpeed;
+    // ── Feeding / inspecting (E14-5): styles that seek a specific target and can
+    //    override facing. _actuate* returns a force delta (additive, or replacing
+    //    it for the face-only/eat cases). Non-facing styles clear style-managed
+    //    intent so the omni actuator returns to auto-facing. ───────────────────
+    if (this._styleId === 'feed') {
+      const r = this._actuateFeed();
+      if (r) { if (r.replace) { ax = r.fx; ay = r.fy; } else { ax += r.fx; ay += r.fy; } }
+    } else if (this._styleId === 'inspect') {
+      const r = this._actuateInspect(ctx);
+      if (r) { if (r.replace) { ax = r.fx; ay = r.fy; } else { ax += r.fx; ay += r.fy; } }
+    } else if (this._intentManaged) {
+      this._intentFace = null; this._intentFaceOnly = false; this._intentManaged = false;
     }
+    // Debug/scenario override (E14-4): a fixed desired-force vector for scripted
+    // maneuver tests (rotate-in-place, sidestep, back-up). Never set in normal use.
+    if (this._debugForce) { ax = this._debugForce.x; ay = this._debugForce.y; }
 
-    // ── 2b. Hard turn-rate clamp ─────────────────────────────────────────────
-    // After forces + drag, the velocity direction may have rotated more than
-    // maxTurnRate allows in one frame — most visibly at low speed where even a
-    // small net force dominates a near-zero velocity vector (the spin cycle).
-    // Clamp the heading change to maxTurnRate×dt; preserve speed unchanged.
-    const spAfterDrag = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    if (spAfterDrag > 1e-6) {
-      const prospH  = Math.atan2(this.vy, this.vx);
-      const delta   = _angleDiff(prospH, this.heading);
+    // ── 2. ACTUATE + INTEGRATE — two-regime blend (E14-4, architecture §4.2) ──
+    // Water drag — the medium (E14-1). Per-species velocity retention per second,
+    // ALWAYS on (no throttle gating). drag = 1.0 → frictionless (pre-E14 default).
+    const drag = Math.pow(tuning.drag, deltaMs / 1000);
+    const omni = this.species.omni ?? DEFAULT_OMNI;
+    const prevHeading = this.heading;
+    const preSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    // w = 1 fast (cruise like a boat), 0 slow (maneuver like an RCS). Generalizes
+    // the old gTurn low-speed gate into a full two-actuator blend band.
+    const w = _smoothstep(omni.lo, omni.hi, preSpeed / maxSpeed);
+
+    // Desired facing: explicit intent (styles / scenarios) wins; else the steering
+    // direction; else keep travelling forward.
+    const fMag = Math.hypot(ax, ay);
+    let faceDir;
+    if (this._intentFace != null)   faceDir = this._intentFace;
+    else if (fMag > 1e-9)           faceDir = Math.atan2(ay, ax);
+    else                            faceDir = preSpeed > 1e-6 ? Math.atan2(this.vy, this.vx) : this.heading;
+    const faceOnly = !!this._intentFaceOnly;
+
+    // ── Cruise branch: today's model — force → velocity, drag, clamp, turn-rate cap ──
+    let cvx = (this.vx + ax * deltaMs) * drag;
+    let cvy = (this.vy + ay * deltaMs) * drag;
+    let csp = Math.hypot(cvx, cvy);
+    if (csp > maxSpeed) { const k = maxSpeed / csp; cvx *= k; cvy *= k; csp = maxSpeed; }
+    let cHeading = this.heading;
+    if (csp > 1e-6) {
+      const prospH   = Math.atan2(cvy, cvx);
+      const delta    = _angleDiff(prospH, this.heading);
       const maxDelta = this.maxTurnRate / 1000 * deltaMs;
       if (Math.abs(delta) > maxDelta) {
-        const clampedH = this.heading + Math.sign(delta) * maxDelta;
-        this.vx = Math.cos(clampedH) * spAfterDrag;
-        this.vy = Math.sin(clampedH) * spAfterDrag;
-      }
+        cHeading = this.heading + Math.sign(delta) * maxDelta;   // clamp heading change; preserve speed
+        cvx = Math.cos(cHeading) * csp;
+        cvy = Math.sin(cHeading) * csp;
+      } else cHeading = prospH;
     }
+
+    // ── Maneuver branch: RCS — heading rotates toward faceDir at finTurnRate; the
+    //    desired force is decomposed into the BODY frame and clamped per axis, so
+    //    sideways/backward translation is possible but weaker than forward. ──────
+    const maxYaw   = omni.finTurnRate / 1000 * deltaMs;
+    const mHeading = this.heading + Math.max(-maxYaw, Math.min(maxYaw, _angleDiff(faceDir, this.heading)));
+    const ch = Math.cos(this.heading), sh = Math.sin(this.heading);
+    const F  = this.maxForce;
+    let fFwd = faceOnly ? 0 : ax * ch + ay * sh;      // component along facing
+    let fLat = faceOnly ? 0 : -ax * sh + ay * ch;     // component to the right
+    fFwd = Math.max(-omni.finThrust.reverse * F, Math.min(omni.finThrust.forward * F, fFwd));
+    fLat = Math.max(-omni.finThrust.lateral * F, Math.min(omni.finThrust.lateral * F, fLat));
+    const mfx = fFwd * ch - fLat * sh;                // recompose body frame → world
+    const mfy = fFwd * sh + fLat * ch;
+    let mvx = (this.vx + mfx * deltaMs) * drag;
+    let mvy = (this.vy + mfy * deltaMs) * drag;
+    const msp = Math.hypot(mvx, mvy);
+    if (msp > maxSpeed) { const k = maxSpeed / msp; mvx *= k; mvy *= k; }
+
+    // ── Blend regimes → velocity + heading; publish body-frame thrust for the fins ──
+    this.vx = mvx + (cvx - mvx) * w;
+    this.vy = mvy + (cvy - mvy) * w;
+    this.heading = _angleLerp(mHeading, cHeading, w);
+    this._finFwd   = fFwd / F;
+    this._finLat   = fLat / F;
+    this._maneuver = 1 - w;
 
     // ── 3. Move + optional hard boundary clamp ──────────────────────────────
     this.x += this.vx * deltaMs;
@@ -559,22 +734,16 @@ export class FishBase {
       this.y = Math.max(this.half, Math.min(logicalH - this.half, this.y));
     }
 
-    // ── 4. Heading + steering bend — derived from the actual turn rate, which
-    //       drives the body curve in the renderer. ───────────────────────────
+    // ── 4. Steering bend — from the actual heading change, gated so a maneuvering
+    //       (low-speed) fish keeps its body STRAIGHT while it yaws in place. The w
+    //       factor + gTurn both vanish in the maneuver regime, so only cruise turns
+    //       curve the body; the fins (not the spine) do the low-speed work. ───────
     const curSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     const maxBend  = body.spline.maxBend ?? 1.2;
-    if (curSpeed > 0.0001) {
-      const newHeading = Math.atan2(this.vy, this.vx);
-      const turnRate   = _angleDiff(newHeading, this.heading) / deltaMs * 1000; // rad/s
-      // Front bends only to turn, only while moving: clamp to the creature's maxBend,
-      // then gate by a ramped speed factor so a near-stopped fish holds straight.
-      const gTurn      = _smoothstep(0, 0.15, curSpeed / maxSpeed);
-      const targetBend = Math.max(-maxBend, Math.min(maxBend, turnRate * 0.8)) * gTurn;
-      this.steeringBend += (targetBend - this.steeringBend) * 0.005 * deltaMs;
-      this.heading = newHeading;
-    } else {
-      this.steeringBend *= Math.pow(0.98, deltaMs / 16);
-    }
+    const turnRate = _angleDiff(this.heading, prevHeading) / deltaMs * 1000;   // rad/s
+    const gTurn    = _smoothstep(0, 0.15, curSpeed / maxSpeed);
+    const targetBend = Math.max(-maxBend, Math.min(maxBend, turnRate * 0.8)) * gTurn * w;
+    this.steeringBend += (targetBend - this.steeringBend) * 0.005 * deltaMs;
 
     // ── 5. Wag drive — cadence + amplitude scale with the propulsion throttle, but
     //       the active style's freq/amp FLOORS keep a coasting fish subtly alive
@@ -598,6 +767,9 @@ export class FishBase {
     const opts = {
       headAngle: this.heading, steeringBend: this.steeringBend,
       swimOsc, swimPhase: this.swimPhase, length: this.length, swimAmp: this.swimAmp,
+      // Omni fin channels (E14-4): body-frame thrust + maneuver fraction drive the
+      // low-speed fin flaps (finSpineFrame). Zero at cruise → no visual change.
+      finFwd: this._finFwd, finLat: this._finLat, maneuver: this._maneuver,
     };
     const filled = FishBase.FILLED, color = this.color;
     const parts = [{ poly: buildBodyOutline(creature.spline, creature.motion, opts), filled, color }];

@@ -23,6 +23,23 @@ export const TRIGGERS = {
   always:        () => true,
   attract:       (fish, ctx) => !!ctx.attractPoint,
   neighborCount: (fish, ctx, p) => (fish._neighborCount ?? 0) >= (p?.min ?? 3),
+  // Feed etiquette (E14-5): a pellet is perceived AND fewer than 2 neighbors are
+  // hungrier (smaller eat-cooldown). fish._foodInfo is precomputed each frame by
+  // FishBase._perceiveFood — 0 hungrier rivals → this fish eats, 1 → it face-only
+  // defers, ≥2 → the trigger fails so the arbiter routes it to a normal swim style
+  // (it "ignores" the food). See architecture §4.4.
+  foodReady:     (fish) => { const fi = fish._foodInfo; return !!fi && fi.smaller < 2; },
+  // Inspect (E14-5): a near-stationary neighbor is within perception — approach + face.
+  slowEntityNearby: (fish, ctx, p) => {
+    const maxFrac = p?.maxFrac ?? 0.12;
+    const ns = ctx.neighbors;
+    for (let i = 0; i < ns.length; i++) {
+      const o = ns[i];
+      if (o === fish) continue;
+      if (Math.hypot(o.vx || 0, o.vy || 0) < maxFrac * (o.maxSpeed || 1)) return true;
+    }
+    return false;
+  },
 };
 
 // ─── Builtin styles ─────────────────────────────────────────────────────────
@@ -59,6 +76,57 @@ export const MOVE_STYLES = {
     wag: { freqFloor: 0.42, ampFloor: 0.22 },
     steering: { wander: 1.15 },   // a touch more idle roam
     minMs: 1200,                  // hold flow ≥1.2s before falling back to it (anti-flap)
+  },
+  // Feeding (E14-5): approach a perceived pellet and eat it, or (if exactly one
+  // hungrier rival is present) hold and face it (the omni face-only showcase). The
+  // approach seek + eat + face-only intent live in FishBase._actuateFeed; this
+  // record supplies the gait/wag/weights. Social weights are muted so a feeding
+  // fish commits to the food, not the school.
+  feed: {
+    id: 'feed', name: 'Feeding',
+    gait: {
+      easeMs: 250,
+      phases: [
+        { name: 'approach', throttle: [0.40, 0.70], ms: [400, 1200] },
+        { name: 'hold',     throttle: [0.0,  0.20], ms: [500, 1500] },
+      ],
+    },
+    wag: { freqFloor: 0.30, ampFloor: 0.20 },
+    steering: { separation: 1.2, alignment: 0, cohesion: 0, wander: 0 },
+    minMs: 400,
+  },
+  // Inspecting (E14-5): approach a near-stationary neighbor to a standoff, then
+  // face it (shared maneuvering base with feed). Present in koi's list but DISABLED
+  // by default — a showcase style the user can enable. Logic: _actuateInspect.
+  inspect: {
+    id: 'inspect', name: 'Inspecting',
+    gait: {
+      easeMs: 250,
+      phases: [
+        { name: 'approach', throttle: [0.30, 0.50], ms: [500, 1200] },
+        { name: 'hold',     throttle: [0.0,  0.15], ms: [600, 1600] },
+      ],
+    },
+    wag: { freqFloor: 0.30, ampFloor: 0.20 },
+    steering: { alignment: 0, cohesion: 0, wander: 0 },
+    minMs: 900,
+  },
+  // Schooling (E14-5): the dense-shoal gait — heavy alignment + cohesion so a crowd
+  // coheres. The multipliers are large because koi are weak schoolers by species
+  // tuning (school 0.14); the style is where a tight shoal comes from. Tuned to
+  // stay coherent at n = 100+ without chugging (E14-2 perf).
+  school: {
+    id: 'school', name: 'Schooling',
+    gait: {
+      easeMs: 300,
+      phases: [
+        { name: 'press', throttle: [0.40, 0.65], ms: [1000, 2400] },
+        { name: 'coast', throttle: [0.15, 0.30], ms: [1000, 3000] },
+      ],
+    },
+    wag: { freqFloor: 0.40, ampFloor: 0.20 },
+    steering: { separation: 1.0, alignment: 5.0, cohesion: 3.5, wander: 0.3 },
+    minMs: 1800,
   },
 };
 

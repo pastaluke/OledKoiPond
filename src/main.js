@@ -6,6 +6,7 @@
 import { Grid         } from './grid.js';
 import { Simulation   } from './simulation.js';
 import { FishBase     } from './entities/fish-base.js';
+import { FoodPellet   } from './entities/food-pellet.js';
 import { getSpecies   } from './species/species-registry.js';
 import { PERF         } from './sim/perf.js';
 import { DebugOverlay } from './debug-overlay.js';
@@ -50,6 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Spawn koi (species-as-data: one engine class + the builtin koi record) ──
   for (let i = 0; i < KOI_COUNT; i++) sim.add(new FishBase(grid, getSpecies('koi')));
+
+  // Debug hooks (E14-4/5): a stable handle for headless verification and scripted
+  // scenarios (omni maneuver tests, feed-etiquette scenarios). Inert in normal use.
+  window.__koi = { sim, grid, getSpecies, FishBase, FoodPellet };
 
   // ── Reposition entities proportionally when the grid is resized ──────────
   // Registered BEFORE the menu so menu-driven display-knob changes (world size /
@@ -178,10 +183,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (attractHoldTimer !== null) {
-      // Quick tap: cancel hold timer, recolor nearest fish.
+      // Quick tap: cancel hold timer. Drop a food pellet if feeding is enabled
+      // (E14-5), else recolor the nearest fish (default — until E12 decides).
       clearTimeout(attractHoldTimer);
       attractHoldTimer = null;
-      _recolorNearest(_attractPos.x, _attractPos.y);
+      if (sim.foodEnabled) sim.addFood(new FoodPellet(_attractPos.x, _attractPos.y));
+      else _recolorNearest(_attractPos.x, _attractPos.y);
     } else {
       _clearAttract();
     }

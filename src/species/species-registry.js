@@ -101,9 +101,25 @@ const KOI_TUNING = {
 // entry whose trigger passes is the active style, and the LAST entry is the idle
 // default. Koi burst toward a held attract point, otherwise flow.
 const KOI_STYLES = [
-  { styleId: 'burst', trigger: 'attract' },
-  { styleId: 'flow',  trigger: 'always'  },
+  { styleId: 'burst',  trigger: 'attract' },                        // burst toward a held pointer
+  { styleId: 'feed',   trigger: 'foodReady' },                      // eat-cooldown etiquette (E14-5)
+  { styleId: 'school', trigger: 'neighborCount', params: { min: 4 } }, // dense shoal (E14-5)
+  { styleId: 'flow',   trigger: 'always' },                         // idle default
 ];
+// `inspect` (E14-5) exists in the MOVE_STYLES registry but is intentionally NOT in
+// koi's default list — it's a showcase style a pond can add without destabilizing
+// the calm default. Add { styleId:'inspect', trigger:'slowEntityNearby' } to enable.
+
+// Omni low-speed maneuvering regime (E14-4, architecture §3.1/§4.2). Below the
+// speed band [lo, hi] (fraction of speedMax) the fish decouples heading from
+// velocity and thrusts in its body frame like an RCS — rotate in place, sidestep,
+// back up — instead of steering like a boat. finTurnRate is the in-place yaw rate;
+// finThrust caps body-frame authority (reverse/lateral weaker than forward).
+const KOI_OMNI = {
+  lo: 0.05, hi: 0.18,
+  finTurnRate: 6.0,
+  finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 },
+};
 
 const BUILTIN_SPECIES = [
   {
@@ -111,6 +127,7 @@ const BUILTIN_SPECIES = [
     id: 'koi', name: 'Koi', builtin: true,
     body:   KOI_BODY,
     tuning: KOI_TUNING,
+    omni:   KOI_OMNI,
     styles: KOI_STYLES,
     sizes:  { min: 12, max: 22, curve: 'normal' },   // most koi mid-sized; extremes rare
   },
@@ -165,6 +182,9 @@ export function upgradeSpecies(raw) {
     builtin: isBuiltinSpecies(c.id),
     body: body ?? base.body,
     tuning: { ...base.tuning, ...(typeof c.tuning === 'object' && c.tuning !== null ? _numericOnly(c.tuning) : {}) },
+    // Omni maneuvering block (E14-4): deep-merge numeric fields over the builtin
+    // defaults so blobs predating omni (or with partial blocks) load intact.
+    omni: _mergeOmni(base.omni, c.omni),
     // Move-style priority list (E14-3). Keep a valid stored list, else the builtin's.
     styles: (Array.isArray(c.styles) && c.styles.every((s) => s && typeof s.styleId === 'string'))
       ? c.styles : _clone(base.styles),
@@ -182,6 +202,23 @@ function _numericOnly(obj) {
   return out;
 }
 
+/** Deep-merge a persisted omni block over the builtin defaults (numeric-only). */
+function _mergeOmni(base, raw) {
+  const b = base ?? { lo: 0.05, hi: 0.18, finTurnRate: 6.0, finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 } };
+  const o = _clone(b);
+  if (raw && typeof raw === 'object') {
+    if (Number.isFinite(raw.lo)) o.lo = raw.lo;
+    if (Number.isFinite(raw.hi)) o.hi = raw.hi;
+    if (Number.isFinite(raw.finTurnRate)) o.finTurnRate = raw.finTurnRate;
+    if (raw.finThrust && typeof raw.finThrust === 'object') {
+      for (const k of ['forward', 'reverse', 'lateral']) {
+        if (Number.isFinite(raw.finThrust[k])) o.finThrust[k] = raw.finThrust[k];
+      }
+    }
+  }
+  return o;
+}
+
 /** Replace the live record's contents for `upgraded.id` in place (same object
  *  identity, so fish/menu references stay valid). Used by the persistence load
  *  path. Returns the live record. */
@@ -189,6 +226,7 @@ export function applySpeciesRecord(upgraded) {
   const live = getSpecies(upgraded.id);
   live.body   = upgraded.body;
   live.tuning = upgraded.tuning;
+  live.omni   = upgraded.omni;
   live.styles = upgraded.styles;
   live.sizes  = upgraded.sizes;
   live.name   = upgraded.name;

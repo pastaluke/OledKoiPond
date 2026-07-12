@@ -82,6 +82,10 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
           <input type="checkbox" id="toggle-filled">
         </label>
         <label class="menu-row">
+          <span>Feed on tap</span>
+          <input type="checkbox" id="toggle-food">
+        </label>
+        <label class="menu-row">
           <span>Food bag</span>
           <select id="palette-select" class="menu-select"></select>
         </label>
@@ -363,7 +367,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   const save = () => savePersisted({
     species: JSON.parse(JSON.stringify(getAllSpecies())),
     ranges, fishCount: sim.entities.length,
-    fish:    { filled: FishBase.FILLED, bendDrivesTurn: FishBase.BEND_DRIVES_TURN, paletteId: getActivePaletteId() },
+    fish:    { filled: FishBase.FILLED, bendDrivesTurn: FishBase.BEND_DRIVES_TURN, paletteId: getActivePaletteId(), foodEnabled: sim.foodEnabled },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishBase.HARD_BORDER, glassEdge: compositor.glassEdge,
                borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
@@ -438,6 +442,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       if (typeof persisted.fish.filled   === 'boolean') FishBase.FILLED = persisted.fish.filled;
       if (typeof persisted.fish.bendDrivesTurn === 'boolean') FishBase.BEND_DRIVES_TURN = persisted.fish.bendDrivesTurn;
       if (typeof persisted.fish.paletteId === 'string') setActivePalette(persisted.fish.paletteId);
+      if (typeof persisted.fish.foodEnabled === 'boolean') sim.foodEnabled = persisted.fish.foodEnabled;
     }
     if (persisted.border) {
       const b = persisted.border;
@@ -587,6 +592,12 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   const filledToggle = panel.querySelector('#toggle-filled');
   filledToggle.checked = FishBase.FILLED;
   filledToggle.addEventListener('change', (e) => { FishBase.FILLED = e.target.checked; save(); });
+
+  // Feed-on-tap (E14-5): when on, a quick tap drops a food pellet the `feed` style
+  // eats (with eat-cooldown etiquette); off = the default tap-recolor behavior.
+  const foodToggle = panel.querySelector('#toggle-food');
+  foodToggle.checked = sim.foodEnabled;
+  foodToggle.addEventListener('change', (e) => { sim.foodEnabled = e.target.checked; save(); });
 
   const palSel       = panel.querySelector('#palette-select');
   const palColorList = panel.querySelector('#pal-color-list');

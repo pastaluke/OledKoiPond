@@ -25,16 +25,19 @@ const C_LABEL = 'rgba(200,200,200,0.80)';   // dim white — label text
 const STATE_COLOR = {
   flow:      'rgba(100,210,255,0.95)',  // cyan   — idle flowing
   burst:     'rgba(255,140,40,0.95)',   // orange — bursting (e.g. toward attract)
-  feed:      'rgba(120,255,160,0.95)',  // green  — (future) feeding
-  school:    'rgba(255,210,60,0.95)',   // amber  — (future) schooling
+  feed:      'rgba(120,255,160,0.95)',  // green  — feeding (E14-5)
+  school:    'rgba(255,210,60,0.95)',   // amber  — schooling (E14-5)
+  inspect:   'rgba(200,120,255,0.95)',  // purple — inspecting (E14-5)
 };
 
 // Gait phase colours (orthogonal to the style above): propelling vs coasting.
 const PHASE_COLOR = {
-  burst: 'rgba(255,140,40,0.95)',   // orange — propelling
-  press: 'rgba(255,180,90,0.95)',   // light orange — gentle press
-  coast: 'rgba(120,200,255,0.95)',  // blue   — coasting
-  glide: 'rgba(120,200,255,0.95)',
+  burst:    'rgba(255,140,40,0.95)',  // orange — propelling
+  press:    'rgba(255,180,90,0.95)',  // light orange — gentle press
+  approach: 'rgba(255,180,90,0.95)',  // light orange — approaching (feed/inspect)
+  coast:    'rgba(120,200,255,0.95)', // blue   — coasting
+  glide:    'rgba(120,200,255,0.95)',
+  hold:     'rgba(120,200,255,0.95)', // blue   — holding (feed/inspect)
 };
 
 

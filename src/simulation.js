@@ -20,6 +20,11 @@ export class Simulation {
     // synchronously inside fish.update() and nothing retains it.
     this._hash     = new SpatialHash();
     this._scratch  = [];
+    // Food pellets (E14-5) live in their OWN list — never in `entities`, so they
+    // never enter fish neighbor queries. Fish reach them through ctx.food. `alive`
+    // pellets are reaped each frame; the tap-to-drop UI is gated by foodEnabled.
+    this.food        = [];
+    this.foodEnabled = false;
   }
 
   /** Add an entity to the simulation. Returns the entity for chaining. */
@@ -32,6 +37,12 @@ export class Simulation {
   remove(entity) {
     const i = this.entities.indexOf(entity);
     if (i >= 0) this.entities.splice(i, 1);
+  }
+
+  /** Drop a food pellet into the pond (E14-5). Returns it for chaining. */
+  addFood(pellet) {
+    this.food.push(pellet);
+    return pellet;
   }
 
   /** Run one frame of physics for all entities. */
@@ -51,18 +62,26 @@ export class Simulation {
 
     if (maxR > 0) _hash.rebuild(entities, maxR, grid.logicalW, grid.logicalH);
 
+    const food = this.food.length ? this.food : null;
     for (let i = 0; i < n; i++) {
       const fish = entities[i];
       const r = fish.species?.tuning.perceptionRadius ?? 0;
       const neighbors = (maxR > 0 && r > 0)
         ? _hash.query(entities, fish.x, fish.y, r, i, _scratch)
         : (_scratch.length = 0, _scratch);
-      fish.update(deltaMs, grid, neighbors, this.attractPoint);
+      fish.update(deltaMs, grid, neighbors, this.attractPoint, food);
+    }
+
+    // Advance + reap food pellets (E14-5): TTL expiry and eaten pellets (alive=false).
+    if (this.food.length) {
+      for (const p of this.food) p.update(deltaMs, grid);
+      if (this.food.some((p) => !p.alive)) this.food = this.food.filter((p) => p.alive);
     }
   }
 
   /** Draw all entities to the grid. */
   draw() {
     for (const entity of this.entities) entity.draw(this.grid);
+    for (const pellet of this.food) pellet.draw(this.grid);
   }
 }
