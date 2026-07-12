@@ -225,7 +225,10 @@ document.addEventListener('DOMContentLoaded', () => {
                            keyNav.frame(deltaMs / 1000);
                            overlay.draw(sim.entities);
                            glassShapes.update(deltaMs, compositor.aspect); PERF.end('overlay');
-    PERF.begin('gpu');     compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0); PERF.end('gpu');
+    PERF.begin('gpu');     // Feed the live ripple height field to the wave texture when the active
+                           // shader cartridge consumes it (paper-water); dormant otherwise. (E14-7)
+                           if (compositor.wantsWave) compositor.uploadWave(rippleField._src, rippleField._cols, rippleField._rows);
+                           compositor.frame(grid.border.enabled ? grid.border.width * grid.scale : 0); PERF.end('gpu');
     PERF.frameEnd();
 
     requestAnimationFrame(frame);

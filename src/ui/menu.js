@@ -10,6 +10,11 @@ import { getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpe
 import { PERF } from '../sim/perf.js';
 import { getStyle } from '../movement/move-styles.js';
 import {
+  getAllCartridges, getCartridge, getActiveCartridgeId, getActiveCartridge, setActiveCartridge,
+  getParamValues, getParam, setParam, resetParams, serializeCartridges, restoreCartridges,
+  CARTRIDGE_NONE,
+} from '../renderer/cartridges.js';
+import {
   getAllPalettes, isBuiltin,
   setActivePalette, getActivePaletteId, getActivePalette,
   addCustomPalette, updateCustomPalette, deleteCustomPalette,
@@ -163,6 +168,16 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       <summary>Display</summary>
       <div class="menu-rows">
         <div id="display-sliders"></div>
+      </div>
+    </details>
+    <details>
+      <summary>Scene shader</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Cartridge</span>
+          <select id="cartridge-select"></select>
+        </label>
+        <div id="cartridge-params"></div>
       </div>
     </details>
     <details>
@@ -376,6 +391,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     glassShapes: glassShapes.serialize(),
     water: waterSnapshot(),
     rain: rainSnapshot(),
+    cartridges: serializeCartridges(),
   });
 
   function setFishCount(n) {
@@ -462,6 +478,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
     if (persisted.water) applyWaterSettings(persisted.water);
     if (persisted.rain) applyRainSettings(persisted.rain);
+    if (persisted.cartridges) restoreCartridges(persisted.cartridges);   // UI built + applied below
   }
 
   // ── Slider row builder ───────────────────────────────────────────────────────
@@ -2142,4 +2159,44 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   panel.querySelector('#toggle-perf').addEventListener('change', (e) => {
     PERF.enabled = e.target.checked;
   });
+
+  // ── Scene shader cartridges (E14-7) ────────────────────────────────────────────
+  // Dropdown (Off + each builtin) + auto-generated param sliders for the active
+  // cartridge. Selection/params drive the compositor's stage-A pass and persist.
+  const cartSelect     = panel.querySelector('#cartridge-select');
+  const cartParamsHost = panel.querySelector('#cartridge-params');
+  {
+    const off = document.createElement('option');
+    off.value = CARTRIDGE_NONE; off.textContent = 'Off';
+    cartSelect.appendChild(off);
+    for (const c of getAllCartridges()) {
+      const o = document.createElement('option');
+      o.value = c.id; o.textContent = c.name;
+      cartSelect.appendChild(o);
+    }
+  }
+  function buildCartridgeParams() {
+    cartParamsHost.innerHTML = '';
+    const cart = getActiveCartridge();
+    if (!cart) return;
+    for (const key in cart.params) {
+      const p = cart.params[key];
+      const { row } = makeRow({
+        label: p.label, decimals: p.step < 1 ? 2 : 0, valueStep: p.step, hasBounds: false,
+        getVal: () => getParam(cart.id, key),
+        setVal: (v) => { setParam(cart.id, key, v); compositor.setCartridgeParams(getParamValues(cart.id)); save(); },
+        getMin: () => p.min, getMax: () => p.max,
+      });
+      cartParamsHost.appendChild(row);
+    }
+  }
+  function applyCartridge() {
+    const cart = getActiveCartridge();
+    compositor.setCartridge(cart);
+    if (cart) compositor.setCartridgeParams(getParamValues(cart.id));
+    buildCartridgeParams();
+  }
+  cartSelect.value = getActiveCartridgeId();
+  cartSelect.addEventListener('change', (e) => { setActiveCartridge(e.target.value); applyCartridge(); save(); });
+  applyCartridge();   // reflect restored persistence (or default Off) into compositor + UI
 }
