@@ -69,6 +69,13 @@ user-facing layer: today the menu hard-binds to the single `koi` record
 5. **Spatial hash check**: `Simulation.update` already computes cell size from
    the per-frame max perception radius across entities — confirm with two
    species of different radii (unit check like E14-2's).
+6. **Shader slot (data only)**: species records gain
+   `render: { shaderId: 'vanilla' }` (persisted, upgradeSpecies-backfilled, no
+   UI yet) so saved creature configs carry their shader assignment from day one.
+   E11-1/E11-4 consume this field later — see the shader-coupling inventory in
+   architecture §3.4/§5.3: the CPU tint tier is per-individual already; the GPU
+   tier goes through the compositor's batch-mask path
+   (`uploadBatchMask`/`setBatch`, landed dormant in E14-7).
 
 **Accept:** create a second species (e.g. duplicate koi, fatten it, slow it
 down, rename "Carp"); pond shows 5 koi + 3 carp simultaneously, each moving per
