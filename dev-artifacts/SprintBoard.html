@@ -179,8 +179,9 @@
       cursor: help;
       transition: color 0.12s;
     }
-    .card-epic + .card-doc { margin-left: auto; }  /* first badge pushes the cluster right */
-    .card-doc + .card-id { margin-left: 5px; }     /* id sits just after the last icon */
+    .card-epic + .card-doc,
+    .card-epic + .card-queue { margin-left: auto; }  /* first badge pushes the cluster right */
+    .card-doc + .card-id { margin-left: 5px; }       /* id sits just after the last icon */
     .card:hover .card-doc { color: rgba(255,255,255,0.7); }
     .card-doc svg { display: block; }
 
@@ -200,6 +201,57 @@
     }
     .doc-legend-item svg { display: block; }
     .doc-legend-label { color: rgba(255,255,255,0.35); letter-spacing: 0.2px; }
+
+    /* ── UP NEXT queue strip ── */
+    /* The work order lives on tickets as a `queue: N` field (1 = next). The strip
+       renders queue-sorted, skipping live tickets, so it self-cleans as work ships. */
+    #up-next {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    #up-next:empty { display: none; }
+    .queue-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: rgba(255,255,255,0.45);
+    }
+    .queue-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.04);
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      cursor: default;
+    }
+    .queue-chip .qn {
+      font-weight: 700;
+      font-size: 10px;
+      color: #0a0a0a;
+      background: rgba(255,255,255,0.65);
+      border-radius: 8px;
+      padding: 0 5px;
+    }
+    .queue-chip .qid { color: rgba(255,255,255,0.4); font-size: 10px; }
+    .queue-arrow { color: rgba(255,255,255,0.25); font-size: 10px; }
+
+    /* Queued cards get a subtle left ribbon + their queue number on the meta row */
+    .card-queue {
+      font-size: 9px;
+      font-weight: 700;
+      color: #0a0a0a;
+      background: rgba(255,255,255,0.6);
+      border-radius: 7px;
+      padding: 0 5px;
+      flex-shrink: 0;
+    }
 
     .card-title {
       font-size: 12px;
@@ -355,6 +407,7 @@
     <span class="sep"></span>
     <span class="doc-legend" id="doc-legend" title="Doc markers show what documentation exists for a ticket beyond its board note"></span>
   </div>
+  <div id="up-next" title="The agreed work order (queue field on tickets). Live tickets drop off automatically."></div>
 </header>
 
 <main id="board"></main>
@@ -422,13 +475,13 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E7-2",  "epic":"E7",  "title":"Water surface — ripple field",            "status":"live",             "sprint":"",         "notes":"Shipped as RippleField: two-buffer height field, isotropic Laplacian, Gaussian tap injection, blitted to Canvas2D. Replaced old FluidSim design" },
   { "id":"E7-3",  "epic":"E7",  "title":"Glass edge shader",                       "status":"live",             "sprint":"",         "notes":"Chromatic aberration in border band; R/G/B displaced along inward edge normal" },
   { "id":"E7-4",  "epic":"E7",  "title":"Water refractive mode (liquid-glass)",    "status":"backlog",          "sprint":"",         "notes":"Roadmap: feed RippleField buffer to GPU; wave normals → UV displacement + envLight crests (liquid-glass shader over Canvas2D data). Parked; compositor scaffolding exists" },
-  { "id":"E7-5",  "epic":"E7",  "title":"Boundary class + camera",                 "status":"implementation",   "sprint":"",         "notes":"Hard-border toggle done; soft Boundary class + camera sub-region outstanding" },
+  { "id":"E7-5",  "epic":"E7",  "title":"Boundary class + camera",                 "status":"ready-for-design",   "sprint":"",         "notes":"Hard-border toggle done; soft Boundary class + camera sub-region outstanding" },
   { "id":"E7-6",  "epic":"E7",  "title":"Display filter shaders",                  "status":"ready-for-design", "sprint":"",         "notes":"Named presets: none / lcd / gbc / game-watch. ABSORBED into E14-7 shader cartridges (docs/epics/E14/architecture.md §3.4) — presets become cartridges" },
   { "id":"E7-7",  "epic":"E7",  "title":"Glass UI panel",                          "status":"backlog",          "sprint":"",         "notes":"Glass UI panel delivered as part of the full menu/UI overhaul — the MVP milestone that makes the app shareable for UAT/alpha. The reworked end-user menu gets glass, likely with further shader changes during the rework. Distinct from E7-13, the precursor that glasses the current dev menu. Depends on E7-3/4.", "desc":"Lands with the big UI/menu rework, not before; expect additional glass-shader changes during the overhaul.", "open":["Ties to E7-13 (dev-menu glass precursor): what from the precursor carries into this overhaul vs. gets reworked?"] },
-  { "id":"E7-8", "epic":"E7", "title":"Water caustics from ripple data (floor)", "status":"idea-pond", "sprint":"", "notes":"Caustics on the pond floor driven by the water shader's data layer (RippleField height/normals). Depends on E7-2.", "desc":"Render animated caustics on the floor layer, influenced by the water ripple data so they move with the surface.", "open":["How to derive a cheap caustic pattern from the ripple height/normal data?"] },
-  { "id":"E7-9", "epic":"E7", "title":"Layered depth — caustics on fish layer", "status":"idea-pond", "sprint":"", "notes":"Apply caustics to fish on a layer above the floor; future-proof multiple fish depths (1+ extra layer). Gives a sense of pool depth. Depends on E7-8.", "desc":"Treat the scene as stacked planes (surface / fish / floor). Caustics also fall on fish, rendered as a distinct layer from the floor; future-proof for more than one fish depth." },
-  { "id":"E7-10", "epic":"E7", "title":"Creature shadows mask floor caustics", "status":"idea-pond", "sprint":"", "notes":"Fish cast shadows that mask out caustics on the floor layer — a depth cue. Depends on E7-8/E7-9.", "desc":"Each creature casts a shadow onto the floor that subtracts/masks the caustics beneath it, reinforcing how deep the pool is." },
-  { "id":"E7-11", "epic":"E7", "title":"Variable light-source angle (layer offsets)", "status":"idea-pond", "sprint":"", "notes":"Choose sun/light angle; compute offsets between the 3 layers (surface/fish/floor) from a directional, infinitely-far source. Cheap 2D fake — offsets only, no shading or bounce. Affects caustics on fish + floor. Follows E7-10.", "desc":"Pick the light direction; shadow and caustic projections offset per layer as if lit by an infinitely distant point source. No per-side shading or bounce light — just planar offset math.", "open":["Confirm offset math: rays from one far point straight through the stacked planes."] },
+  { "id":"E7-8", "epic":"E7", "title":"Water caustics from ripple data (floor)", "status":"ready-for-design", "sprint":"", "queue":3, "notes":"Caustics on the pond floor driven by the water shader's data layer (RippleField height/normals). Depends on E7-2.", "desc":"Render animated caustics on the floor layer, influenced by the water ripple data so they move with the surface.", "open":["How to derive a cheap caustic pattern from the ripple height/normal data?"] },
+  { "id":"E7-9", "epic":"E7", "title":"Layered depth — caustics on fish layer", "status":"ready-for-design", "sprint":"", "queue":4, "notes":"Apply caustics to fish on a layer above the floor; future-proof multiple fish depths (1+ extra layer). Gives a sense of pool depth. Depends on E7-8.", "desc":"Treat the scene as stacked planes (surface / fish / floor). Caustics also fall on fish, rendered as a distinct layer from the floor; future-proof for more than one fish depth." },
+  { "id":"E7-10", "epic":"E7", "title":"Creature shadows mask floor caustics", "status":"ready-for-design", "sprint":"", "queue":5, "notes":"Fish cast shadows that mask out caustics on the floor layer — a depth cue. Depends on E7-8/E7-9.", "desc":"Each creature casts a shadow onto the floor that subtracts/masks the caustics beneath it, reinforcing how deep the pool is." },
+  { "id":"E7-11", "epic":"E7", "title":"Variable light-source angle (layer offsets)", "status":"ready-for-design", "sprint":"", "queue":6, "notes":"Choose sun/light angle; compute offsets between the 3 layers (surface/fish/floor) from a directional, infinitely-far source. Cheap 2D fake — offsets only, no shading or bounce. Affects caustics on fish + floor. Follows E7-10.", "desc":"Pick the light direction; shadow and caustic projections offset per layer as if lit by an infinitely distant point source. No per-side shading or bounce light — just planar offset math.", "open":["Confirm offset math: rays from one far point straight through the stacked planes."] },
   { "id":"E7-12", "epic":"E7", "title":"Compass + region → diegetic sun position", "status":"idea-pond", "sprint":"", "notes":"Phone flat: read compass to orient; user picks region/time so sun azimuth+elevation are known; drives each layer's caustic/shadow offset diegetically (noon@equator = shadow directly below; sunset@N.Utah = long offset). Point source infinitely far. No fish side-shading. Depends on E7-11.", "desc":"Use device compass (phone flat) plus a user-provided region/time to place the sun, then set layer offsets so shadows and caustics match the real-world sun direction and elevation — faking a 3D effect while staying 2D.", "open":["Can we read compass/orientation data reliably in-browser?","What granularity of region input pins the sun azimuth/elevation well enough?"] },
   { "id":"E7-13", "epic":"E7", "title":"Dev-menu glass + look customizer", "status":"idea-pond", "sprint":"", "notes":"Scoped first step BEFORE the full glass UI overhaul (E7-7). Apply the existing glass shader to the CURRENT developer menu panel as-is — the unoptimized, buggy, not-end-user dev UI — plus a sub-section to customize the menu glass look. No other menu changes; a standalone precursor.", "desc":"Apply current glass rendering to the existing dev menu panel as-is, plus a new sub-menu to tune the menu glass appearance (reusing glass shape params). Deliberately scoped: no menu redesign — that is the E7-7 overhaul.", "open":["Ties to E7-7 (full glass UI overhaul): how much of this precursor carries forward vs. gets replaced by the overhaul?"] },
 
@@ -474,9 +527,10 @@ const BAKED_DATA = /* BEGIN_TICKETS */ [
   { "id":"E14-3", "epic":"E14", "title":"Move styles: gait loops + arbiter + wag preview", "status":"live", "sprint":"", "ended":"2026-07-11", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P3. MoveStyle records with N-phase gait loops (coast = sub-state; burst becomes data); trigger registry + priority arbiter with hysteresis replaces the single swim state; wag freq/amp style curves; style-transition preview panel.", "desc":"Styles are per-creature cartridges. Today's burst-and-coast throttle machine generalizes verbatim to data-defined phases.", "open":["Trigger granularity v1 — keep coarse to avoid arbiter flapping"] },
   { "id":"E14-4", "epic":"E14", "title":"Omni low-speed locomotion (fin/RCS model)", "status":"live", "sprint":"", "ended":"2026-07-12", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P4. Below a per-species speed band, heading decouples from velocity (rotate in place, no body bend) and thrust is body-frame clamped (forward/reverse/lateral fin authority). Blend band generalizes the existing gTurn smoothstep gate. Fin flap channels driven by body-frame thrust.", "desc":"Fish are not boats: below threshold they maneuver like RCS thrusters — face food, sidestep, back up — per the raw-notes fish observations.", "tech":"species.omni {lo,hi,finTurnRate,finThrust{forward,reverse,lateral}} (registry backfills legacy blobs). Actuator blends w=smoothstep(omni.lo,omni.hi,speedFrac): cruise branch = today's force→velocity→drag→clamp→turn-cap path (identical at w=1); maneuver branch yaws heading toward faceDir at finTurnRate and thrusts the desired force in the BODY frame, clamped per axis. Blended velocity+heading; steeringBend gated by gTurn·w so a maneuvering fish stays straight. Fin channels: reverse→forward-sweep, lateral→asymmetric scull (fade with maneuver fraction). _intentFace/_intentFaceOnly enable face-only intents (P5 etiquette). Built on Session-B's live E14-3 arbiter (pickStyle/stepGait/styleWeights). Verified headless: rotate-in-place 0→π zero drift/zero bend; sidestep dy≈4.6 heading held; back-up dx≈−4.2 facing forward; cruise headings still track velocity.", "open":["Fin-channel deg gains (FIN_REV_DEG/FIN_LAT_DEG) are first-pass — tune visually"] },
   { "id":"E14-5", "epic":"E14", "title":"Styles: inspect, feed etiquette, greet, school", "status":"live", "sprint":"", "ended":"2026-07-12", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P5. Inspect (approach+face slow targets); feed with eat-cooldown etiquette (1 rival with smaller timer -> face-only; 2+ -> ignore); greet (scope-down lever); school tuned at 100+. Needs a minimal food pellet (coordinate E12-1).", "desc":"The behavior catalog on top of styles + omni locomotion; etiquette is the omni regime's showcase.", "tech":"Minimal FoodPellet (src/entities/food-pellet.js) in Simulation.food — a SEPARATE list from entities so it never pollutes boids; sinks + TTL-fades + reaped on eat; behind a 'Feed on tap' toggle (default off). feed style: _perceiveFood ranks rivals by eatCooldownMs; foodReady trigger gates entry (<2 hungrier); _actuateFeed → 0 rivals approach+eat (5s cooldown), 1 rival face-only omni hold, ≥2 the trigger fails so the arbiter routes to a normal swim style (ignore). inspect style (slowEntityNearby→approach→standoff→face), in MOVE_STYLES registry but NOT in koi's default list (add {styleId:'inspect',trigger:'slowEntityNearby'} to enable). school style (heavy align×5/cohere×3.5, neighborCount min:4). greet CUT (scope lever). All added to Session-B's live E14-3 MOVE_STYLES + TRIGGERS. Verified headless: scripted 3-fish scenario — f0 eats, f1 faces (faceOnly), f2 ignores (flow); 60 koi form coherent shoals; sim.update 0.37ms@100; default pond unchanged.", "open":["greet deferred (scope-down lever)","school multipliers large to overcome koi's low species school weight"] },
-  { "id":"E14-6", "epic":"E14", "title":"Depth layers: tint filters, buckets, lock, lerp", "status":"backlog", "sprint":"", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P6. User-defined layer count; depth filter = color-space tint (free — fish are flat-color cell art); per-layer draw buckets floor-first; species layerLock (snail); layer-lerp API (food sinking, creature diving = tint mix). Carries the caustics interface fields for E7-8..12. Default 1 layer alpha 0 = pixel-identical.", "desc":"Depth faked by draw order + per-layer tint, exactly as the raw notes describe — implemented at color level so it costs nothing." },
-  { "id":"E14-7", "epic":"E14", "title":"Shader cartridges: pass graph + terminal/GBC + paper adapter", "status":"live", "sprint":"", "ended":"2026-07-11", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P7a. Compositor grows a two-stage pass graph (cartridge FBO -> existing post; no cartridge = identical path). Cartridge registry + auto menu rows; terminal + GBC cartridges ship first (absorbs E7-6); paper-shaders adapter ports their water (Apache 2.0, attribution file) and lights up the dormant uploadWave path; per-species shader batch masks (E11 infra, cap 4).", "desc":"The 'cartridge' hook of the game: swappable scene looks, done as light as convincingly possible.", "open":["N64 / Frutiger Aero are composite looks — later cartridges, after caustics/masks (E7-8..12)"] },
-  { "id":"E14-8", "epic":"E14", "title":"Pond as saveable/shareable config", "status":"backlog", "sprint":"", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P7b. PondConfig v1 schema (layers, cartridge+params, water/rain/border/shapes, species records, roster); version-routed migration from the koipond.tuning blob (.bak kept); named saves + JSON export/import. Concretizes E6-6.", "desc":"Switch between ponds rendered entirely differently; share them as JSON." },
+  { "id":"E14-6", "epic":"E14", "title":"Depth layers: tint filters, buckets, lock, lerp", "status":"ready-for-design", "sprint":"", "queue":2, "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P6. User-defined layer count; depth filter = color-space tint (free — fish are flat-color cell art); per-layer draw buckets floor-first; species layerLock (snail); layer-lerp API (food sinking, creature diving = tint mix). Carries the caustics interface fields for E7-8..12. Default 1 layer alpha 0 = pixel-identical.", "desc":"Depth faked by draw order + per-layer tint, exactly as the raw notes describe — implemented at color level so it costs nothing." },
+  { "id":"E14-7", "epic":"E14", "title":"Shader cartridges: pass graph + terminal/GBC + paper adapter", "status":"live", "sprint":"", "ended":"2026-07-11", "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P7a. Compositor grows a two-stage pass graph (cartridge FBO -> existing post; no cartridge = identical path). Cartridge registry + auto menu rows; terminal + GBC cartridges ship first (absorbs E7-6); paper-shaders adapter ports their water (Apache 2.0, attribution file) and lights up the dormant uploadWave path; per-species shader batch masks (E11 infra, cap 4).", "desc":"The 'cartridge' hook of the game: swappable scene looks, done as light as convincingly possible.", "open":["N64 / Frutiger Aero are composite looks — later cartridges, after caustics/masks (E7-8..12)","PLAYTEST VERDICT 2026-07-15: v1 cartridges read as guesses at the intent; direction under reconsideration toward in-fiction customization (users make/share via fish food, water treatment, decorations) — see docs/idea-pond/customization-through-fiction.md. No successor work queued yet."] },
+  { "id":"E14-8", "epic":"E14", "title":"Pond as saveable/shareable config", "status":"ready-for-design", "sprint":"", "queue":7, "doc":2, "docRef":"docs/epics/E14/architecture.md", "notes":"P7b. PondConfig v1 schema (layers, cartridge+params, water/rain/border/shapes, species records, roster); version-routed migration from the koipond.tuning blob (.bak kept); named saves + JSON export/import. Concretizes E6-6.", "desc":"Switch between ponds rendered entirely differently; share them as JSON." },
+  { "id":"E14-9", "epic":"E14", "title":"Creature library + mixed-species roster", "status":"ready-for-design", "sprint":"", "queue":1, "doc":2, "docRef":"docs/epics/E14/implementation-plan.md", "notes":"QUEUE #1 (Phase L). The user-facing payoff of species-as-data: save/name multiple creature configs (Save-as / Rename / Duplicate / Delete via the existing registry CRUD); a species selector rebinds Movement + Shape editors and Copy/Reset to the SELECTED species; per-species count rows replace the single Fish count so species spawn NON-EXCLUSIVELY — mixed ponds. Roster persists ({speciesId, count}); legacy fishCount maps to koi.", "desc":"You still can't keep more than one creature or mix species in the pond — the backend shipped in E14-1/3 but no user-facing layer did. This closes that gap with a minimal honest library (E13-5's full class browser stays the richer future reorg).", "tech":"Registry CRUD + per-entity species refs + type-agnostic Simulation + persisted species[] all exist; work is menu selection state (replace the KOI_ID constant), library actions, per-species count rows, roster persistence, and a two-radii spatial-hash spot check.", "open":["Roster UI home: extend the Fish section vs a new Creatures section (lightweight now; E13-5 later)"] },
   { "id":"B1-1",  "epic":"B1",  "title":"viewport-fit=cover + safe-area CSS",     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"viewport meta + env(safe-area-inset-*) on hamburger and panel; canvas fills under notch" },
   { "id":"B1-2",  "epic":"B1",  "title":"manifest.json (standalone PWA)",          "status":"ready-for-design", "sprint":"Sprint 2", "notes":"display:standalone, theme_color:#000000; overlaps E1-1/E5-1 — do all together" },
   { "id":"B1-3",  "epic":"B1",  "title":"Apple PWA meta tags",                     "status":"ready-for-design", "sprint":"Sprint 2", "notes":"apple-mobile-web-app-capable/title/status-bar-style; overlaps E1-2 — do together" },
@@ -615,6 +669,7 @@ function makeCard(t) {
     `<div class="card-body">` +
       `<div class="card-meta">` +
         `<span class="card-epic" style="color:${color}">${escHtml(t.epic)} · ${escHtml(EPIC_NAMES[t.epic] || '')}</span>` +
+        (t.queue && t.status !== 'live' ? `<span class="card-queue" title="Position in the UP NEXT work order">#${t.queue}</span>` : '') +
         docBadge(t) +
         `<span class="card-id">${escHtml(t.id)}</span>` +
       `</div>` +
@@ -642,11 +697,15 @@ function makeCard(t) {
 }
 
 function renderBoard() {
+  if (typeof renderUpNext === 'function') renderUpNext();   // strip tracks drag-to-live etc.
   const board = document.getElementById('board');
   board.innerHTML = '';
 
   for (const col of COLUMNS) {
-    const colTickets = tickets.filter(t => t.status === col.id);
+    // Queued tickets float to the top of their column in work order; the rest
+    // keep BAKED_DATA insertion order (sort is stable).
+    const colTickets = tickets.filter(t => t.status === col.id)
+      .sort((a, b) => (a.queue ?? 9999) - (b.queue ?? 9999));
     const visCount = activeEpic === 'all'
       ? colTickets.length
       : colTickets.filter(t => t.epic === activeEpic).length;
@@ -736,8 +795,26 @@ function renderLegend() {
     `</span>`;
 }
 
+// ── UP NEXT strip: the agreed work order, from `queue: N` ticket fields.
+// Live tickets are skipped, so the strip self-cleans as queued work ships.
+function renderUpNext() {
+  const el = document.getElementById('up-next');
+  if (!el) return;
+  const q = tickets.filter(t => t.queue && t.status !== 'live')
+                   .sort((a, b) => a.queue - b.queue);
+  if (!q.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<span class="queue-title">UP NEXT</span>' + q.map((t, i) =>
+    (i ? '<span class="queue-arrow">→</span>' : '') +
+    `<span class="queue-chip" title="${escHtml(t.notes || t.title)}">` +
+      `<span class="qn">${t.queue}</span>${escHtml(t.title)}` +
+      `<span class="qid">${escHtml(t.id)}</span>` +
+    `</span>`
+  ).join('');
+}
+
 load();
 renderLegend();
+renderUpNext();
 renderBoard();
 </script>
 </body>

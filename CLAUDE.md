@@ -20,11 +20,14 @@ written unless explicitly requested. Treat all conversation as planning unless
 the user clearly signals otherwise.
 
 **Execution mode** — the user will explicitly say they want a task implemented.
-When they do, they may orchestrate multiple agents in parallel (fan-out pattern)
-to work on independent stories simultaneously. Each agent prompt will be
-self-contained with enough context to act without back-referencing the
-conversation. Do not start implementing during plan mode, even if the path is
-obvious.
+Do not start implementing during plan mode, even if the path is obvious.
+
+**Single-session rule (decided 2026-07-15):** all work happens in ONE session at
+a time — never run parallel sessions or fan-out agents against this repo (a
+2026-07 parallel-session experiment caused a work collision; the pattern is
+retired). Continuity across sessions comes from the project documentation
+(`docs/epics/*`, the SprintBoard and its UP NEXT queue) plus `/clear` when a
+session's context is spent. Pull the dev branch before starting any work.
 
 ## Project tracking (SprintBoard, epics, artifacts)
 The board is `dev-artifacts/SprintBoard.html` (its `BAKED_DATA` block is the single

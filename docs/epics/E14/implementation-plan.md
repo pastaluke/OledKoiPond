@@ -4,12 +4,83 @@
 > stepping, §5 rendering). Phases are **independently shippable** and ordered by
 > dependency. Each story is written to be handed to an implementation agent
 > (Opus) as a self-contained brief: context pointers, files, steps, acceptance
-> criteria, verification. Board tickets: E14-1 … E14-8.
+> criteria, verification. Board tickets: E14-1 … E14-9.
 >
 > House rules for every story: work on `claude/koi-pond-sim-78hVO`; verify in a
 > real browser (headless Chromium is fine) before commit; merge to `main` when
 > done (CLAUDE.md workflow); update the SprintBoard per
-> `.claude/skills/sprintboard-usage/SKILL.md`.
+> `.claude/skills/sprintboard-usage/SKILL.md`. **One session at a time** — no
+> parallel sessions/agents on this repo (CLAUDE.md execution model).
+
+---
+
+## EXECUTION QUEUE (revised 2026-07-15 — the board's UP NEXT strip mirrors this)
+
+Shipped: P1 (E14-1), P2 (E14-2), P3 (E14-3), P4 (E14-4), P5 (E14-5), P7a (E14-7).
+
+Reprioritized after user playtest: front-load user-visible payoff, and add the
+missing piece the user called out — the species-as-data backend exists but you
+still can't *keep* multiple creatures or mix species in the pond.
+
+| # | Ticket | Work | Outcome the user sees |
+|---|--------|------|----------------------|
+| 1 | **E14-9** | Creature library + mixed roster (Phase L below) | Save/name multiple creature configs; spawn any mix of them into the pond at once; pick which one you're editing |
+| 2 | **E14-6** | Depth layers (Phase 6) | Real sense of depth: deeper fish dimmer/tinted; snail-style floor-locked entities; food can sink |
+| 3 | **E7-8** | Caustics on the floor from ripple data | The water visibly *lights* the pond floor, driven by real ripples |
+| 4 | **E7-9** | Caustics on the fish layer | Depth planes read differently under the same light |
+| 5 | **E7-10** | Creature shadows mask floor caustics | Fish cast shadows that punch holes in the caustics — the big depth illusion |
+| 6 | **E7-11** | Variable light angle (layer offsets) | Choose where the "sun" is; shadows/caustics shift coherently |
+| 7 | **E14-8** | Pond config save/share (Phase 7b) | Named ponds; export/import the whole setup as JSON |
+
+Not queued (still idea-pond): E7-12 compass-sun, E2 fluid chain, cartridge
+successor work — the cartridge direction is under reconsideration toward
+in-fiction customization (see `docs/idea-pond/customization-through-fiction.md`).
+
+---
+
+## Phase L — Creature library & mixed-species roster  *(ticket E14-9 — QUEUE #1)*
+
+**Goal:** the user-facing payoff of species-as-data: really save creature
+configs, keep several, and spawn them **non-exclusively** — multiple species
+swimming together — plus choose which one the editors target.
+
+**Context:** the backend already shipped in E14-1/E14-3: `species-registry.js`
+has `addCustomSpecies/deleteCustomSpecies/getAllSpecies/upgradeSpecies`;
+individuals hold a `species` reference; `Simulation` is type-agnostic; the save
+blob already persists a `species: []` array. What's missing is purely the
+user-facing layer: today the menu hard-binds to the single `koi` record
+(`menu.js` `KOI_ID`) and `setFishCount` spawns only koi.
+
+**Steps:**
+1. **Species selector**: dropdown at the top of the Fish (or a new Creatures)
+   section listing registry records; Movement sliders, Shape/Fin editors, Copy
+   values, and both Reset buttons rebind to the SELECTED species (replace the
+   `KOI_ID` constant with selection state; the binding closures already read
+   through one `species` variable — swap it on selection + re-sync rows/preview).
+2. **Library actions**: Save-as (clone current record → new id/name via
+   `addCustomSpecies`), Rename, Duplicate, Delete (builtin-protected). Paste
+   values accepts a whole species record (Copy already exports one).
+3. **Mixed roster**: replace the single "Fish count" row with a per-species
+   count row (− N +) for every registry record; `setFishCount` becomes
+   per-species (`sim` add/remove filtered by `entity.species.id`). Species
+   coexist — nothing is exclusive.
+4. **Spawning + persistence**: save blob gains `roster: [{speciesId, count}]`
+   (load backfills legacy `fishCount` → koi count); spawn restores the mix.
+5. **Spatial hash check**: `Simulation.update` already computes cell size from
+   the per-frame max perception radius across entities — confirm with two
+   species of different radii (unit check like E14-2's).
+
+**Accept:** create a second species (e.g. duplicate koi, fatten it, slow it
+down, rename "Carp"); pond shows 5 koi + 3 carp simultaneously, each moving per
+its own tuning; edit target switches cleanly; refresh restores the mix; legacy
+blobs still load (count → koi).
+
+**Verify:** headless — duplicate/edit/spawn flow scripted; screenshot of a mixed
+pond; persistence round-trip; neighbor-correctness spot check with differing
+perception radii.
+
+*(E13-5's full class-browser menu reorg remains the richer future version of
+this UI; E14-9 is the minimal honest library. E13-9 is fully closed by this.)*
 
 ---
 

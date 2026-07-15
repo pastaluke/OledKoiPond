@@ -60,6 +60,18 @@ Change the ticket's `"status"` to one of: `idea-pond`, `backlog`,
 also works, but persists only to that browser's `localStorage` — copy it back
 into `BAKED_DATA` via the **Copy JSON** button to make it permanent.)
 
+### The UP NEXT queue (work order)
+The agreed implementation order lives on tickets as a **`"queue": N`** field
+(1 = next). The header renders an **UP NEXT** strip from it, queued cards float
+to the top of their column with a `#N` chip, and **live tickets drop off the
+strip automatically** — so ship-then-forget works. Conventions:
+- When work is agreed/reordered in a session, set/renumber `queue` to match —
+  the strip **is** the plan of record (mirrored in
+  `docs/epics/E14/implementation-plan.md`'s EXECUTION QUEUE while E14 runs).
+- When you START a queued ticket, move it to `implementation`; when it ships,
+  set `live` (+ `ended`) — no need to strip the queue field.
+- Ticket IDs are stable/historical; the queue is the ordering. Don't renumber IDs.
+
 ### Ticket schema
 Required: `id`, `epic`, `title`, `status`. Common: `sprint`, `notes` (the short
 line shown collapsed). Optional detail fields (see §5) and markers (see §4).

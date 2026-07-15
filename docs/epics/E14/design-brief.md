@@ -85,4 +85,15 @@ per-individual shaders, sim LOD, multi-pond saves.
       hash exact vs brute force, draw −37..40%, update O(n·k), HUD, cap 150). Measured
       numbers in the E14-2 board ticket. Remaining draw lever: ImageData cell blit
       (fold into P6, which touches the draw path).
-- [ ] Wave 2 (P3-5 ∥ P7a, two parallel sessions — see session-prompts.md) → Wave 3 (P6→P7b)
+- [x] **Wave 2 SHIPPED 2026-07-11** — E14-3 (move styles/gaits/arbiter/preview),
+      E14-4 (omni locomotion), E14-5 (feed etiquette/inspect/school), E14-7
+      (shader cartridges v1: terminal/GBC/paper-water, wave feed, licenses).
+- [!] **2026-07-15 playtest feedback**: cartridge v1 reads as guesses at the intent;
+      direction under reconsideration toward in-fiction customization
+      (`docs/idea-pond/customization-through-fiction.md`). Missing user-facing piece
+      called out: saving multiple creature configs + mixed-species ponds → new
+      **E14-9 (Phase L)**, now QUEUE #1.
+- [ ] **EXECUTION QUEUE** (see implementation-plan.md, mirrored on the board's UP NEXT
+      strip): 1 E14-9 creature library/roster → 2 E14-6 layers → 3-6 E7-8..11
+      caustics/shadows/light → 7 E14-8 pond config. Single-session workflow only
+      (parallel sessions retired after the 2026-07 collision).
