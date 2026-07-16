@@ -93,7 +93,11 @@ per-individual shaders, sim LOD, multi-pond saves.
       (`docs/idea-pond/customization-through-fiction.md`). Missing user-facing piece
       called out: saving multiple creature configs + mixed-species ponds → new
       **E14-9 (Phase L)**, now QUEUE #1.
+- [x] **QUEUE #1 SHIPPED 2026-07-15** — E14-9 creature library + mixed-species roster
+      (Duplicate/Rename/Delete, selector retargets all editors, per-species counts,
+      non-exclusive spawning, roster persistence, render.shaderId slot, koi-clobber
+      load fix, mixed-radii hash verified exact).
 - [ ] **EXECUTION QUEUE** (see implementation-plan.md, mirrored on the board's UP NEXT
-      strip): 1 E14-9 creature library/roster → 2 E14-6 layers → 3-6 E7-8..11
-      caustics/shadows/light → 7 E14-8 pond config. Single-session workflow only
-      (parallel sessions retired after the 2026-07 collision).
+      strip): 2 E14-6 layers → 3-6 E7-8..11 caustics/shadows/light → 7 E14-8 pond
+      config. Single-session workflow only (parallel sessions retired after the
+      2026-07 collision).
