@@ -6,7 +6,10 @@ import {
   defaultRanges, loadPersisted, savePersisted,
 } from '../movement/tuning.js';
 import { FishBase } from '../entities/fish-base.js';
-import { getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpeciesRecord } from '../species/species-registry.js';
+import {
+  getSpecies, getAllSpecies, getSpeciesDefaults, upgradeSpecies, applySpeciesRecord,
+  createSpeciesFrom, deleteCustomSpecies, isBuiltinSpecies,
+} from '../species/species-registry.js';
 import { PERF } from '../sim/perf.js';
 import { getStyle } from '../movement/move-styles.js';
 import {
@@ -38,9 +41,12 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain }) {
   // The live species record the Movement + Shape sections bind to. Mutations are
   // read fresh each frame by every living fish (species-registry live-read model).
-  const species = getSpecies(KOI_ID);
-  // Pristine defaults captured BEFORE persisted tuning is applied (for Reset).
-  const defaults = snapshot(species);
+  // `let` since E14-9: the Creature selector reassigns it (every bound closure
+  // reads the current binding, so selection retargets all editors at once).
+  let species = getSpecies(KOI_ID);
+  // Movement Reset restores the SELECTED species to its builtin code defaults
+  // (customs reset to koi's — the record they were cloned from ultimately).
+  const tuningDefaults = () => snapshot(getSpeciesDefaults(species.id) ?? getSpeciesDefaults(KOI_ID));
   // Live, per-param slider range { key: {min, max} } — adjustable + persisted.
   const ranges = defaultRanges();
   const fmt = (v, d) => Number(v).toFixed(d);
@@ -82,6 +88,15 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     <details>
       <summary>Fish</summary>
       <div class="menu-rows">
+        <label class="menu-row">
+          <span>Creature</span>
+          <select id="species-select" class="menu-select"></select>
+        </label>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="species-new">Duplicate</button>
+          <button class="menu-action" id="species-rename">Rename</button>
+          <button class="menu-action" id="species-delete">Delete</button>
+        </div>
         <label class="menu-row">
           <span>Filled in</span>
           <input type="checkbox" id="toggle-filled">
@@ -381,7 +396,8 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   // `params` + `creature` keys; the load path below still reads legacy blobs.
   const save = () => savePersisted({
     species: JSON.parse(JSON.stringify(getAllSpecies())),
-    ranges, fishCount: sim.entities.length,
+    roster: rosterSnapshot(),
+    ranges,
     fish:    { filled: FishBase.FILLED, bendDrivesTurn: FishBase.BEND_DRIVES_TURN, paletteId: getActivePaletteId(), foodEnabled: sim.foodEnabled },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishBase.HARD_BORDER, glassEdge: compositor.glassEdge,
@@ -394,18 +410,31 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     cartridges: serializeCartridges(),
   });
 
-  function setFishCount(n) {
-    n = clamp(Math.round(n), FISH_MIN, FISH_MAX);
-    while (sim.entities.length < n) sim.add(new FishBase(grid, species));
-    while (sim.entities.length > n) sim.remove(sim.entities[sim.entities.length - 1]);
+  // Per-species population (E14-9): species spawn NON-exclusively — each registry
+  // record gets its own count and they mix freely in one pond. FISH_MAX caps the
+  // creature total across all species. Pellets/etc. have no species and are ignored.
+  const speciesCount = (id) => sim.entities.reduce((n, e) => n + (e.species?.id === id ? 1 : 0), 0);
+  const creatureTotal = () => sim.entities.reduce((n, e) => n + (e.species ? 1 : 0), 0);
+  function setSpeciesCount(id, n) {
+    n = clamp(Math.round(n), 0, FISH_MAX);
+    const rec = getSpecies(id);
+    if (rec.id !== id) return;                       // unknown id — never spawn the fallback
+    while (speciesCount(id) < n && creatureTotal() < FISH_MAX) sim.add(new FishBase(grid, rec));
+    while (speciesCount(id) > n) {
+      const last = [...sim.entities].reverse().find((e) => e.species?.id === id);
+      if (!last) break;
+      sim.remove(last);
+    }
   }
+  /** { speciesId, count } per registry record — the persisted pond population. */
+  const rosterSnapshot = () => getAllSpecies().map((s) => ({ speciesId: s.id, count: speciesCount(s.id) }));
 
   // ── Creature state ────────────────────────────────────────────────────────────
   // The editors mutate `liveCreature` and commit via `species.body = liveCreature`
   // (living fish read species.body fresh each frame). defaultCreature is the
   // pristine builtin body for the Shape Reset button.
-  const defaultCreature = getSpeciesDefaults(KOI_ID).body;
-  let liveCreature      = species.body;
+  let defaultCreature = getSpeciesDefaults(KOI_ID).body;   // re-pointed on selection (E14-9)
+  let liveCreature    = species.body;
 
   // ── Display knobs (owned by the Grid) ─────────────────────────────────────────
   const DENSITY_RANGE = { min: 1, max: 4 };    // display cells per world unit
@@ -447,7 +476,15 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     for (const p of MOVEMENT_PARAMS) {
       species.tuning[p.key] = clamp(species.tuning[p.key], ranges[p.key].min, ranges[p.key].max);
     }
-    if (Number.isFinite(persisted.fishCount)) setFishCount(persisted.fishCount);
+    if (Array.isArray(persisted.roster)) {
+      // E14-9 blob: per-species population. Only ids present in the registry
+      // (builtins + customs registered above) are honored.
+      for (const r of persisted.roster) {
+        if (r && typeof r.speciesId === 'string' && Number.isFinite(r.count)) setSpeciesCount(r.speciesId, r.count);
+      }
+    } else if (Number.isFinite(persisted.fishCount)) {
+      setSpeciesCount(KOI_ID, persisted.fishCount);   // legacy single-count blob → all koi
+    }
     if (persisted.display) {
       const d = persisted.display;
       if (Number.isFinite(d.density))        grid.density        = clamp(d.density, DENSITY_RANGE.min, DENSITY_RANGE.max);
@@ -790,19 +827,26 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     refreshEditor();
   });
 
-  // Fish count — value control only (fixed range, no bound brackets).
-  const { row: countRow } = makeRow({
-    label: 'Fish count',
-    infoText: 'Fish count: number of koi in the pond. Handy for judging how schooling feels at different densities.',
-    decimals: 0,
-    valueStep: 1,
-    hasBounds: false,
-    getVal: () => sim.entities.length,
-    setVal: (v) => setFishCount(v),
-    getMin: () => FISH_MIN,
-    getMax: () => FISH_MAX,
-  });
-  fishHost.appendChild(countRow);
+  // Roster (E14-9) — one count row per registry species; species mix freely.
+  // Rebuilt whenever the library changes (duplicate / rename / delete).
+  function buildRosterRows() {
+    fishHost.innerHTML = '';
+    for (const s of getAllSpecies()) {
+      const { row } = makeRow({
+        label: s.name,
+        infoText: `${s.name}: how many swim in the pond. Every species has its own count — they mix freely (total cap ${FISH_MAX}).`,
+        decimals: 0,
+        valueStep: 1,
+        hasBounds: false,
+        getVal: () => speciesCount(s.id),
+        setVal: (v) => { setSpeciesCount(s.id, v); save(); },
+        getMin: () => FISH_MIN,
+        getMax: () => FISH_MAX,
+      });
+      fishHost.appendChild(row);
+    }
+  }
+  buildRosterRows();
 
   // ── Shape editor ─────────────────────────────────────────────────────────────
   const shapePreview    = panel.querySelector('#shape-preview');   // editor pane (static + dots)
@@ -2034,7 +2078,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   });
 
   panel.querySelector('#btn-reset-tuning').addEventListener('click', () => {
-    applyValues(species, defaults);
+    applyValues(species, tuningDefaults());
     const dr = defaultRanges();
     for (const p of MOVEMENT_PARAMS) {
       ranges[p.key].min = dr[p.key].min;
@@ -2199,4 +2243,72 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   cartSelect.value = getActiveCartridgeId();
   cartSelect.addEventListener('change', (e) => { setActiveCartridge(e.target.value); applyCartridge(); save(); });
   applyCartridge();   // reflect restored persistence (or default Off) into compositor + UI
+
+  // ── Creature library (E14-9) ────────────────────────────────────────────────────
+  // Selector retargets every editor (Movement sliders, Shape/Fin editors, Copy/
+  // Reset, style preview) at the chosen species; Duplicate/Rename/Delete manage
+  // custom records. Wired last so all editor functions exist.
+  const speciesSelect = panel.querySelector('#species-select');
+  const speciesNewBtn    = panel.querySelector('#species-new');
+  const speciesRenameBtn = panel.querySelector('#species-rename');
+  const speciesDeleteBtn = panel.querySelector('#species-delete');
+
+  function buildSpeciesSelect() {
+    speciesSelect.innerHTML = '';
+    for (const s of getAllSpecies()) {
+      const o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = s.name + (s.builtin ? '' : ' •');
+      speciesSelect.appendChild(o);
+    }
+    speciesSelect.value = species.id;
+    // Builtins are protected: they can be duplicated but not renamed/deleted.
+    const builtin = isBuiltinSpecies(species.id);
+    speciesRenameBtn.disabled = builtin;
+    speciesDeleteBtn.disabled = builtin;
+  }
+
+  function selectSpecies(id) {
+    species = getSpecies(id);
+    liveCreature = species.body;
+    defaultCreature = (getSpeciesDefaults(species.id) ?? getSpeciesDefaults(KOI_ID)).body;
+    for (const p of MOVEMENT_PARAMS) rowSyncs[p.key]?.();   // movement sliders re-read
+    editSel = 'body';                                       // shape editor retargets
+    buildTargetSel();
+    selectTarget('body');
+    buildSpeciesSelect();
+  }
+
+  speciesSelect.addEventListener('change', (e) => selectSpecies(e.target.value));
+
+  speciesNewBtn.addEventListener('click', () => {
+    const name = (window.prompt('Name for the new creature:', species.name + ' copy') || '').trim();
+    if (!name) return;
+    const rec = createSpeciesFrom(species.id, name);
+    buildRosterRows();
+    selectSpecies(rec.id);
+    save();
+  });
+
+  speciesRenameBtn.addEventListener('click', () => {
+    if (isBuiltinSpecies(species.id)) return;
+    const name = (window.prompt('Rename creature:', species.name) || '').trim();
+    if (!name) return;
+    species.name = name;
+    buildSpeciesSelect();
+    buildRosterRows();
+    save();
+  });
+
+  speciesDeleteBtn.addEventListener('click', () => {
+    if (isBuiltinSpecies(species.id)) return;
+    if (!window.confirm(`Delete "${species.name}" and its fish?`)) return;
+    setSpeciesCount(species.id, 0);   // despawn before the record disappears
+    deleteCustomSpecies(species.id);
+    buildRosterRows();
+    selectSpecies(KOI_ID);
+    save();
+  });
+
+  buildSpeciesSelect();
 }

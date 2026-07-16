@@ -130,6 +130,10 @@ const BUILTIN_SPECIES = [
     omni:   KOI_OMNI,
     styles: KOI_STYLES,
     sizes:  { min: 12, max: 22, curve: 'normal' },   // most koi mid-sized; extremes rare
+    // Render prefs (E14-9, data only for now): which shader this species draws
+    // with. 'vanilla' = the flat-color cell renderer; E11-1/E11-4 add consumers
+    // (per-species GPU shader via the compositor batch-mask path).
+    render: { shaderId: 'vanilla' },
   },
 ];
 
@@ -166,6 +170,27 @@ export function deleteCustomSpecies(id) {
   _registry = _registry.filter((s) => s.id !== id);
 }
 
+/** Unique registry id from a display name ('Golden Carp' → 'golden-carp', '-2'…). */
+function _slugId(name) {
+  const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'creature';
+  let id = base, n = 2;
+  while (_registry.some((s) => s.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
+/** Clone the live `sourceId` record into a NEW custom species named `name`
+ *  (fresh id, builtin:false), register it, and return the live record.
+ *  This is the menu's Duplicate/Save-as action (E14-9). */
+export function createSpeciesFrom(sourceId, name) {
+  const src = getSpecies(sourceId);
+  const rec = _clone(src);
+  rec.id = _slugId(name);
+  rec.name = String(name);
+  rec.builtin = false;
+  addCustomSpecies(rec);
+  return getSpecies(rec.id);
+}
+
 // ─── Load boundary ────────────────────────────────────────────────────────────
 /** Validate + upgrade a stored species record (clone; never mutates the caller's
  *  blob). Unknown/missing fields are backfilled from the builtin of the same id
@@ -192,6 +217,11 @@ export function upgradeSpecies(raw) {
       min:   Number.isFinite(c.sizes?.min) ? c.sizes.min : base.sizes.min,
       max:   Number.isFinite(c.sizes?.max) ? c.sizes.max : base.sizes.max,
       curve: c.sizes?.curve ?? base.sizes.curve,
+    },
+    // Render prefs (E14-9): shaderId slot, backfilled for pre-E14-9 blobs.
+    render: {
+      shaderId: typeof c.render?.shaderId === 'string' ? c.render.shaderId
+              : (base.render?.shaderId ?? 'vanilla'),
     },
   };
 }
@@ -220,15 +250,21 @@ function _mergeOmni(base, raw) {
 }
 
 /** Replace the live record's contents for `upgraded.id` in place (same object
- *  identity, so fish/menu references stay valid). Used by the persistence load
- *  path. Returns the live record. */
+ *  identity, so fish/menu references stay valid), or REGISTER it if the id is
+ *  unknown — persisted custom species must not fall through getSpecies()'s
+ *  koi fallback and clobber the builtin (E14-9 fix). Returns the live record. */
 export function applySpeciesRecord(upgraded) {
-  const live = getSpecies(upgraded.id);
-  live.body   = upgraded.body;
-  live.tuning = upgraded.tuning;
-  live.omni   = upgraded.omni;
-  live.styles = upgraded.styles;
-  live.sizes  = upgraded.sizes;
-  live.name   = upgraded.name;
-  return live;
+  const existing = _registry.find((s) => s.id === upgraded.id);
+  if (!existing) {
+    addCustomSpecies(upgraded);
+    return getSpecies(upgraded.id);
+  }
+  existing.body   = upgraded.body;
+  existing.tuning = upgraded.tuning;
+  existing.omni   = upgraded.omni;
+  existing.styles = upgraded.styles;
+  existing.sizes  = upgraded.sizes;
+  existing.name   = upgraded.name;
+  existing.render = upgraded.render;
+  return existing;
 }
