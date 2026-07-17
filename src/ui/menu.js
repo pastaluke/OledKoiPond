@@ -13,6 +13,9 @@ import {
 import { PERF } from '../sim/perf.js';
 import { getStyle } from '../movement/move-styles.js';
 import {
+  getLayers, layerCount, setLayerCount, redistribute, serializeLayers, restoreLayers, MAX_LAYERS,
+} from '../pond/layer-stack.js';
+import {
   getAllCartridges, getCartridge, getActiveCartridgeId, getActiveCartridge, setActiveCartridge,
   getParamValues, getParam, setParam, resetParams, serializeCartridges, restoreCartridges,
   CARTRIDGE_NONE,
@@ -193,6 +196,13 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
           <select id="cartridge-select"></select>
         </label>
         <div id="cartridge-params"></div>
+      </div>
+    </details>
+    <details>
+      <summary>Depth</summary>
+      <div class="menu-rows">
+        <div id="layer-count"></div>
+        <div id="layer-list"></div>
       </div>
     </details>
     <details>
@@ -408,6 +418,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     water: waterSnapshot(),
     rain: rainSnapshot(),
     cartridges: serializeCartridges(),
+    layers: serializeLayers(),
   });
 
   // Per-species population (E14-9): species spawn NON-exclusively — each registry
@@ -476,6 +487,9 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     for (const p of MOVEMENT_PARAMS) {
       species.tuning[p.key] = clamp(species.tuning[p.key], ranges[p.key].min, ranges[p.key].max);
     }
+    // Depth layers (E14-6) — restore BEFORE the roster spawns so fish get their
+    // spawn layer against the restored stack.
+    if (persisted.layers) restoreLayers(persisted.layers);
     if (Array.isArray(persisted.roster)) {
       // E14-9 blob: per-species population. Only ids present in the registry
       // (builtins + customs registered above) are honored.
@@ -2243,6 +2257,62 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   cartSelect.value = getActiveCartridgeId();
   cartSelect.addEventListener('change', (e) => { setActiveCartridge(e.target.value); applyCartridge(); save(); });
   applyCartridge();   // reflect restored persistence (or default Off) into compositor + UI
+
+  // ── Depth layers (E14-6) ────────────────────────────────────────────────────────
+  // Layer count + a per-layer depth-filter editor (colour + opacity). Changing
+  // the count re-distributes living fish across the new stack so striation shows.
+  const layerCountHost = panel.querySelector('#layer-count');
+  const layerListHost  = panel.querySelector('#layer-list');
+  const rgbToHex = (c) => '#' + [c.r, c.g, c.b].map((v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, '0')).join('');
+  const hexToRgb = (h) => ({ r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16), b: parseInt(h.slice(5, 7), 16) });
+
+  function buildLayerList() {
+    layerListHost.innerHTML = '';
+    const layers = getLayers();
+    if (layers.length <= 1) {                      // single layer: nothing to tune
+      const hint = document.createElement('div');
+      hint.className = 'menu-row';
+      hint.style.cssText = 'font-size:11px;opacity:0.45;display:block';
+      hint.textContent = 'One layer — no depth. Raise Layers to add tinted planes.';
+      layerListHost.appendChild(hint);
+      return;
+    }
+    // Surface first in the UI (top of the list = top of the water) — layers[] is
+    // floor-first, so iterate in reverse.
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const L = layers[i];
+      const head = document.createElement('div');
+      head.className = 'menu-row';
+      head.style.cssText = 'display:flex;align-items:center;gap:8px';
+      const lbl = document.createElement('span');
+      lbl.textContent = L.name; lbl.style.cssText = 'font-size:11px;opacity:0.7;flex:1';
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color'; colorInput.value = rgbToHex(L.tint);
+      colorInput.title = 'Depth filter colour';
+      colorInput.addEventListener('input', (e) => { const c = hexToRgb(e.target.value); L.tint.r = c.r; L.tint.g = c.g; L.tint.b = c.b; save(); });
+      head.appendChild(lbl); head.appendChild(colorInput);
+      layerListHost.appendChild(head);
+
+      const { row } = makeRow({
+        label: 'Opacity', decimals: 2, valueStep: 0.02, hasBounds: false,
+        getVal: () => L.tint.a,
+        setVal: (v) => { L.tint.a = clamp(v, 0, 1); save(); },
+        getMin: () => 0, getMax: () => 1,
+      });
+      layerListHost.appendChild(row);
+    }
+  }
+
+  const { row: layerCountRow } = makeRow({
+    label: 'Layers',
+    infoText: 'Depth planes in the pond. Deeper fish are dimmed by each plane’s depth filter, giving a sense of depth. 1 = flat (no depth). Fish spread across the layers.',
+    decimals: 0, valueStep: 1, hasBounds: false,
+    getVal: () => layerCount(),
+    setVal: (v) => { setLayerCount(v); redistribute(sim.entities); buildLayerList(); save(); },
+    getMin: () => 1, getMax: () => MAX_LAYERS,
+  });
+  layerCountHost.appendChild(layerCountRow);
+  buildLayerList();
 
   // ── Creature library (E14-9) ────────────────────────────────────────────────────
   // Selector retargets every editor (Movement sliders, Shape/Fin editors, Copy/

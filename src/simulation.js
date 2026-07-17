@@ -2,6 +2,7 @@
 // Manages all pond entities and drives per-frame updates with boids neighbors.
 
 import { SpatialHash } from './sim/spatial-hash.js';
+import { getLayers, drawLayerIdx, advanceLayer } from './pond/layer-stack.js';
 
 /**
  * Simulation owns the entity list and feeds each fish its neighborhood
@@ -70,6 +71,7 @@ export class Simulation {
         ? _hash.query(entities, fish.x, fish.y, r, i, _scratch)
         : (_scratch.length = 0, _scratch);
       fish.update(deltaMs, grid, neighbors, this.attractPoint, food);
+      advanceLayer(fish, deltaMs);   // depth-layer lerp (E14-6)
     }
 
     // Advance + reap food pellets (E14-5): TTL expiry and eaten pellets (alive=false).
@@ -79,9 +81,20 @@ export class Simulation {
     }
   }
 
-  /** Draw all entities to the grid. */
+  /** Draw all entities to the grid, floor-first when depth layers are active so
+   *  shallower entities paint over deeper ones (E14-6). Single-layer pond takes
+   *  the original flat path — byte-identical. */
   draw() {
-    for (const entity of this.entities) entity.draw(this.grid);
-    for (const pellet of this.food) pellet.draw(this.grid);
+    const layers = getLayers();
+    if (layers.length <= 1) {
+      for (const entity of this.entities) entity.draw(this.grid);
+      for (const pellet of this.food) pellet.draw(this.grid);
+      return;
+    }
+    // O(layers × entities): a few layers, so cheaper than a per-frame sort/alloc.
+    for (let li = 0; li < layers.length; li++) {
+      for (const entity of this.entities) if (drawLayerIdx(entity) === li) entity.draw(this.grid);
+      for (const pellet of this.food)     if (drawLayerIdx(pellet) === li) pellet.draw(this.grid);
+    }
   }
 }

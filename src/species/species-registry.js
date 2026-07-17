@@ -130,10 +130,11 @@ const BUILTIN_SPECIES = [
     omni:   KOI_OMNI,
     styles: KOI_STYLES,
     sizes:  { min: 12, max: 22, curve: 'normal' },   // most koi mid-sized; extremes rare
-    // Render prefs (E14-9, data only for now): which shader this species draws
-    // with. 'vanilla' = the flat-color cell renderer; E11-1/E11-4 add consumers
-    // (per-species GPU shader via the compositor batch-mask path).
-    render: { shaderId: 'vanilla' },
+    // Render prefs (data only for now): which shader this species draws with
+    // ('vanilla' = flat-color cell renderer; E11-1/E11-4 add consumers), and an
+    // optional depth-layer lock (E14-6) — an index/id that pins this species to a
+    // plane (e.g. a bottom-feeder on the floor); null = spread across the stack.
+    render: { shaderId: 'vanilla', layerLock: null },
   },
 ];
 
@@ -218,10 +219,12 @@ export function upgradeSpecies(raw) {
       max:   Number.isFinite(c.sizes?.max) ? c.sizes.max : base.sizes.max,
       curve: c.sizes?.curve ?? base.sizes.curve,
     },
-    // Render prefs (E14-9): shaderId slot, backfilled for pre-E14-9 blobs.
+    // Render prefs: shaderId (E14-9) + layerLock (E14-6), backfilled for old blobs.
     render: {
       shaderId: typeof c.render?.shaderId === 'string' ? c.render.shaderId
               : (base.render?.shaderId ?? 'vanilla'),
+      layerLock: (typeof c.render?.layerLock === 'number' || typeof c.render?.layerLock === 'string')
+              ? c.render.layerLock : (base.render?.layerLock ?? null),
     },
   };
 }

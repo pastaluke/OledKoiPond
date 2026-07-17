@@ -8,6 +8,7 @@
 import { BEHAVIORS } from '../movement/behaviors.js';
 import { pickStyle, stepGait, styleWeights, defaultStyleId } from '../movement/move-styles.js';
 import { rollColor, getActivePalette, getSpecialPalette } from '../palettes/index.js';
+import { assignSpawnLayer, entityTint, getLayers } from '../pond/layer-stack.js';
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
 // curve: number → power exponent (1=uniform, >1=small-biased, <1=large-biased)
@@ -490,6 +491,10 @@ export class FishBase {
     this._orbitChirality = 0;   // ±1 set on first entry to attract orbit; 0 = unassigned
 
     this.color = rollColor(getActivePalette(), getSpecialPalette());
+
+    // Depth layer (E14-6): { from, to, t, dur } — the plane this fish swims on.
+    // Locked layer if the species pins one, else random across the stack.
+    assignSpawnLayer(this);
   }
 
   /** Max steering force for this fish (logical px/ms²). A fixed internal constant
@@ -775,9 +780,15 @@ export class FishBase {
     const parts = [{ poly: buildBodyOutline(creature.spline, creature.motion, opts), filled, color }];
     for (const poly of buildAppendageOutlines(creature, opts)) parts.push({ poly, filled, color });
 
+    // Depth filter (E14-6): the layer's tint mixes into every part's color once
+    // per fish. Null / alpha 0 (the single-layer default) → no change, identical.
+    const tint = getLayers().length > 1 ? entityTint(this) : null;
+    const ta = tint ? tint.a : 0, ia = 1 - ta, tr = tint ? tint.r : 0, tg = tint ? tint.g : 0, tb = tint ? tint.b : 0;
+
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
     for (const part of parts) {
-      const { r, g, b } = part.color;
+      let { r, g, b } = part.color;
+      if (ta > 0) { r = (r * ia + tr * ta) | 0; g = (g * ia + tg * ta) | 0; b = (b * ia + tb * ta) | 0; }
       // Shared packed-int cell set (see rasterizers) — consumed before the next part.
       const cells = part.filled ? fillOutlineCells(part.poly, D) : strokeOutlineCells(part.poly, D);
       grid.beginCells(r, g, b);   // one fillStyle per part, not per cell (E14-2)
