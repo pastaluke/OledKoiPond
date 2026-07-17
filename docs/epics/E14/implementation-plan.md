@@ -31,6 +31,12 @@ still can't *keep* multiple creatures or mix species in the pond.
 | 5 | **E7-10** | Creature shadows mask floor caustics | Fish cast shadows that punch holes in the caustics — the big depth illusion |
 | 6 | **E7-11** | Variable light angle (layer offsets) | Choose where the "sun" is; shadows/caustics shift coherently |
 | 7 | **E14-8** | Pond config save/share (Phase 7b) | Named ponds; export/import the whole setup as JSON |
+| 8 | **E14-10** | Movement feel: unify bend/turn/rotate controls (**design-first**) | One coherent way to control how a fish bends/turns/rotates, replacing 6 overlapping controls + fixing the invisible axial movement |
+
+E14-10 is a DESIGN story — walk through each current control's description with the
+user before designing the consolidated scheme. Do not pre-design it. It also carries
+the open question of why the E14-4 axial/omni regime isn't visibly engaging in
+normal play.
 
 Not queued (still idea-pond): E7-12 compass-sun, E2 fluid chain, cartridge
 successor work — the cartridge direction is under reconsideration toward
