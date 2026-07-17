@@ -17,6 +17,7 @@ import { GlassShapes } from './renderer/glass-shapes.js';
 import { KeyNavManager } from './ui/key-nav.js';
 import { RippleField } from './fluid/ripple-field.js';
 import { Rain } from './fluid/rain.js';
+import { CausticsField } from './fluid/caustics.js';
 
 /** Number of koi to spawn. */
 const KOI_COUNT = 5;
@@ -35,7 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const glassShapes = new GlassShapes(compositor);
   const rippleField = new RippleField(grid);
   const rain        = new Rain();
+  const caustics    = new CausticsField(grid);
   const sim     = new Simulation(grid);
+  sim.caustics = caustics;   // floor web + fish stamps + shadows render inside sim.draw
   const overlay = new DebugOverlay(debugCanvas, grid);
   overlay.glassShapes = glassShapes;
 
@@ -70,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
       entity.y *= scaleY;
     }
     rippleField.resize();
+    caustics.resize();
     overlay.sync();
     prevW = grid.logicalW;
     prevH = grid.logicalH;
@@ -201,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Menu wires up movement-tuning + display sliders (and may restore persisted state).
-  initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain });
+  initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain, caustics });
 
   // ── Animation loop ────────────────────────────────────────────────────────
   let lastTime = performance.now();
@@ -218,7 +222,8 @@ document.addEventListener('DOMContentLoaded', () => {
     grid.clear();
     PERF.begin('sim');     sim.update(deltaMs);                          PERF.end('sim');
     PERF.begin('water');   rain.update(deltaMs, rippleField, grid);
-                           rippleField.update();                         PERF.end('water');
+                           rippleField.update();
+                           caustics.update(deltaMs, rippleField);        PERF.end('water');
     PERF.begin('draw');    sim.draw();                                   PERF.end('draw');
     PERF.begin('overlay'); rippleField.draw(grid);
                            grid.drawBorder();

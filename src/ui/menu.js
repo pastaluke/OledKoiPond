@@ -28,6 +28,7 @@ import {
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
 import { RAIN_DEFAULTS } from '../fluid/rain.js';
+import { CAUSTICS_DEFAULTS } from '../fluid/caustics.js';
 import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 150;   // cap raised 40 → 150 by the E14-2 perf work
@@ -42,7 +43,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
  * @param {import('../simulation.js').Simulation} refs.sim
  * @param {import('../grid.js').Grid} refs.grid
  */
-export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain }) {
+export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, rippleField, rain, caustics }) {
   // The live species record the Movement + Shape sections bind to. Mutations are
   // read fresh each frame by every living fish (species-registry live-read model).
   // `let` since E14-9: the Creature selector reassigns it (every bound closure
@@ -226,6 +227,25 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       </div>
     </details>
     <details>
+      <summary>Caustics</summary>
+      <div class="menu-rows">
+        <label class="menu-row">
+          <span>Caustics</span>
+          <input type="checkbox" id="toggle-caustics-enabled">
+        </label>
+        <label class="menu-row">
+          <span>Shadows</span>
+          <input type="checkbox" id="toggle-caustics-shadows">
+        </label>
+        <div id="caustics-sliders"></div>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-caustics-reset">Reset</button>
+          <button class="menu-action" id="btn-caustics-copy">Copy</button>
+          <button class="menu-action" id="btn-caustics-paste">Paste</button>
+        </div>
+      </div>
+    </details>
+    <details>
       <summary>Rain</summary>
       <div class="menu-rows">
         <label class="menu-row">
@@ -401,6 +421,40 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     return true;
   };
 
+  // ── Caustics settings (de)serialisation ──────────────────────────────────────
+  // Mirrors the water/rain helpers: one shape feeds persistence, Copy, and Paste/Reset.
+  const causticsSnapshot = () => caustics ? {
+    enabled: caustics.enabled, intensity: caustics.intensity,
+    fishIntensity: caustics.fishIntensity, scale: caustics.scale,
+    speed: caustics.speed, refract: caustics.refract, glint: caustics.glint,
+    sharpness: caustics.sharpness, maxDim: caustics.maxDim, color: [...caustics.color],
+    shadows: caustics.shadows, shadowStrength: caustics.shadowStrength,
+    lightAngleDeg: caustics.lightAngleDeg, lightOffset: caustics.lightOffset,
+  } : undefined;
+
+  // Apply a (possibly partial / untrusted) caustics blob, clamping every field.
+  const applyCausticsSettings = (cv) => {
+    if (!caustics || cv === null || typeof cv !== 'object' || Array.isArray(cv)) return false;
+    if (typeof cv.enabled === 'boolean')     caustics.enabled        = cv.enabled;
+    if (typeof cv.shadows === 'boolean')     caustics.shadows        = cv.shadows;
+    if (Number.isFinite(cv.intensity))       caustics.intensity      = clamp(cv.intensity, 0, 1);
+    if (Number.isFinite(cv.fishIntensity))   caustics.fishIntensity  = clamp(cv.fishIntensity, 0, 1);
+    if (Number.isFinite(cv.scale))           caustics.scale          = clamp(cv.scale, 0.2, 3);
+    if (Number.isFinite(cv.speed))           caustics.speed          = clamp(cv.speed, 0, 4);
+    if (Number.isFinite(cv.refract))         caustics.refract        = clamp(cv.refract, 0, 30);
+    if (Number.isFinite(cv.glint))           caustics.glint          = clamp(cv.glint, 0, 500);
+    if (Number.isFinite(cv.sharpness))       caustics.sharpness      = clamp(cv.sharpness, 1, 16);
+    if (Number.isFinite(cv.maxDim))          caustics.maxDim         = clamp(Math.round(cv.maxDim), 60, 300);
+    if (Array.isArray(cv.color) && cv.color.length === 3 && cv.color.every(Number.isFinite)) {
+      caustics.color = cv.color.map((c) => clamp(Math.round(c), 0, 255));
+    }
+    if (Number.isFinite(cv.shadowStrength))  caustics.shadowStrength = clamp(cv.shadowStrength, 0, 1);
+    if (Number.isFinite(cv.lightAngleDeg))   caustics.lightAngleDeg  = clamp(cv.lightAngleDeg, 0, 360);
+    if (Number.isFinite(cv.lightOffset))     caustics.lightOffset    = clamp(cv.lightOffset, 0, 6);
+    caustics.resize();
+    return true;
+  };
+
   // ── Persistence ─────────────────────────────────────────────────────────────
   // Snapshot shape: deep-clone so the persisted copy isn't affected by later mutations.
   // E14-1: species records (tuning + body together) replace the old separate
@@ -418,6 +472,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     glassShapes: glassShapes.serialize(),
     water: waterSnapshot(),
     rain: rainSnapshot(),
+    caustics: causticsSnapshot(),
     cartridges: serializeCartridges(),
     layers: serializeLayers(),
   });
@@ -530,6 +585,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (persisted.glassShapes) glassShapes.restore(persisted.glassShapes);
     if (persisted.water) applyWaterSettings(persisted.water);
     if (persisted.rain) applyRainSettings(persisted.rain);
+    if (persisted.caustics) applyCausticsSettings(persisted.caustics);
     if (persisted.cartridges) restoreCartridges(persisted.cartridges);   // UI built + applied below
   }
 
@@ -1674,6 +1730,149 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       catch { flash(waterPasteBtn, 'Bad data'); return; }
       if (applyWaterSettings(parsed)) { syncWaterUI(); save(); flash(waterPasteBtn, 'Pasted!'); }
       else flash(waterPasteBtn, 'Bad data');
+    });
+  }
+
+  // ── Caustics controls (E7-8..11) ─────────────────────────────────────────────
+  if (caustics) {
+    const causticsSliderHost = panel.querySelector('#caustics-sliders');
+    const causticsEnableToggle = panel.querySelector('#toggle-caustics-enabled');
+    const causticsShadowToggle = panel.querySelector('#toggle-caustics-shadows');
+
+    causticsEnableToggle.checked = caustics.enabled;
+    causticsShadowToggle.checked = caustics.shadows;
+
+    causticsEnableToggle.addEventListener('change', (e) => { caustics.enabled = e.target.checked; save(); });
+    causticsShadowToggle.addEventListener('change', (e) => { caustics.shadows = e.target.checked; save(); });
+
+    // Caustic light colour picker (matches the Depth section's water-colour row).
+    const cColorRow = document.createElement('label');
+    cColorRow.className = 'menu-row';
+    cColorRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+    const cColorLbl = document.createElement('span');
+    cColorLbl.textContent = 'Light color'; cColorLbl.style.flex = '1';
+    const cColorInput = document.createElement('input');
+    cColorInput.type = 'color';
+    const cRgbToHex = (c) => '#' + c.map((v) => clamp(v | 0, 0, 255).toString(16).padStart(2, '0')).join('');
+    cColorInput.value = cRgbToHex(caustics.color);
+    cColorInput.title = 'Colour of the caustic light web';
+    cColorInput.addEventListener('input', (e) => {
+      const h = e.target.value;
+      caustics.color = [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+      save();
+    });
+    cColorRow.appendChild(cColorLbl); cColorRow.appendChild(cColorInput);
+    causticsSliderHost.appendChild(cColorRow);
+
+    const causticsRowSyncs = [];
+    const mkC = (cfg) => {
+      const { row, sync } = makeRow({ hasBounds: false, ...cfg });
+      causticsSliderHost.appendChild(row);
+      causticsRowSyncs.push(sync);
+    };
+    const syncCausticsUI = () => {
+      causticsEnableToggle.checked = caustics.enabled;
+      causticsShadowToggle.checked = caustics.shadows;
+      cColorInput.value = cRgbToHex(caustics.color);
+      causticsRowSyncs.forEach((s) => s());
+    };
+
+    mkC({
+      label: 'Floor strength', decimals: 2, valueStep: 0.02,
+      infoText: 'Opacity of the caustic web on the pond floor. 0 hides the floor web.',
+      getVal: () => caustics.intensity, getMin: () => 0, getMax: () => 1,
+      setVal: (v) => { caustics.intensity = clamp(v, 0, 1); save(); },
+    });
+    mkC({
+      label: 'Fish strength', decimals: 2, valueStep: 0.02,
+      infoText: 'Opacity of the caustic light falling on fish (per depth layer). 0 = fish are untouched.',
+      getVal: () => caustics.fishIntensity, getMin: () => 0, getMax: () => 1,
+      setVal: (v) => { caustics.fishIntensity = clamp(v, 0, 1); save(); },
+    });
+    mkC({
+      label: 'Scale', decimals: 2, valueStep: 0.05,
+      infoText: 'Size of the light-web cells. Higher = broader, calmer pattern.',
+      getVal: () => caustics.scale, getMin: () => 0.2, getMax: () => 3,
+      setVal: (v) => { caustics.scale = clamp(v, 0.2, 3); save(); },
+    });
+    mkC({
+      label: 'Speed', decimals: 2, valueStep: 0.05,
+      infoText: 'Idle shimmer speed of the web (independent of ripples).',
+      getVal: () => caustics.speed, getMin: () => 0, getMax: () => 4,
+      setVal: (v) => { caustics.speed = clamp(v, 0, 4); save(); },
+    });
+    mkC({
+      label: 'Ripple warp', decimals: 1, valueStep: 0.5,
+      infoText: 'How strongly passing ripples bend the web (refraction through the surface normals).',
+      getVal: () => caustics.refract, getMin: () => 0, getMax: () => 30,
+      setVal: (v) => { caustics.refract = clamp(v, 0, 30); save(); },
+    });
+    mkC({
+      label: 'Ripple glint', decimals: 0, valueStep: 10,
+      infoText: 'Extra brightness where wave crests focus light — expanding rings carry a bright band.',
+      getVal: () => caustics.glint, getMin: () => 0, getMax: () => 500,
+      setVal: (v) => { caustics.glint = clamp(v, 0, 500); save(); },
+    });
+    mkC({
+      label: 'Sharpness', decimals: 1, valueStep: 0.5,
+      infoText: 'Web filament sharpening. Higher = thinner, brighter strands; lower = soft glow.',
+      getVal: () => caustics.sharpness, getMin: () => 1, getMax: () => 16,
+      setVal: (v) => { caustics.sharpness = clamp(v, 1, 16); save(); },
+    });
+    mkC({
+      label: 'Resolution', decimals: 0, valueStep: 10,
+      infoText: 'Pattern grid long-edge in cells. Higher = crisper web, slightly more CPU.',
+      getVal: () => caustics.maxDim, getMin: () => 60, getMax: () => 300,
+      setVal: (v) => { caustics.maxDim = clamp(Math.round(v), 60, 300); caustics.resize(); save(); },
+    });
+    mkC({
+      label: 'Shadow strength', decimals: 2, valueStep: 0.02,
+      infoText: 'Darkness of the shadow each creature casts on the floor, masking the web beneath it.',
+      getVal: () => caustics.shadowStrength, getMin: () => 0, getMax: () => 1,
+      setVal: (v) => { caustics.shadowStrength = clamp(v, 0, 1); save(); },
+    });
+    mkC({
+      label: 'Light angle', decimals: 0, valueStep: 5,
+      infoText: 'Sun azimuth in degrees. Shadows and per-layer caustics shift this way as depth increases.',
+      getVal: () => caustics.lightAngleDeg, getMin: () => 0, getMax: () => 360,
+      setVal: (v) => { caustics.lightAngleDeg = clamp(v, 0, 360); save(); },
+    });
+    mkC({
+      label: 'Layer offset', decimals: 2, valueStep: 0.1,
+      infoText: 'How far shadows/caustics shift per depth layer, in world units. 0 = sun at noon (no offset).',
+      getVal: () => caustics.lightOffset, getMin: () => 0, getMax: () => 6,
+      setVal: (v) => { caustics.lightOffset = clamp(v, 0, 6); save(); },
+    });
+
+    const cFlash = (btn, msg) => {
+      const prev = btn.textContent;
+      btn.textContent = msg;
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    };
+
+    panel.querySelector('#btn-caustics-reset').addEventListener('click', () => {
+      applyCausticsSettings(CAUSTICS_DEFAULTS);
+      syncCausticsUI();
+      save();
+    });
+
+    const cCopyBtn = panel.querySelector('#btn-caustics-copy');
+    cCopyBtn.addEventListener('click', async () => {
+      const json = JSON.stringify(causticsSnapshot(), null, 2);
+      try { await navigator.clipboard.writeText(json); cFlash(cCopyBtn, 'Copied!'); }
+      catch { console.log('[koi caustics]\n' + json); cFlash(cCopyBtn, 'Logged'); }
+    });
+
+    const cPasteBtn = panel.querySelector('#btn-caustics-paste');
+    cPasteBtn.addEventListener('click', async () => {
+      let text;
+      try { text = await navigator.clipboard.readText(); }
+      catch { cFlash(cPasteBtn, 'No access'); return; }
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { cFlash(cPasteBtn, 'Bad data'); return; }
+      if (applyCausticsSettings(parsed)) { syncCausticsUI(); save(); cFlash(cPasteBtn, 'Pasted!'); }
+      else cFlash(cPasteBtn, 'Bad data');
     });
   }
 

@@ -420,6 +420,11 @@ export class FishBase {
    *  overshoot at high speed or with the edge weight lowered. */
   static HARD_BORDER = true;
 
+  /** When true, draw() also records each fish's rasterized cells + origin so the
+   *  caustics shadow pass (E7-10) can re-fill the silhouette, offset toward the
+   *  floor, next frame. Set per-frame by Simulation.draw from the caustics state. */
+  static CAPTURE_SHADOW_CELLS = false;
+
   /**
    * @param {import('../grid.js').Grid} grid
    * @param {object} species - live species record (see species-registry.js)
@@ -796,6 +801,15 @@ export class FishBase {
     const ta = tint ? tint.a : 0, ia = 1 - ta, tr = tint ? tint.r : 0, tg = tint ? tint.g : 0, tb = tint ? tint.b : 0;
 
     const ocx = Math.round(this.x * D), ocy = Math.round(this.y * D);
+    // Shadow capture (E7-10): keep this frame's cells so the next frame's shadow
+    // pass (which runs before fish draw) can restamp the silhouette on the floor.
+    let sc = null;
+    if (FishBase.CAPTURE_SHADOW_CELLS) {
+      sc = this._shadowCells ?? (this._shadowCells = []);
+      sc.length = 0;
+      this._shadowOx = ocx;
+      this._shadowOy = ocy;
+    }
     for (const part of parts) {
       let { r, g, b } = part.color;
       if (ta > 0) { r = (r * ia + tr * ta) | 0; g = (g * ia + tg * ta) | 0; b = (b * ia + tb * ta) | 0; }
@@ -806,6 +820,7 @@ export class FishBase {
         const cx = (key & CELL_MASK) - CELL_OFF;
         const cy = (key >>> CELL_SHIFT) - CELL_OFF;
         grid.drawCellFast(ocx + cx, ocy + cy);
+        if (sc !== null) sc.push(key);
       }
     }
   }
