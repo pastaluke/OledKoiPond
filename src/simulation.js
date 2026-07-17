@@ -2,7 +2,7 @@
 // Manages all pond entities and drives per-frame updates with boids neighbors.
 
 import { SpatialHash } from './sim/spatial-hash.js';
-import { getLayers, drawLayerIdx, advanceLayer } from './pond/layer-stack.js';
+import { getLayers, drawLayerIdx, advanceLayer, maybeDrift } from './pond/layer-stack.js';
 
 /**
  * Simulation owns the entity list and feeds each fish its neighborhood
@@ -71,6 +71,7 @@ export class Simulation {
         ? _hash.query(entities, fish.x, fish.y, r, i, _scratch)
         : (_scratch.length = 0, _scratch);
       fish.update(deltaMs, grid, neighbors, this.attractPoint, food);
+      maybeDrift(fish, deltaMs);     // occasional vertical drift (E14-11)
       advanceLayer(fish, deltaMs);   // depth-layer lerp (E14-6)
     }
 

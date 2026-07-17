@@ -8,7 +8,7 @@
 import { BEHAVIORS } from '../movement/behaviors.js';
 import { pickStyle, stepGait, styleWeights, defaultStyleId } from '../movement/move-styles.js';
 import { rollColor, getActivePalette, getSpecialPalette } from '../palettes/index.js';
-import { assignSpawnLayer, entityTint, getLayers } from '../pond/layer-stack.js';
+import { assignSpawnLayer, entityTint, getLayers, drawLayerIdx, moveToLayer } from '../pond/layer-stack.js';
 
 // ─── Size sampling ────────────────────────────────────────────────────────────
 // curve: number → power exponent (1=uniform, >1=small-biased, <1=large-biased)
@@ -577,7 +577,17 @@ export class FishBase {
     }
     // Hungriest here → approach; eat when the mouth reaches the pellet.
     this._intentFace = null; this._intentFaceOnly = false; this._intentManaged = true;
-    if (dist <= this.half + pellet.radius + 1) {
+
+    // Depth-coherent feeding (E14-11): move toward the pellet's layer as we
+    // approach, and only eat once we've reached its depth. In a single-layer pond
+    // every entity is on layer 0, so this is a no-op — feeding is unchanged.
+    const pelletLayer = drawLayerIdx(pellet);
+    const sameLayer = drawLayerIdx(this) === pelletLayer;
+    if (!sameLayer && this.layer && this.layer.to !== pelletLayer) {
+      moveToLayer(this, pelletLayer, 1200);   // follow it (incl. a sinking pellet) down/up
+    }
+
+    if (sameLayer && dist <= this.half + pellet.radius + 1) {
       pellet.alive = false;
       this.eatCooldownMs = EAT_COOLDOWN_MS;
       return { fx: 0, fy: 0, replace: true };

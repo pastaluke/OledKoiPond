@@ -131,10 +131,11 @@ const BUILTIN_SPECIES = [
     styles: KOI_STYLES,
     sizes:  { min: 12, max: 22, curve: 'normal' },   // most koi mid-sized; extremes rare
     // Render prefs (data only for now): which shader this species draws with
-    // ('vanilla' = flat-color cell renderer; E11-1/E11-4 add consumers), and an
-    // optional depth-layer lock (E14-6) — an index/id that pins this species to a
-    // plane (e.g. a bottom-feeder on the floor); null = spread across the stack.
-    render: { shaderId: 'vanilla', layerLock: null },
+    // ('vanilla' = flat-color cell renderer; E11-1/E11-4 add consumers); an
+    // optional depth-layer lock (E14-6) pinning this species to a plane (index/id,
+    // null = spread); and verticalRoam (E14-11) — how readily the species drifts
+    // between depth layers (0 = pinned, ~0.35 = gentle wander).
+    render: { shaderId: 'vanilla', layerLock: null, verticalRoam: 0.35 },
   },
 ];
 
@@ -219,12 +220,15 @@ export function upgradeSpecies(raw) {
       max:   Number.isFinite(c.sizes?.max) ? c.sizes.max : base.sizes.max,
       curve: c.sizes?.curve ?? base.sizes.curve,
     },
-    // Render prefs: shaderId (E14-9) + layerLock (E14-6), backfilled for old blobs.
+    // Render prefs: shaderId (E14-9) + layerLock (E14-6) + verticalRoam (E14-11),
+    // backfilled for old blobs.
     render: {
       shaderId: typeof c.render?.shaderId === 'string' ? c.render.shaderId
               : (base.render?.shaderId ?? 'vanilla'),
       layerLock: (typeof c.render?.layerLock === 'number' || typeof c.render?.layerLock === 'string')
               ? c.render.layerLock : (base.render?.layerLock ?? null),
+      verticalRoam: Number.isFinite(c.render?.verticalRoam) ? Math.max(0, Math.min(1, c.render.verticalRoam))
+              : (base.render?.verticalRoam ?? 0.35),
     },
   };
 }

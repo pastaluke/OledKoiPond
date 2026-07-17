@@ -13,7 +13,8 @@ import {
 import { PERF } from '../sim/perf.js';
 import { getStyle } from '../movement/move-styles.js';
 import {
-  getLayers, layerCount, setLayerCount, redistribute, serializeLayers, restoreLayers, MAX_LAYERS,
+  getWaterParams, layerCount, setLayerCount, setWaterColor, setMurkiness,
+  setOpacitySurface, setOpacityFloor, redistribute, serializeLayers, restoreLayers, MAX_LAYERS,
 } from '../pond/layer-stack.js';
 import {
   getAllCartridges, getCartridge, getActiveCartridgeId, getActiveCartridge, setActiveCartridge,
@@ -2258,61 +2259,51 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   cartSelect.addEventListener('change', (e) => { setActiveCartridge(e.target.value); applyCartridge(); save(); });
   applyCartridge();   // reflect restored persistence (or default Off) into compositor + UI
 
-  // ── Depth layers (E14-6) ────────────────────────────────────────────────────────
-  // Layer count + a per-layer depth-filter editor (colour + opacity). Changing
-  // the count re-distributes living fish across the new stack so striation shows.
-  const layerCountHost = panel.querySelector('#layer-count');
-  const layerListHost  = panel.querySelector('#layer-list');
+  // ── Depth — parametric water model (E14-11) ───────────────────────────────────
+  // One water colour + count + murkiness + surface/floor opacity → the per-layer
+  // depth filters are DERIVED, so changing the count preserves the look and the
+  // pond reads as one coherent body of water. (Replaces E14-6's per-layer editors.)
+  const layerCountHost = panel.querySelector('#layer-count');   // hosts all the water knobs
+  const wp = getWaterParams();
   const rgbToHex = (c) => '#' + [c.r, c.g, c.b].map((v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, '0')).join('');
   const hexToRgb = (h) => ({ r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16), b: parseInt(h.slice(5, 7), 16) });
 
-  function buildLayerList() {
-    layerListHost.innerHTML = '';
-    const layers = getLayers();
-    if (layers.length <= 1) {                      // single layer: nothing to tune
-      const hint = document.createElement('div');
-      hint.className = 'menu-row';
-      hint.style.cssText = 'font-size:11px;opacity:0.45;display:block';
-      hint.textContent = 'One layer — no depth. Raise Layers to add tinted planes.';
-      layerListHost.appendChild(hint);
-      return;
-    }
-    // Surface first in the UI (top of the list = top of the water) — layers[] is
-    // floor-first, so iterate in reverse.
-    for (let i = layers.length - 1; i >= 0; i--) {
-      const L = layers[i];
-      const head = document.createElement('div');
-      head.className = 'menu-row';
-      head.style.cssText = 'display:flex;align-items:center;gap:8px';
-      const lbl = document.createElement('span');
-      lbl.textContent = L.name; lbl.style.cssText = 'font-size:11px;opacity:0.7;flex:1';
-      const colorInput = document.createElement('input');
-      colorInput.type = 'color'; colorInput.value = rgbToHex(L.tint);
-      colorInput.title = 'Depth filter colour';
-      colorInput.addEventListener('input', (e) => { const c = hexToRgb(e.target.value); L.tint.r = c.r; L.tint.g = c.g; L.tint.b = c.b; save(); });
-      head.appendChild(lbl); head.appendChild(colorInput);
-      layerListHost.appendChild(head);
+  // Water colour picker.
+  const colorRow = document.createElement('label');
+  colorRow.className = 'menu-row';
+  colorRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+  const colorLbl = document.createElement('span');
+  colorLbl.textContent = 'Water color'; colorLbl.style.flex = '1';
+  const waterColorInput = document.createElement('input');
+  waterColorInput.type = 'color'; waterColorInput.value = rgbToHex(wp.waterColor);
+  waterColorInput.title = 'The pond’s water colour — it darkens with depth';
+  waterColorInput.addEventListener('input', (e) => { const c = hexToRgb(e.target.value); setWaterColor(c.r, c.g, c.b); save(); });
+  colorRow.appendChild(colorLbl); colorRow.appendChild(waterColorInput);
+  layerCountHost.appendChild(colorRow);
 
-      const { row } = makeRow({
-        label: 'Opacity', decimals: 2, valueStep: 0.02, hasBounds: false,
-        getVal: () => L.tint.a,
-        setVal: (v) => { L.tint.a = clamp(v, 0, 1); save(); },
-        getMin: () => 0, getMax: () => 1,
-      });
-      layerListHost.appendChild(row);
-    }
-  }
-
-  const { row: layerCountRow } = makeRow({
-    label: 'Layers',
-    infoText: 'Depth planes in the pond. Deeper fish are dimmed by each plane’s depth filter, giving a sense of depth. 1 = flat (no depth). Fish spread across the layers.',
+  const addKnob = (cfg) => layerCountHost.appendChild(makeRow(cfg).row);
+  addKnob({
+    label: 'Layers', infoText: 'Depth planes in the pond. 1 = flat (no depth). More = smoother depth gradient; fish spread across them.',
     decimals: 0, valueStep: 1, hasBounds: false,
     getVal: () => layerCount(),
-    setVal: (v) => { setLayerCount(v); redistribute(sim.entities); buildLayerList(); save(); },
+    setVal: (v) => { setLayerCount(v); redistribute(sim.entities); save(); },
     getMin: () => 1, getMax: () => MAX_LAYERS,
   });
-  layerCountHost.appendChild(layerCountRow);
-  buildLayerList();
+  addKnob({
+    label: 'Murkiness', infoText: 'How much the water colour darkens toward black from the surface down to the floor. Higher = murkier deep water.',
+    decimals: 2, valueStep: 0.02, hasBounds: false,
+    getVal: () => wp.murkiness, setVal: (v) => { setMurkiness(v); save(); }, getMin: () => 0, getMax: () => 1,
+  });
+  addKnob({
+    label: 'Surface haze', infoText: 'Depth-filter strength at the very top of the water. 0 = surface fish are untouched (clear water at the top).',
+    decimals: 2, valueStep: 0.02, hasBounds: false,
+    getVal: () => wp.opacitySurface, setVal: (v) => { setOpacitySurface(v); save(); }, getMin: () => 0, getMax: () => 1,
+  });
+  addKnob({
+    label: 'Floor haze', infoText: 'Depth-filter strength at the pond floor. Higher = the deep fades more strongly into the water colour.',
+    decimals: 2, valueStep: 0.02, hasBounds: false,
+    getVal: () => wp.opacityFloor, setVal: (v) => { setOpacityFloor(v); save(); }, getMin: () => 0, getMax: () => 1,
+  });
 
   // ── Creature library (E14-9) ────────────────────────────────────────────────────
   // Selector retargets every editor (Movement sliders, Shape/Fin editors, Copy/
