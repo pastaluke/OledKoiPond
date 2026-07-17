@@ -97,7 +97,11 @@ per-individual shaders, sim LOD, multi-pond saves.
       (Duplicate/Rename/Delete, selector retargets all editors, per-species counts,
       non-exclusive spawning, roster persistence, render.shaderId slot, koi-clobber
       load fix, mixed-radii hash verified exact).
+- [x] **QUEUE #2 SHIPPED 2026-07-15** — E14-6 depth layers (layer-stack module, per-layer
+      colour/opacity depth filters, floor-first draw, spawn-layer + species layerLock,
+      food sink lerp, Depth menu, persistence; N=1 identical by construction). The
+      caustics block on each layer is the dormant interface E7-8..12 lands against.
 - [ ] **EXECUTION QUEUE** (see implementation-plan.md, mirrored on the board's UP NEXT
-      strip): 2 E14-6 layers → 3-6 E7-8..11 caustics/shadows/light → 7 E14-8 pond
-      config. Single-session workflow only (parallel sessions retired after the
-      2026-07 collision).
+      strip): 3-6 E7-8..11 caustics/shadows/light → 7 E14-8 pond config → 8 E14-10
+      movement-feel unify. Single-session workflow only (parallel sessions retired
+      after the 2026-07 collision).
