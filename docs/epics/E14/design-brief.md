@@ -101,7 +101,12 @@ per-individual shaders, sim LOD, multi-pond saves.
       colour/opacity depth filters, floor-first draw, spawn-layer + species layerLock,
       food sink lerp, Depth menu, persistence; N=1 identical by construction). The
       caustics block on each layer is the dormant interface E7-8..12 lands against.
+- [x] **QUEUE #3 SHIPPED 2026-07-15** — E14-11 layers polish: parametric water model
+      (water color + count + murkiness + surface/floor haze → derived tints, count
+      change no longer wipes edits), vertical drift (species.render.verticalRoam),
+      and layer-aware feeding (fish moves to a pellet's depth before eating; follows
+      sinking pellets). N=1 still identical (opacitySurface default 0).
 - [ ] **EXECUTION QUEUE** (see implementation-plan.md, mirrored on the board's UP NEXT
-      strip): 3-6 E7-8..11 caustics/shadows/light → 7 E14-8 pond config → 8 E14-10
+      strip): 4-7 E7-8..11 caustics/shadows/light → 8 E14-8 pond config → 9 E14-10
       movement-feel unify. Single-session workflow only (parallel sessions retired
       after the 2026-07 collision).
