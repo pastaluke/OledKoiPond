@@ -26,11 +26,11 @@ still can't *keep* multiple creatures or mix species in the pond.
 |---|--------|------|----------------------|
 | ~~1~~ | ~~E14-9~~ | Creature library + mixed roster | ✅ SHIPPED — save/name creatures; mixed-species ponds |
 | ~~2~~ | ~~E14-6~~ | Depth layers | ✅ SHIPPED — deeper fish dimmer; floor-lock; food sinks |
-| 3 | **E14-11** | Layers polish: parametric water model + vertical drift (`E14-11-layer-water-model.md`) | One coherent pond you tune with a few knobs (water color / count / murkiness / opacity); fish drift between depths |
-| 4 | **E7-8** | Caustics on the floor from ripple data | The water visibly *lights* the pond floor, driven by real ripples |
-| 5 | **E7-9** | Caustics on the fish layer | Depth planes read differently under the same light |
-| 6 | **E7-10** | Creature shadows mask floor caustics | Fish cast shadows that punch holes in the caustics — the big depth illusion |
-| 7 | **E7-11** | Variable light angle (layer offsets) | Choose where the "sun" is; shadows/caustics shift coherently |
+| ~~3~~ | ~~E14-11~~ | Layers polish: parametric water model + vertical drift | ✅ SHIPPED — coherent water knobs; fish drift between depths |
+| ~~4~~ | ~~E7-8~~ | Caustics on the floor from ripple data | ✅ SHIPPED 2026-07-17 — ripple-warped light web on the floor (`docs/epics/E7/E7-8-11-caustics-design.md`) |
+| ~~5~~ | ~~E7-9~~ | Caustics on the fish layer | ✅ SHIPPED 2026-07-17 — per-layer light stamps, layer.caustics.opacity live |
+| ~~6~~ | ~~E7-10~~ | Creature shadows mask floor caustics | ✅ SHIPPED 2026-07-17 — offset silhouettes punch holes in the web |
+| ~~7~~ | ~~E7-11~~ | Variable light angle (layer offsets) | ✅ SHIPPED 2026-07-17 — light angle + per-gap offset sliders, one consistent projection |
 | 8 | **E14-8** | Pond config save/share (Phase 7b) | Named ponds; export/import the whole setup as JSON |
 | 9 | **E14-10** | Movement feel: unify bend/turn/rotate controls (**design-first**) | One coherent way to control how a fish bends/turns/rotates, replacing 6 overlapping controls + fixing the invisible axial movement |
 
