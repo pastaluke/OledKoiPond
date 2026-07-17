@@ -72,6 +72,25 @@ rate, instead of being pinned to its spawn plane.
   boids steering (schoolmates would read/influence each other's depth), breaking
   the clean "layers don't touch movement" separation for a subtle payoff.
 
+## Layer-aware feeding — DEFINITE (folded in)
+
+E14-6 gave pellets a depth (they sink surface→floor) and E14-11 lets fish drift
+between layers, but feeding still ignores depth entirely: `_perceiveFood` /
+`_actuateFeed` (fish-base.js ~543/568) work in 2D, so a floor fish eats a surface
+pellet through the water. Make feeding depth-coherent — the natural completion of
+the depth work:
+
+- **Approach:** while chasing a pellet, lerp the fish's layer toward the pellet's
+  current layer (`drawLayerIdx(pellet)` via `moveToLayer`). Since pellets sink,
+  the fish follows it down — depth becomes purposeful, not decorative.
+- **Eat gate:** add a same-(≈)layer condition to the existing proximity test, so a
+  fish can only eat once it has reached the pellet's depth.
+
+Explicitly the DEPTH half of feeding only. The OTHER half — eating on the
+creature's actual **mouth / front contact** instead of today's center-radius
+circle (`dist <= this.half + pellet.radius`) — is food-mechanics precision and
+stays in the **food rework (E12-2)**, not here.
+
 ## (2) Per-species depth footprint — DEFERRED (blocked on creature size)
 
 The right model (from the "inches" discussion): a creature's depth footprint =
@@ -101,5 +120,7 @@ it drops in cleanly. Do NOT half-build it against a size model that isn't real.
 - Changing layer count preserves the look (re-derives; no reset to black).
 - A dark water color + murkiness + opacity gradient reads as one coherent pond.
 - Fish visibly, slowly drift between depths; `layerLock` species stay put.
+- A fish chasing a pellet on another layer moves to the pellet's depth before it
+  can eat; it follows a sinking pellet down.
 - N=1 / zero opacity still identical to pre-E14-6.
 - Persistence round-trips the params; old E14-6 blobs load without error.
