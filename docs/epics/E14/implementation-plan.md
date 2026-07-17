@@ -24,14 +24,19 @@ still can't *keep* multiple creatures or mix species in the pond.
 
 | # | Ticket | Work | Outcome the user sees |
 |---|--------|------|----------------------|
-| 1 | **E14-9** | Creature library + mixed roster (Phase L below) | Save/name multiple creature configs; spawn any mix of them into the pond at once; pick which one you're editing |
-| 2 | **E14-6** | Depth layers (Phase 6) | Real sense of depth: deeper fish dimmer/tinted; snail-style floor-locked entities; food can sink |
-| 3 | **E7-8** | Caustics on the floor from ripple data | The water visibly *lights* the pond floor, driven by real ripples |
-| 4 | **E7-9** | Caustics on the fish layer | Depth planes read differently under the same light |
-| 5 | **E7-10** | Creature shadows mask floor caustics | Fish cast shadows that punch holes in the caustics — the big depth illusion |
-| 6 | **E7-11** | Variable light angle (layer offsets) | Choose where the "sun" is; shadows/caustics shift coherently |
-| 7 | **E14-8** | Pond config save/share (Phase 7b) | Named ponds; export/import the whole setup as JSON |
-| 8 | **E14-10** | Movement feel: unify bend/turn/rotate controls (**design-first**) | One coherent way to control how a fish bends/turns/rotates, replacing 6 overlapping controls + fixing the invisible axial movement |
+| ~~1~~ | ~~E14-9~~ | Creature library + mixed roster | ✅ SHIPPED — save/name creatures; mixed-species ponds |
+| ~~2~~ | ~~E14-6~~ | Depth layers | ✅ SHIPPED — deeper fish dimmer; floor-lock; food sinks |
+| 3 | **E14-11** | Layers polish: parametric water model + vertical drift (`E14-11-layer-water-model.md`) | One coherent pond you tune with a few knobs (water color / count / murkiness / opacity); fish drift between depths |
+| 4 | **E7-8** | Caustics on the floor from ripple data | The water visibly *lights* the pond floor, driven by real ripples |
+| 5 | **E7-9** | Caustics on the fish layer | Depth planes read differently under the same light |
+| 6 | **E7-10** | Creature shadows mask floor caustics | Fish cast shadows that punch holes in the caustics — the big depth illusion |
+| 7 | **E7-11** | Variable light angle (layer offsets) | Choose where the "sun" is; shadows/caustics shift coherently |
+| 8 | **E14-8** | Pond config save/share (Phase 7b) | Named ponds; export/import the whole setup as JSON |
+| 9 | **E14-10** | Movement feel: unify bend/turn/rotate controls (**design-first**) | One coherent way to control how a fish bends/turns/rotates, replacing 6 overlapping controls + fixing the invisible axial movement |
+
+Per-species depth footprint (sharks span few coarse layers, tetras span many) is
+NOT queued — it's blocked on an absolute creature-size primitive and is designed
+with E13-8. E14-11 leaves the data slot; see `E14-11-layer-water-model.md` §(2).
 
 E14-10 is a DESIGN story — walk through each current control's description with the
 user before designing the consolidated scheme. Do not pre-design it. It also carries
