@@ -26,12 +26,32 @@
 /** Nominal gaps between the deepest fish plane and the pond floor itself. */
 export const FLOOR_GAP = 1;
 
+/** Selectable caustic pattern generators (E7-8 polish). One is active at a time
+ *  (CausticsField.pattern); each is a different way to synthesize the web, all
+ *  sharing the ripple-refraction + crest-glint driving and the layer/shadow
+ *  compositing. `extras` lists the pattern-specific slider keys the menu shows. */
+export const CAUSTIC_PATTERNS = [
+  { id: 'web',        name: 'Warped web',  extras: ['warp'] },
+  { id: 'cells',      name: 'Voronoi cells', extras: [] },
+  { id: 'turbulence', name: 'Turbulence',  extras: ['iterations'] },
+];
+const PATTERN_ID = { web: 0, cells: 1, turbulence: 2 };
+
+/** Cheap deterministic hash of integer cell coords → [0,1) (for Voronoi jitter). */
+function hash2(ix, iy) {
+  let h = (ix | 0) * 374761393 + (iy | 0) * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+}
+
 /**
  * First-run caustics settings (same contract as WATER_DEFAULTS): what a visitor
  * sees before touching a slider; the Caustics "Reset" button restores exactly this.
  */
 export const CAUSTICS_DEFAULTS = Object.freeze({
   enabled: true,
+  pattern: 'web',         // which caustic generator is active (CAUSTIC_PATTERNS)
+  iterations: 4,          // turbulence pattern: domain-warp iteration count
   intensity: 0.38,        // floor web opacity
   fishIntensity: 0.5,     // opacity of the web stamped onto fish (× layer opacity)
   scale: 1.0,             // feature size multiplier (higher = broader web)
@@ -66,6 +86,8 @@ export class CausticsField {
 
     const d = CAUSTICS_DEFAULTS;
     this.enabled        = d.enabled;
+    this.pattern        = d.pattern;
+    this.iterations     = d.iterations;
     this.intensity      = d.intensity;
     this.fishIntensity  = d.fishIntensity;
     this.scale          = d.scale;
@@ -158,19 +180,22 @@ export class CausticsField {
     const cols = this._cols, rows = this._rows;
     const data = this._img.data;
     const lut = this._lut;
-    // Base spatial frequency: ~14-cell features at scale 1, independent of maxDim
-    // only in cell terms (higher resolution = finer web, like the ripple rings).
-    const k = 0.45 / Math.max(0.05, this.scale);
     const t = this._t;
-    const p0 = WAVES[0].w * t, p1 = WAVES[1].w * t, p2 = WAVES[2].w * t, p3 = WAVES[3].w * t;
     const refract = this.refract, glint = this.glint;
-    // Domain warp (Inigo Quilez): before evaluating the interference, displace the
-    // sample point by a slow low-frequency field. This makes the filament lattice
-    // WANDER organically instead of reading as a regular tiled mesh — the single
-    // biggest fix for the "repetitive" look, at the cost of two sines per cell.
-    // The warp field itself drifts on its own clock so the whole web breathes.
-    const warpAmt = this.warp, WF = 0.34;
-    const tw0 = t * 0.23, tw1 = t * 0.17;
+    const sharp = this.sharpness;
+    const patId = PATTERN_ID[this.pattern] ?? 0;
+
+    // ── web (domain-warped sines) constants ──
+    const k = 0.45 / Math.max(0.05, this.scale);
+    const p0 = WAVES[0].w * t, p1 = WAVES[1].w * t, p2 = WAVES[2].w * t, p3 = WAVES[3].w * t;
+    const warpAmt = this.warp, WF = 0.34, tw0 = t * 0.23, tw1 = t * 0.17;
+    const lutScale = (LUT_N - 1) / (2 * WAVES.length);
+    // ── cells (animated Voronoi edges) constants ──
+    const cdK = 0.10 / Math.max(0.05, this.scale);
+    const tc = t * 0.6;
+    // ── turbulence (Hoskins iterative domain-warp) constants ──
+    const kt = 0.085 / Math.max(0.05, this.scale);
+    const iters = Math.max(2, Math.min(8, this.iterations | 0));
 
     // Ripple field mapping (nearest cell; both grids span the same logical area).
     const h = ripple && ripple.enabled ? ripple._src : null;
@@ -178,7 +203,6 @@ export class CausticsField {
     const useR = !!(h && rcols > 2 && rrows > 2);
     const fx = useR ? (rcols - 1) / (cols - 1) : 0;
     const fy = useR ? (rrows - 1) / (rows - 1) : 0;
-    const lutScale = (LUT_N - 1) / (2 * WAVES.length);
 
     let j = 3;   // alpha channel; RGB pre-filled by _syncColor
     for (let y = 0; y < rows; y++) {
@@ -200,18 +224,67 @@ export class CausticsField {
           const lap = h[i + 1] + h[i - 1] + h[i + rcols] + h[i - rcols] - 4 * h[i];
           if (lap < 0) focus = -lap * glint;
         }
-        let u = px * k, v = py * k;
-        // Warp the domain by a low-frequency field of itself (IQ). Two sines.
-        const qx = Math.sin(v * WF + tw0) + 0.7 * Math.sin(u * (WF * 1.3) - tw1);
-        const qy = Math.sin(u * WF - tw1) + 0.7 * Math.sin(v * (WF * 1.3) + tw0);
-        u += qx * warpAmt; v += qy * warpAmt;
-        const s = Math.sin(u * WAVES[0].ux + v * WAVES[0].uy + p0)
-                + Math.sin(u * WAVES[1].ux + v * WAVES[1].uy + p1)
-                + Math.sin(u * WAVES[2].ux + v * WAVES[2].uy + p2)
-                + Math.sin(u * WAVES[3].ux + v * WAVES[3].uy + p3);
-        let a = lut[((s + WAVES.length) * lutScale) | 0] + focus;
-        if (a > 255) a = 255;
-        data[j] = a;
+
+        let a;
+        if (patId === 1) {
+          // ── VORONOI CELLS: bright thin filaments along Voronoi edges, points
+          //    orbiting so the web crawls. Distance to the two nearest = the edge. ──
+          const gxp = px * cdK, gyp = py * cdK;
+          const cx0 = Math.floor(gxp), cy0 = Math.floor(gyp);
+          const fxp = gxp - cx0, fyp = gyp - cy0;
+          let f1 = 9, f2 = 9;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const hh = hash2(cx0 + dx, cy0 + dy);
+              const ang = hh * 6.2831853 + tc;
+              const jx = dx + 0.5 + 0.36 * Math.cos(ang) - fxp;
+              const jy = dy + 0.5 + 0.36 * Math.sin(ang * 1.23) - fyp;
+              const d = jx * jx + jy * jy;
+              if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+            }
+          }
+          const edge = Math.sqrt(f2) - Math.sqrt(f1);
+          let e = 1 - edge * 2.2;
+          a = (e > 0 ? 255 * Math.pow(e, sharp) : 0) + focus;
+        } else if (patId === 2) {
+          // ── TURBULENCE (Dave Hoskins iterative caustic, Shadertoy MdlXz8): each
+          //    step warps the coordinate by trig of the previous one, accumulating
+          //    an inverse-distance field that reads as rich, non-tiling caustics.
+          //    Faithful port — the large −250 offset breaks origin symmetry and the
+          //    1.17−pow / pow(·,8) curve is what carves the bright thin filaments. ──
+          const bx = px * kt - 250, by = py * kt - 250;
+          let ix = bx, iy = by, c = 0;
+          const inten = 0.005;
+          for (let n = 0; n < iters; n++) {
+            const tt = t * (1 - 3.5 / (n + 1));
+            const nix = bx + Math.cos(tt - ix) + Math.sin(tt + iy);
+            const niy = by + Math.sin(tt - iy) + Math.cos(tt + ix);
+            ix = nix; iy = niy;
+            const dx = bx / (Math.sin(ix + tt) / inten);
+            const dy = by / (Math.cos(iy + tt) / inten);
+            c += 1 / Math.sqrt(dx * dx + dy * dy + 1e-9);
+          }
+          c /= iters;
+          c = 1.17 - Math.pow(c, 1.4);
+          // Invert: the recursion's broad plateaus become the dark floor and the
+          // narrow transition bands become bright light-pools — caustics on black,
+          // not marble on blue. The band width tracks `sharpness` (higher = thinner).
+          let col = 1 - Math.pow(Math.abs(c), 0.5 + sharp * 0.28);
+          if (col < 0) col = 0;
+          a = 255 * col + focus;
+        } else {
+          // ── WEB (default): domain-warped summed sines + zero-crossing LUT. ──
+          let u = px * k, v = py * k;
+          const qx = Math.sin(v * WF + tw0) + 0.7 * Math.sin(u * (WF * 1.3) - tw1);
+          const qy = Math.sin(u * WF - tw1) + 0.7 * Math.sin(v * (WF * 1.3) + tw0);
+          u += qx * warpAmt; v += qy * warpAmt;
+          const s = Math.sin(u * WAVES[0].ux + v * WAVES[0].uy + p0)
+                  + Math.sin(u * WAVES[1].ux + v * WAVES[1].uy + p1)
+                  + Math.sin(u * WAVES[2].ux + v * WAVES[2].uy + p2)
+                  + Math.sin(u * WAVES[3].ux + v * WAVES[3].uy + p3);
+          a = lut[((s + WAVES.length) * lutScale) | 0] + focus;
+        }
+        data[j] = a > 255 ? 255 : a;
       }
     }
     this._offCtx.putImageData(this._img, 0, 0);

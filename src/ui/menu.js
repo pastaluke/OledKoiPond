@@ -28,7 +28,7 @@ import {
 } from '../palettes/index.js';
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
 import { RAIN_DEFAULTS } from '../fluid/rain.js';
-import { CAUSTICS_DEFAULTS } from '../fluid/caustics.js';
+import { CAUSTICS_DEFAULTS, CAUSTIC_PATTERNS } from '../fluid/caustics.js';
 import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 150;   // cap raised 40 → 150 by the E14-2 perf work
@@ -424,7 +424,8 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   // ── Caustics settings (de)serialisation ──────────────────────────────────────
   // Mirrors the water/rain helpers: one shape feeds persistence, Copy, and Paste/Reset.
   const causticsSnapshot = () => caustics ? {
-    enabled: caustics.enabled, intensity: caustics.intensity,
+    enabled: caustics.enabled, pattern: caustics.pattern, iterations: caustics.iterations,
+    intensity: caustics.intensity,
     fishIntensity: caustics.fishIntensity, scale: caustics.scale,
     speed: caustics.speed, refract: caustics.refract, glint: caustics.glint,
     sharpness: caustics.sharpness, warp: caustics.warp, maxDim: caustics.maxDim, color: [...caustics.color],
@@ -437,6 +438,9 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (!caustics || cv === null || typeof cv !== 'object' || Array.isArray(cv)) return false;
     if (typeof cv.enabled === 'boolean')     caustics.enabled        = cv.enabled;
     if (typeof cv.shadows === 'boolean')     caustics.shadows        = cv.shadows;
+    if (typeof cv.pattern === 'string' && CAUSTIC_PATTERNS.some((p) => p.id === cv.pattern))
+      caustics.pattern = cv.pattern;
+    if (Number.isFinite(cv.iterations))      caustics.iterations     = clamp(Math.round(cv.iterations), 2, 8);
     if (Number.isFinite(cv.intensity))       caustics.intensity      = clamp(cv.intensity, 0, 1);
     if (Number.isFinite(cv.fishIntensity))   caustics.fishIntensity  = clamp(cv.fishIntensity, 0, 1);
     if (Number.isFinite(cv.scale))           caustics.scale          = clamp(cv.scale, 0.2, 3);
@@ -1746,6 +1750,31 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     causticsEnableToggle.addEventListener('change', (e) => { caustics.enabled = e.target.checked; save(); });
     causticsShadowToggle.addEventListener('change', (e) => { caustics.shadows = e.target.checked; save(); });
 
+    // Pattern selector — one caustic generator runs at a time (E7-8 polish). The
+    // pattern-specific sliders below (warp, iterations) show only for the pattern
+    // that uses them, driven by each CAUSTIC_PATTERNS entry's `extras` list.
+    const cPatRow = document.createElement('label');
+    cPatRow.className = 'menu-row';
+    cPatRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+    const cPatLbl = document.createElement('span');
+    cPatLbl.textContent = 'Pattern'; cPatLbl.style.flex = '1';
+    const cPatSel = document.createElement('select');
+    cPatSel.className = 'menu-select';
+    for (const p of CAUSTIC_PATTERNS) {
+      const opt = document.createElement('option');
+      opt.value = p.id; opt.textContent = p.name;
+      cPatSel.appendChild(opt);
+    }
+    cPatSel.value = caustics.pattern;
+    cPatSel.title = 'Which caustic generator paints the light web';
+    cPatSel.addEventListener('change', (e) => {
+      caustics.pattern = e.target.value;
+      applyPatternVisibility();
+      save();
+    });
+    cPatRow.appendChild(cPatLbl); cPatRow.appendChild(cPatSel);
+    causticsSliderHost.appendChild(cPatRow);
+
     // Caustic light colour picker (matches the Depth section's water-colour row).
     const cColorRow = document.createElement('label');
     cColorRow.className = 'menu-row';
@@ -1766,16 +1795,28 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     causticsSliderHost.appendChild(cColorRow);
 
     const causticsRowSyncs = [];
+    const causticsExtraRows = {};   // extraKey → row, for pattern-specific show/hide
     const mkC = (cfg) => {
       const { row, sync } = makeRow({ hasBounds: false, ...cfg });
       causticsSliderHost.appendChild(row);
       causticsRowSyncs.push(sync);
+      if (cfg.extraKey) causticsExtraRows[cfg.extraKey] = row;
+    };
+    // Show only the extra sliders the active pattern lists in its `extras`.
+    const applyPatternVisibility = () => {
+      const active = CAUSTIC_PATTERNS.find((p) => p.id === caustics.pattern);
+      const shown = new Set(active ? active.extras : []);
+      for (const key in causticsExtraRows) {
+        causticsExtraRows[key].style.display = shown.has(key) ? '' : 'none';
+      }
     };
     const syncCausticsUI = () => {
       causticsEnableToggle.checked = caustics.enabled;
       causticsShadowToggle.checked = caustics.shadows;
       cColorInput.value = cRgbToHex(caustics.color);
+      cPatSel.value = caustics.pattern;
       causticsRowSyncs.forEach((s) => s());
+      applyPatternVisibility();
     };
 
     mkC({
@@ -1821,10 +1862,16 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       setVal: (v) => { caustics.sharpness = clamp(v, 1, 16); save(); },
     });
     mkC({
-      label: 'Organic warp', decimals: 2, valueStep: 0.1,
+      label: 'Organic warp', decimals: 2, valueStep: 0.1, extraKey: 'warp',
       infoText: 'Domain-warps the web so it wanders organically instead of a regular tiled mesh. 0 = plain lattice (cheapest); higher = more natural, costs a little more CPU.',
       getVal: () => caustics.warp, getMin: () => 0, getMax: () => 4,
       setVal: (v) => { caustics.warp = clamp(v, 0, 4); save(); },
+    });
+    mkC({
+      label: 'Iterations', decimals: 0, valueStep: 1, extraKey: 'iterations',
+      infoText: 'Turbulence pattern only: recursion depth. More iterations = richer, busier caustics, at a little more CPU.',
+      getVal: () => caustics.iterations, getMin: () => 2, getMax: () => 8,
+      setVal: (v) => { caustics.iterations = clamp(Math.round(v), 2, 8); save(); },
     });
     mkC({
       label: 'Resolution', decimals: 0, valueStep: 10,
@@ -1850,6 +1897,8 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       getVal: () => caustics.lightOffset, getMin: () => 0, getMax: () => 6,
       setVal: (v) => { caustics.lightOffset = clamp(v, 0, 6); save(); },
     });
+
+    applyPatternVisibility();   // hide extras that don't apply to the active pattern
 
     const cFlash = (btn, msg) => {
       const prev = btn.textContent;
