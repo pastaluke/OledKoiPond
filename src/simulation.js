@@ -171,6 +171,10 @@ export class Simulation {
     const dir = ca.lightDir();
     // Offset per layer gap, in display cells (lightOffset is world units).
     const k = ca.lightOffset * grid.density;
+    // CONTINUOUS depth (E7-8..11 polish): interpolate the fish's layer during a
+    // drift lerp so its shadow SLIDES between planes instead of snapping at the
+    // midpoint. Falls back to the discrete draw layer for entities without lerp.
+    const contDepth = (e) => (e.layer ? e.layer.from + (e.layer.to - e.layer.from) * (e.layer.t || 0) : drawLayerIdx(e));
     const { cellScale, canvas } = grid;
     const size = Math.ceil(cellScale);
 
@@ -179,7 +183,7 @@ export class Simulation {
     let mx0 = Infinity, my0 = Infinity, mx1 = -Infinity, my1 = -Infinity;
     for (const e of this.entities) {
       if (!e._shadowCells || e._shadowCells.length === 0) continue;
-      const shift = k * (drawLayerIdx(e) + FLOOR_GAP);
+      const shift = k * (contDepth(e) + FLOOR_GAP);
       const r = (e.length ?? 4) * grid.density + Math.abs(shift) + 1;
       if (e._shadowOx - r < mx0) mx0 = e._shadowOx - r;
       if (e._shadowOy - r < my0) my0 = e._shadowOy - r;
@@ -198,7 +202,7 @@ export class Simulation {
     for (const e of this.entities) {
       const sc = e._shadowCells;
       if (!sc || sc.length === 0) continue;
-      const gaps = drawLayerIdx(e) + FLOOR_GAP;   // height above the floor plane
+      const gaps = contDepth(e) + FLOOR_GAP;   // continuous height above the floor plane
       const ox = e._shadowOx + dir.x * k * gaps;
       const oy = e._shadowOy + dir.y * k * gaps;
       for (let m = 0; m < sc.length; m++) {
