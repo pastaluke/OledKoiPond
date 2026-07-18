@@ -427,7 +427,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     enabled: caustics.enabled, intensity: caustics.intensity,
     fishIntensity: caustics.fishIntensity, scale: caustics.scale,
     speed: caustics.speed, refract: caustics.refract, glint: caustics.glint,
-    sharpness: caustics.sharpness, maxDim: caustics.maxDim, color: [...caustics.color],
+    sharpness: caustics.sharpness, warp: caustics.warp, maxDim: caustics.maxDim, color: [...caustics.color],
     shadows: caustics.shadows, shadowStrength: caustics.shadowStrength,
     lightAngleDeg: caustics.lightAngleDeg, lightOffset: caustics.lightOffset,
   } : undefined;
@@ -444,6 +444,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (Number.isFinite(cv.refract))         caustics.refract        = clamp(cv.refract, 0, 30);
     if (Number.isFinite(cv.glint))           caustics.glint          = clamp(cv.glint, 0, 500);
     if (Number.isFinite(cv.sharpness))       caustics.sharpness      = clamp(cv.sharpness, 1, 16);
+    if (Number.isFinite(cv.warp))            caustics.warp           = clamp(cv.warp, 0, 4);
     if (Number.isFinite(cv.maxDim))          caustics.maxDim         = clamp(Math.round(cv.maxDim), 60, 300);
     if (Array.isArray(cv.color) && cv.color.length === 3 && cv.color.every(Number.isFinite)) {
       caustics.color = cv.color.map((c) => clamp(Math.round(c), 0, 255));
@@ -1818,6 +1819,12 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       infoText: 'Web filament sharpening. Higher = thinner, brighter strands; lower = soft glow.',
       getVal: () => caustics.sharpness, getMin: () => 1, getMax: () => 16,
       setVal: (v) => { caustics.sharpness = clamp(v, 1, 16); save(); },
+    });
+    mkC({
+      label: 'Organic warp', decimals: 2, valueStep: 0.1,
+      infoText: 'Domain-warps the web so it wanders organically instead of a regular tiled mesh. 0 = plain lattice (cheapest); higher = more natural, costs a little more CPU.',
+      getVal: () => caustics.warp, getMin: () => 0, getMax: () => 4,
+      setVal: (v) => { caustics.warp = clamp(v, 0, 4); save(); },
     });
     mkC({
       label: 'Resolution', decimals: 0, valueStep: 10,

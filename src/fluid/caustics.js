@@ -39,6 +39,7 @@ export const CAUSTICS_DEFAULTS = Object.freeze({
   refract: 8.0,           // ripple gradient → sample displacement, in pattern cells
   glint: 120,             // ripple crest (−laplacian) → added brightness
   sharpness: 7.0,         // web sharpening exponent (higher = thinner filaments)
+  warp: 1.8,              // domain-warp strength (0 = old regular lattice; higher = more organic wander)
   maxDim: 150,            // coarse grid long edge in cells
   color: [150, 205, 235], // cool skylight
   shadows: true,
@@ -72,6 +73,7 @@ export class CausticsField {
     this.refract        = d.refract;
     this.glint          = d.glint;
     this.sharpness      = d.sharpness;
+    this.warp           = d.warp;
     this.maxDim         = d.maxDim;
     this.color          = [...d.color];
     this.shadows        = d.shadows;
@@ -162,6 +164,13 @@ export class CausticsField {
     const t = this._t;
     const p0 = WAVES[0].w * t, p1 = WAVES[1].w * t, p2 = WAVES[2].w * t, p3 = WAVES[3].w * t;
     const refract = this.refract, glint = this.glint;
+    // Domain warp (Inigo Quilez): before evaluating the interference, displace the
+    // sample point by a slow low-frequency field. This makes the filament lattice
+    // WANDER organically instead of reading as a regular tiled mesh — the single
+    // biggest fix for the "repetitive" look, at the cost of two sines per cell.
+    // The warp field itself drifts on its own clock so the whole web breathes.
+    const warpAmt = this.warp, WF = 0.34;
+    const tw0 = t * 0.23, tw1 = t * 0.17;
 
     // Ripple field mapping (nearest cell; both grids span the same logical area).
     const h = ripple && ripple.enabled ? ripple._src : null;
@@ -191,7 +200,11 @@ export class CausticsField {
           const lap = h[i + 1] + h[i - 1] + h[i + rcols] + h[i - rcols] - 4 * h[i];
           if (lap < 0) focus = -lap * glint;
         }
-        const u = px * k, v = py * k;
+        let u = px * k, v = py * k;
+        // Warp the domain by a low-frequency field of itself (IQ). Two sines.
+        const qx = Math.sin(v * WF + tw0) + 0.7 * Math.sin(u * (WF * 1.3) - tw1);
+        const qy = Math.sin(u * WF - tw1) + 0.7 * Math.sin(v * (WF * 1.3) + tw0);
+        u += qx * warpAmt; v += qy * warpAmt;
         const s = Math.sin(u * WAVES[0].ux + v * WAVES[0].uy + p0)
                 + Math.sin(u * WAVES[1].ux + v * WAVES[1].uy + p1)
                 + Math.sin(u * WAVES[2].ux + v * WAVES[2].uy + p2)
