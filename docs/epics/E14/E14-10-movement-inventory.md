@@ -1,9 +1,10 @@
 # E14-10 — Movement feel: inventory & option space
 
-**Status:** design-first (no code, no decisions locked). This doc is the memory of
-record for the E14-10 discussion — inventory of every rotation/turn/bend control,
-plus a clearly-laid-out option space for the three open decisions. The user picks
-(or invents) options from here; nothing below is a chosen plan.
+**Status:** design-first. Decisions 2 and 3 are MADE (see §9); Decision 1 has a
+concrete proposal awaiting user sign-off (§11). §1–§8 are the original inventory
+and option space, kept for the record. New cross-cutting requirements the user
+added (age snapshots, nibble feeding, body-plan generality) are in §10 — they
+constrain everything designed here.
 
 Source of truth for the code facts: `src/entities/fish-base.js` (physics),
 `src/movement/tuning.js` + `src/species/species-registry.js` (params/defaults),
@@ -214,10 +215,199 @@ For quick reference while deciding — what each existing knob does at its extre
 
 ---
 
-## Decisions still needed (from the user)
+## 9. Decisions made (user, 2026-07-27)
 
-1. **Turning model** — 1A / 1B / 1C / 1D (or your own).
-2. **Size-based turn scaling** — 2A / 2B / 2C (or your own).
-3. **Omni/maneuver regime** — 3A / 3B / 3C (or your own).
+**Decision 2 — RESOLVED, superseded by age snapshots.** Size-based turn scaling
+via a hidden min/max interpolation pair is retired ("too arbitrary"). At most,
+size effects are ONE knob. But the real direction replaces it entirely: **age
+snapshots** (§10.1). Scale becomes an explicit shape-scale setting on the
+creature; the user saves full-settings snapshots at named ages, and the sim lerps
+between snapshots as a creature ages. A newborn that turns fast and an adult that
+turns slow is authored *directly*, not inferred from size. `turnRateMin` dies.
+(The per-fish size-jitter → age-spread mapping is an implementation question.)
 
-Consolidation design + the menu restructure wait on these three answers.
+**Decision 3 — RESOLVED: 3A.** Make the omni/maneuver regime a visible default
+(at least to try it). Motivating behavior: **nibble feeding** (§10.2) — a tiny
+tetra meeting a big pellet should bite, back off a little while still tracking
+the pellet, then push back in for another bite. That's impossible without the
+maneuver regime (reverse thrust + face-lock), so omni must be surfaced AND
+tunable per species (and per age, via snapshots).
+
+**Decision 1 — proposal in §11**, built to the §10 requirements. Awaiting user
+review; nothing implemented.
+
+---
+
+## 10. New requirements (user feedback, 2026-07-27)
+
+### 10.1 Age snapshots (future system; constrains E14-10 now)
+
+- **Scale** becomes a first-class creature setting: a shape-scale multiplier that
+  sets the final drawn size. (Today size is a per-fish jitter; it becomes an
+  authored value per age.)
+- Per species, the user can **"save current settings as an age snapshot"** —
+  capturing the full tunable state (scale, agility, bend, hover, gait, …) at a
+  named age (newborn / adolescent / grown / …).
+- Over a creature's lifetime the sim **lerps between adjacent snapshots'
+  settings** — so a species isn't one tuning, it's a *timeline* of tunings.
+- **Design constraint on E14-10:** every knob we design must be a plain,
+  independently-lerpable number. Structural choices (e.g. which turn style a
+  species uses) are per-species, not per-age. No toggles that flip behavior
+  discontinuously mid-life. This is a reason to avoid modal controls like the
+  old Bend-drives-turn toggle.
+
+### 10.2 Nibble feeding (future behavior; built on 3A)
+
+Sketch: pellets get a size / bites-remaining budget (ties into the queued E12-2
+food rework). The feed style gains a loop: **approach → bite (mouth contact) →
+retreat** (reverse thrust, heading face-locked on the pellet even as it drifts)
+**→ hold → re-approach**. Small creature + big pellet = many nibble cycles; big
+creature + small pellet = one gulp. Per-species knobs (bite interval, retreat
+distance) and per-age via snapshots. Not designed further here — it's the payoff
+that justifies the Hovering knob set in §11.
+
+### 10.3 Body-plan generality
+
+The scheme must make sense authoring **fish, turtles, snails, dragons, birds,
+ball-shaped fairies with wings** — not just easy fish shapes:
+
+- **Not all creatures bend.** Bend must be optional per species, and its absence
+  must not leave dead sliders lying around.
+- Settings must be **instantly understandable** — no rad/s, no "arbitrary points
+  of reference for when something is supposed to happen."
+- The **UI structure itself should teach** the split between a creature's
+  turning *ability* and its turning *look/style*.
+
+---
+
+## 11. Decision 1 proposal — "physics owns truth, the body follows"
+
+### 11.1 The core principle
+
+Split turning into two layers that can never contradict each other:
+
+1. **Ability (physics)** — how the creature's heading actually changes. One knob
+   per regime. This is what trajectories obey.
+2. **Expression (look)** — how the body *shows* the turn it is actually making.
+   Style-dependent (bend for fish/dragons; nothing for snails/fairies; bank for
+   birds someday). Purely cosmetic — it can exaggerate or hide a turn, never
+   cause one.
+
+Coupling is **structural, not a toggle**: the shown bend is driven by the *actual*
+turn as a fraction of the creature's own max —
+`bendShown = BendDepth × (currentTurnRate / agilityRate)`, saturating at full
+depth exactly when the creature turns its hardest. This is self-normalizing:
+any Agility setting shows full expression at its own hardest turn, so the `0.8`
+exchange-rate constant and the Bend-drives-turn toggle both disappear — while a
+stiff-bodied tight-turner (Bend depth 0, Agility high) stays possible. It keeps
+option 1A's honesty with option 1B's expressive freedom.
+
+### 11.2 Regimes get plain names
+
+- **Swimming** (was cruise) — moving; turns are arcs.
+- **Hovering** (was omni/maneuver) — stopped or slow; can pivot in place,
+  sidestep, back up. Per 3A this becomes visible by default.
+
+### 11.3 The proposed knob set
+
+**Turning (while swimming)**
+- **Agility** — the ONLY physics turn knob. Readout in felt units: **seconds to
+  make a U-turn** (internally rad/s; `t180 = π/rate`; today's 2.4 rad/s ⇒
+  "1.3 s"). High = darts around corners; low = barge arcs.
+
+**Turn look** (only shown for styles that use them — same extras pattern as the
+Caustics pattern selector)
+- **Turn style** — per-species selector: **None / Bend** (extensible: Bank for
+  birds, etc. — each style declares its own extra knobs).
+- **Bend depth** (Bend style) — 0–1, was `maxBend`. 0 = rigid plank even in a
+  hard turn; 1 = deepest C-curve. Purely cosmetic now.
+- **Flex point** (Bend style) — was Pivot/`pivotT`. WHERE the body hinges.
+  Anatomy — shared with the swim wag, and labeled as such.
+- **Flex spread** (Bend style) — ONE knob replacing Waist bend + Body bend
+  (they're two control points of the same C-curve). 0 = only the front kinks at
+  the hinge; 1 = the whole body bows in one smooth C. Internally maps to
+  (bendWaist, bendBody) along a curve that preserves today's default mid-scale.
+  (The raw pair stays reachable via Copy/Paste JSON for power users.)
+
+**Hovering (stopped & slow)** — surfacing the omni regime, per 3A
+- **Hover threshold** — was `omni.lo/hi`. The speed fraction below which the
+  creature switches from swimming to hovering (band width derived). **0 = this
+  creature never hovers** — so retiring the regime is a per-creature slider
+  value, not a code decision: a snail can live here, a bird can never hover.
+- **Pivot speed** — was `finTurnRate`. How fast it rotates in place, same
+  U-turn-seconds readout as Agility.
+- **Scoot** — was `finThrust.reverse/lateral`, ONE knob (fixed internal ratio).
+  0 = must arc forward to reposition (fish-like); 1 = backs up and sidesteps
+  freely (crab/hummingbird-like). This is the knob nibble feeding rides on.
+
+### 11.4 Old → new mapping
+
+| Old control | Fate |
+|---|---|
+| Turn rate (rad/s) | → **Agility** (U-turn seconds readout) |
+| turnRateMin (hidden) | **retired** (age snapshots supersede size scaling) |
+| Bend drives turn (toggle) | **retired** (coupling now structural, §11.1) |
+| Turn bend (`maxBend`) | → **Bend depth** (0–1, pure look) |
+| Waist bend + Body bend | → **Flex spread** (one knob) |
+| Pivot (`pivotT`) | → **Flex point** (relabeled; shared-with-wag noted) |
+| finTurnRate | → **Pivot speed** (Hovering) |
+| omni.lo / hi | → **Hover threshold** (one knob, band derived) |
+| finThrust fwd/rev/lat | → **Scoot** (one knob) |
+
+Net: 10 raw params → **7 knobs + 1 style selector**, and a non-bending creature
+sees only 4 (Agility, Hover threshold, Pivot speed, Scoot). Every knob is a
+lerpable number (§10.1 ✓); the style selector is per-species structural.
+
+### 11.5 Menu structure (the UI teaches the model)
+
+```
+Pets (folder)
+ ├─ Creature selector + Duplicate/Rename/Delete + Filled/Feed
+ ├─ Body     (today's Shape editor: silhouette, points, fins)
+ ├─ Motion
+ │   ├─ Speed & gait   (Max speed, burst/coast, drag, wag)
+ │   ├─ Turning        (Agility · Turn style · Bend depth · Flex point · Flex spread)
+ │   └─ Hovering       (Hover threshold · Pivot speed · Scoot)
+ └─ Social   (separation, alignment, cohesion, wander, school, edges)
+```
+
+- The **section split IS the explanation**: "Turning = while swimming, arcs";
+  "Hovering = stopped, pivots" — one header line of copy under each.
+- Turn-style extra knobs swap with the style selection (the shipped Caustics
+  extras mechanic, reused).
+- A **live mini-preview** in Turning (reusing the move-style preview pattern): a
+  creature running a figure-eight with the current Agility/Bend settings, so
+  ability + look are visible without touching the pond.
+- Scoping question (user to decide): move ONLY the turning/hovering knobs now and
+  leave gait/boids where they are, or do the full Pets/Motion/Social regrouping
+  in one pass?
+
+### 11.6 Implementation notes & migrations (for the eventual build ticket)
+
+- **3A default fix:** coast throttle default (0.19) sits just above the hover
+  band (0.18) — Finding #3. With Hover threshold exposed, default it so a
+  coasting fish actually dips into hovering (e.g. threshold ≈ 0.22–0.25 or
+  lower the default coast), then tune by eye.
+- **Persisted-blob migrations:** `turnRateMax` → agility; drop `turnRateMin`;
+  if a blob had `bendDrivesTurn: true`, derive Agility from `maxBend / 0.8` so
+  those users' felt turn radius is preserved; map (bendWaist, bendBody) → the
+  nearest Flex spread value; merge finThrust rev/lat → Scoot.
+- **Hovering visibility beyond physics:** in the maneuver regime the spine stays
+  straight by design — fins are the only tell. Surfacing 3A likely also wants a
+  slightly stronger fin read (existing FIN_REV/LAT_DEG channels) so hovering
+  looks intentional, not stalled.
+- Bend-depth normalization changes what saved `maxBend` MEANS (clamp → 0–1
+  depth); normalize on load (`maxBend / 2.5` against the old slider ceiling).
+
+---
+
+## Open for user review (Decision 1)
+
+1. Does the **physics-owns-truth / body-follows** coupling (§11.1) match your
+   intent — turn look can exaggerate or underplay but never cause a turn?
+2. **Naming** — react to: Agility, Hover threshold, Pivot speed, Scoot, Bend
+   depth, Flex point, Flex spread, Turning/Hovering, Pets/Body/Motion/Social.
+3. **Menu scope** — minimal move (turning/hovering knobs only) vs the full
+   Pets/Motion/Social regroup in one pass?
+4. **Flex point placement** — it's shared anatomy with the tail wag; keep it in
+   Turning (with a "affects wag too" note) or in Body?
