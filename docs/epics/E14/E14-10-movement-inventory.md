@@ -399,6 +399,51 @@ Pets (folder)
 - Bend-depth normalization changes what saved `maxBend` MEANS (clamp → 0–1
   depth); normalize on load (`maxBend / 2.5` against the old slider ceiling).
 
+### 11.7 Agility — the math (deep-dive, 2026-07-27)
+
+**Today's chain** (`fish-base.js`): the 3 knobs resolve in the `maxTurnRate`
+getter (:513 — toggle branch, else size-interpolated rad/s). The cruise branch
+(:711–721) computes the heading the steering forces want, wraps the difference,
+and clamps it to `maxTurnRate/1000 × dt` — rotating the velocity vector to the
+clamped heading with **speed preserved** (the cap redirects, it never brakes —
+why low rate reads as a barge arc, not a slowdown). Bend (:762–766) measures the
+ACTUAL realized rotation and maps it through the glue constant:
+`targetBend = clamp(measuredω × 0.8, ±maxBend) × gTurn × w`.
+
+**Felt-unit conversions:** `t_uturn = π/ω` (2.4 rad/s → 1.31 s; the hidden
+big-fish 0.8 → 3.93 s). Turn radius `r = v/ω`: koi full speed 51 px/s → r ≈ 21
+logical px; coasting ≈ 4 px — rate-based turning gives "slower = tighter corner"
+for free (physically right; why we spec rate, not radius). Per-frame the clamp is
+dt-scaled (≈2.3°/frame at 60 fps) so it's framerate-independent.
+
+**The bug the 0.8 constant hides:** a large koi (ω = 0.8) can show at most
+0.8 × 0.8 = 0.64 bend against its authored maxBend 1.2 — **53% of its own curve,
+unreachable forever**. The clamp only saturates for fish whose ω×0.8 ≥ maxBend,
+so "Turn bend" silently means different things per size.
+
+**Agility replacement:**
+- Store `tuning.agilitySec` — seconds per U-turn, THE felt unit, on the species.
+- `get maxTurnRate() { return Math.PI / this.species.tuning.agilitySec; }` —
+  cruise clamp consumes it unchanged; toggle branch + size interpolation deleted.
+- Bend goes self-normalizing:
+  `frac = min(1, |measuredω| / maxTurnRate)`;
+  `targetBend = maxBend × frac × sign(ω) × gTurn × w`.
+  frac = 1 exactly at THIS creature's hardest turn → every creature reaches its
+  full authored curve; the 0.8 constant, clamp mismatch, and big-fish bend
+  starvation vanish in one line.
+- Slider ≈ 0.4 s (darting) → 6 s (barge), default 1.3 s (today's koi feel).
+  UI note: seconds run backwards from intuition — draw the slider
+  right-equals-snappier; readout "U-turn: 1.3 s".
+- **Lerp space:** snapshots lerp the stored seconds (period space): midpoint of
+  1 s and 3 s = 2 s — perceptually honest. Lerping rad/s would bias snappy
+  (→ 1.5 s). This is WHY agilitySec, not rad/s, is canonical.
+- **Migrations:** `agilitySec = π/turnRateMax`; if a blob had
+  `bendDrivesTurn:true` → `agilitySec = 0.8π/maxBend` (preserves those users'
+  felt radius); `turnRateMin` dropped.
+- **Ceiling, not drive:** fish only turn at max rate when steering demands it
+  (wall / attract / food). Agility = capability; how often hard turns are
+  demanded stays with the Social weights (wander, edges) = temperament.
+
 ---
 
 ## Open for user review (Decision 1)
