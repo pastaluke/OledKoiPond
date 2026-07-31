@@ -796,13 +796,13 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
   });
   mkLive(turnLookHost, {
     label: 'Flex point', decimals: 3, valueStep: 0.01,
-    infoText: 'WHERE the body hinges when it turns, from tail tip (0) to snout (1). Low = only the front pivots over a long stiff tail; high = the hinge sits forward for whole-body, snake-like turns. (The tail wag has its own separate origin — Wag point, under Body.)',
+    infoText: 'The hinge: how far back the bending part of the body reaches, from tail tip (0) to snout (1). The curve always tapers to nothing behind it, so a LOW value keeps a long limp tail trailing behind a short bending front; a HIGH value lets the bend run most of the length for whole-body, snake-like turns. Does not affect the resting shape. (The tail wag has its own separate origin — Wag point, under Body.)',
     getVal: () => species.body.spline.pivotT, getMin: () => 0.10, getMax: () => 0.999,
     setVal: (v) => { species.body.spline.pivotT = clamp(v, 0.10, 0.999); save(); },
   });
   mkLive(turnLookHost, {
     label: 'Flex spread', decimals: 2, valueStep: 0.02,
-    infoText: 'WHERE the curve sits along the body. 0 = the bow is all mid-body and the waist stays straight (the C starts further back); 1 = waist and body share it evenly for a rounder, whole-body C. Total curvature stays constant — this is shape, not amount (that’s Bend depth).',
+    infoText: 'Where along the body the curve is deepest. 0 = up near the head, so the creature turns mostly with its front while the rest trails fairly straight; 1 = back toward the flex point, so the curve is shared down the length and the whole body swings through the turn. This moves the curve — how DEEP it gets is Bend depth.',
     getVal: () => species.body.spline.flexSpread, getMin: () => 0, getMax: () => 1,
     setVal: (v) => { species.body.spline.flexSpread = clamp(v, 0, 1); save(); },
   });

@@ -65,16 +65,17 @@ export const BEND_DEPTH_SCALE = 2.5;          // bendDepth 0..1 → legacy maxBe
 
 get maxTurnRate() { return Math.PI / this.species.tuning.agilitySec; }   // rad/s, internal
 
-// Flex spread → the two legacy control-point gains, constant total so it is a
-// SHAPE knob (where the bow sits), orthogonal to bendDepth (how much bow).
-export function flexAmounts(spread) {
-  const s = Math.max(0, Math.min(1, spread));
-  const TOTAL = 0.394;                        // koi's historical bendWaist + bendBody
-  const wFrac = 0.246 + (s - 0.5) * 0.49;     // s=0.5 → exactly (0.097, 0.297)
-  return { waist: TOTAL * wFrac, body: TOTAL * (1 - wFrac) };
-}
-// s=0 → (0.000, 0.394) bow sits mid-body, waist straight (C starts further back)
-// s=1 → (0.194, 0.201) waist and body share evenly (rounder whole-body C)
+// STEERING BOW (revised — see §9). ONE signed lateral profile along the body:
+// zero at both tips, one smooth peak ahead of the flex point. Both bezier control
+// points are sampled from it, so the spine is a single C by construction.
+const peak = pivotT + (1 - pivotT) * (0.85 - 0.60 * spread);   // spread slides the apex
+const amp  = steeringBend * length * BEND_BOW_GAIN;            // 0.198, calibrated
+const bowAt = (p) => {
+  const u = p <= peak ? p / peak : (1 - p) / (1 - peak);       // 0 at tips → 1 at apex
+  return amp * Math.sin(Math.PI * 0.5 * clamp01(u));           // smooth through the apex
+};
+const TC = 2*bow(pivotT*0.5)     - 0.5*T - 0.5*W;              // each segment passes
+const BC = 2*bow((pivotT+1)*0.5) - 0.5*W - 0.5*H;              // through the bow's midpoint
 
 // Self-normalizing bend — replaces the `× 0.8` glue constant. frac = 1 exactly at
 // THIS creature's hardest turn, so every creature reaches its full authored curve.
@@ -159,8 +160,8 @@ Pets
    KOI_TUNING (`agilitySec`; drop turnRate{Max,Min}), KOI_OMNI
    (`hoverThreshold`/`pivotSec`/`scoot`), `schemaVersion: 6` + the v5→v6 upgrade,
    `_mergeOmni` for the new shape, tuning migration.
-2. **`src/entities/fish-base.js`** — `BEND_DEPTH_SCALE` + `flexAmounts()` exports;
-   `maxTurnRate` from `agilitySec`; `buildCenterline` uses `flexAmounts` +
+2. **`src/entities/fish-base.js`** — `BEND_DEPTH_SCALE` + `BEND_BOW_GAIN` exports;
+   `maxTurnRate` from `agilitySec`; `buildCenterline` uses the steering bow +
    `wagPivotT`; self-normalizing bend + `turnStyle 'none'`; omni derivations;
    delete `BEND_DRIVES_TURN`.
 3. **`src/movement/tuning.js`** — `agilitySec` param (replaces `turnRateMax`),
@@ -177,7 +178,8 @@ Pets
 - Parse-check all touched modules; load the pond headless with **no console errors**.
 - **Feel-preservation**: with a fresh profile, fish trajectories should be
   indistinguishable from pre-change except for the intentional 3A hover change.
-  Assert numerically: `π/agilitySec === 2.4`, `flexAmounts(0.5) ≈ (0.097, 0.297)`,
+  Assert numerically: `π/agilitySec === 2.4`, every sampled spine offset shares one
+  sign (single C, never an S),
   scoot 0.5 → (0.35, 0.55), pivotSec 0.524 → 6.0 rad/s.
 - **3A visible**: log the mean `_maneuver` (= 1−w) across fish over ~10 s; it must be
   clearly > 0 in normal play (it is ≈0 today). Screenshot fish hovering/pivoting.
@@ -222,3 +224,50 @@ turning the pond into hovercraft. It is one slider — dial to taste, 0 = never 
   once demonstrating specific movements; put a scrolling grid behind them so
   translation reads while the viewport tracks the creature. Would give Turning and
   Hovering immediate visual feedback. → own ticket.
+
+
+---
+
+## 9. Follow-up fix — the flex/S-bend bug (2026-07-27)
+
+**Reported:** with `pivotT 0.5`, `flexSpread 0`, the spine drew an **S**; at
+`flexSpread 1` the back half barely moved.
+
+**Root cause (pre-existing, exposed and worsened by E14-10).** The tail's bezier
+control was derived purely from the front's tangent:
+`TC = W + normalize(W − BC) × handle`. That guarantees C¹ smoothness but leaves
+the tail's **side** unconstrained — a hard front bulge tips that tangent back
+across the body axis, so the tail swings the other way. It had gone unnoticed
+because koi's default `pivotT` of 0.173 makes the tail segment so short its
+bulge is ≈0. Measured, pre-fix:
+
+| pivotT | spread | tail bulge | front bulge | shape |
+|---|---|---|---|---|
+| 0.173 | 0.0 | +0.067 | −0.394 | **S** |
+| 0.173 | 0.5 | +0.003 | −0.297 | tail straight (default — why it looked fine) |
+| 0.173 | 1.0 | −0.069 | −0.201 | C |
+| 0.500 | 0.0 | +0.253 | −0.394 | **S** |
+| 0.500 | 0.5 | +0.152 | −0.297 | **S** |
+| 0.500 | 1.0 | +0.007 | −0.201 | **S** |
+
+Note the middle row: at `pivotT 0.5` even the *default* spread was an S. And
+`flexSpread 0` set the waist gain to zero, which pins the hinge on the axis and
+makes an S unavoidable at any pivot.
+
+**Fix.** Replaced the two independent control-point gains with a single **steering
+bow** — one signed lateral profile along the whole body (zero at both tips, one
+smooth peak ahead of the flex point), with both control points *sampled* from it.
+Because the profile never changes sign, the tail cannot disagree with the front:
+an S is now unrepresentable. Verified C at pivotT ∈ {0.173, 0.35, 0.5, 0.75} ×
+spread ∈ {0, 0.5, 1}, and a runtime assertion that all sampled offsets share one
+sign.
+
+**Default preserved:** koi's mid-body swing is **0.1969** vs **0.1970** before —
+`BEND_BOW_GAIN = 0.198` was calibrated for exactly this.
+
+**Semantics changed** (slider copy rewritten to match):
+- **Flex point** — the hinge; how far back the bending part reaches. The curve
+  always tapers to nothing behind it. Does not affect the resting shape.
+- **Flex spread** — where along the body the curve is **deepest**: 0 = up near the
+  head (front turns, rest trails straighter), 1 = back toward the flex point (the
+  whole body swings through the turn). Depth is `Bend depth`; this only moves it.

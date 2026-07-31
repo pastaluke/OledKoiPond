@@ -108,11 +108,6 @@ export function cachedWidthFn(points) {
 //   spline/motion: from a CreatureDef (see FishBase.CREATURE)
 export function buildCenterline(spline, motion, { headAngle, steeringBend, swimPhase = 0, length, swimAmp = 1 }) {
   const { headFrac, tailFrac, pivotT } = spline;
-  // Bend control-point gains come from the single Flex spread knob (E14-10); a
-  // hand-authored blob may still carry the legacy pair, so honour it if present.
-  const flex = flexAmounts(spline.flexSpread);
-  const bendWaist = Number.isFinite(spline.bendWaist) ? spline.bendWaist : flex.waist;
-  const bendBody  = Number.isFinite(spline.bendBody)  ? spline.bendBody  : flex.body;
   // WAG ORIGIN — deliberately independent of pivotT (the bend hinge) since E14-10.
   // Defaults equal, so the classic single-pivot look is unchanged. NOTE: the wag
   // envelope zeroes at wagPivotT, so C¹ continuity at the geometric hinge only
@@ -127,23 +122,44 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimP
 
   const Hx =  cosH * headDist,    Hy =  sinH * headDist;
   const Tx = -cosH * tailDist,    Ty = -sinH * tailDist;
-  // Pivot W sits at fraction pivotT between tail tip (0) and nose (1) — a normalized
-  // position, so it can never escape past either end regardless of head/tail offsets.
-  const Wx = Tx + (Hx - Tx) * pivotT - cosP * steeringBend * length * bendWaist;
-  const Wy = Ty + (Hy - Ty) * pivotT - sinP * steeringBend * length * bendWaist;
 
-  // Front (body) control: bends to steer. Computed first — the back inherits from it.
-  const BCx = (Wx + Hx) * 0.5 - cosP * steeringBend * length * bendBody;
-  const BCy = (Wy + Hy) * 0.5 - sinP * steeringBend * length * bendBody;
+  // ── STEERING BOW (E14-10) ───────────────────────────────────────────────────
+  // The whole spine bends as ONE lateral displacement profile: zero at both tips,
+  // rising smoothly to a single peak somewhere ahead of the flex point. Both
+  // bézier control points are then SAMPLED from that profile, so every part of
+  // the body bows the same way by construction.
+  //
+  // (This replaced a pair of independent control-point gains whose tail control
+  // was derived from the front's tangent. That gave C¹ smoothness but left the
+  // tail's SIDE unconstrained — a hard front bulge tipped the tangent back across
+  // the axis and flicked the tail the other way, drawing an S instead of a C.
+  // With one signed profile the tail can't disagree with the front.)
+  const spread = Math.max(0, Math.min(1, Number.isFinite(spline.flexSpread) ? spline.flexSpread : 0.5));
+  // Where the bow peaks, as a fraction tail-tip(0)→nose(1). Always strictly ahead
+  // of the flex point (so the tail always tapers) and behind the nose. Flex spread
+  // slides it: 0 = far forward (curve concentrated up front, tail nearly rigid),
+  // 1 = back near the flex point (the whole body swings through the turn).
+  const peak = pivotT + (1 - pivotT) * (0.85 - 0.60 * spread);
+  const amp  = steeringBend * length * BEND_BOW_GAIN;
+  // Displacement at normalized body position p. sin() peaks with zero slope, so
+  // the profile is smooth THROUGH the peak as well as at the tips.
+  const bowAt = (p) => {
+    const u = p <= peak ? (peak > 1e-6 ? p / peak : 0)
+                        : (peak < 1 - 1e-6 ? (1 - p) / (1 - peak) : 0);
+    return amp * Math.sin(Math.PI * 0.5 * Math.max(0, Math.min(1, u)));
+  };
+  // Point on the bowed spine at p (axis position + lateral bow).
+  const bowX = (p) => Tx + (Hx - Tx) * p - cosP * bowAt(p);
+  const bowY = (p) => Ty + (Hy - Ty) * p - sinP * bowAt(p);
 
-  // Back (tail) rest control TC: placed so the back's tangent at W is colinear with the
-  // front tangent (BC→W), so the back smoothly CONTINUES the front's steering curve
-  // through the pivot (C¹). No swim wobble baked in — the wag is added per-t in at().
-  const fdx = Wx - BCx, fdy = Wy - BCy;            // tail-ward tangent direction through W
-  const fdl = Math.sqrt(fdx*fdx + fdy*fdy) || 1;
-  const handle = 0.5 * Math.hypot(Wx - Tx, Wy - Ty);
-  const TCx = Wx + (fdx / fdl) * handle;
-  const TCy = Wy + (fdy / fdl) * handle;
+  const Wx = bowX(pivotT), Wy = bowY(pivotT);
+  // Each quadratic's control is placed so the segment passes exactly through the
+  // bow at its own midpoint: B(0.5) = 0.25·A + 0.5·C + 0.25·B  ⇒  C = 2·mid − ½A − ½B.
+  const tm = pivotT * 0.5, fm = (pivotT + 1) * 0.5;
+  const TCx = 2 * bowX(tm) - 0.5 * Tx - 0.5 * Wx;
+  const TCy = 2 * bowY(tm) - 0.5 * Ty - 0.5 * Wy;
+  const BCx = 2 * bowX(fm) - 0.5 * Wx - 0.5 * Hx;
+  const BCy = 2 * bowY(fm) - 0.5 * Wy - 0.5 * Hy;
 
   // Propulsive wag: a lateral offset that grows from 0 at the pivot → max at the tail
   // tip and travels tailward (phase lag wagK·d). Amplitude rides swimAmp (throttle).
@@ -372,7 +388,7 @@ export function upgradeCreature(raw) {
   }
   // v5 → v6 (E14-10): the turn-look consolidation.
   //   • maxBend (0..2.5 clamp)      → bendDepth (0..1 fraction of BEND_DEPTH_SCALE)
-  //   • bendWaist + bendBody (pair) → flexSpread (one shape knob; see flexAmounts)
+  //   • bendWaist + bendBody (pair) → flexSpread (one shape knob; see buildCenterline)
   //   • wag origin splits off the bend hinge → motion.wagPivotT (defaults equal)
   //   • turnStyle names HOW a turn is shown at all ('none' = rigid creatures)
   if ((c.schemaVersion ?? 1) < 6) {
@@ -401,17 +417,13 @@ export function upgradeCreature(raw) {
 /** bendDepth 0..1 → the legacy front-bend clamp magnitude (old maxBend units). */
 export const BEND_DEPTH_SCALE = 2.5;
 
-/** Flex spread (0..1) → the two bend control-point gains. Constant TOTAL, so this
- *  is a pure SHAPE knob (WHERE the bow sits) and stays orthogonal to bendDepth
- *  (HOW MUCH bow). 0.5 reproduces koi's historical (0.097, 0.297) exactly. */
-export function flexAmounts(spread) {
-  const s = Math.max(0, Math.min(1, Number.isFinite(spread) ? spread : 0.5));
-  const TOTAL = 0.394;                         // koi's historical bendWaist + bendBody
-  const wFrac = 0.246 + (s - 0.5) * 0.49;      // s=0 → bow all mid-body; s=1 → shared
-  return { waist: TOTAL * wFrac, body: TOTAL * (1 - wFrac) };
-}
+/** Peak lateral displacement of the steering bow, as a fraction of body length per
+ *  unit steeringBend. Calibrated so the default koi's mid-body swings exactly as
+ *  far as it did under the retired two-gain construction. */
+export const BEND_BOW_GAIN = 0.198;
 
-/** Inverse of flexAmounts, for migrating a stored (bendWaist, bendBody) pair. */
+/** Legacy (bendWaist, bendBody) pair → the Flex spread that bows most like it.
+ *  A waist-heavy pair curved further back, which is what a high spread does. */
 export function inverseFlexSpread(waist, body) {
   const w = Number.isFinite(waist) ? waist : 0.097;
   const b = Number.isFinite(body) ? body : 0.297;
