@@ -107,7 +107,17 @@ export function cachedWidthFn(points) {
 //   length       : nose-to-tail world units
 //   spline/motion: from a CreatureDef (see FishBase.CREATURE)
 export function buildCenterline(spline, motion, { headAngle, steeringBend, swimPhase = 0, length, swimAmp = 1 }) {
-  const { headFrac, tailFrac, pivotT, bendWaist, bendBody } = spline;
+  const { headFrac, tailFrac, pivotT } = spline;
+  // Bend control-point gains come from the single Flex spread knob (E14-10); a
+  // hand-authored blob may still carry the legacy pair, so honour it if present.
+  const flex = flexAmounts(spline.flexSpread);
+  const bendWaist = Number.isFinite(spline.bendWaist) ? spline.bendWaist : flex.waist;
+  const bendBody  = Number.isFinite(spline.bendBody)  ? spline.bendBody  : flex.body;
+  // WAG ORIGIN — deliberately independent of pivotT (the bend hinge) since E14-10.
+  // Defaults equal, so the classic single-pivot look is unchanged. NOTE: the wag
+  // envelope zeroes at wagPivotT, so C¹ continuity at the geometric hinge only
+  // holds while the two coincide; separating them is an intentional authoring knob.
+  const wagPivotT = Number.isFinite(motion.wagPivotT) ? motion.wagPivotT : pivotT;
 
   const cosH = Math.cos(headAngle), sinH = Math.sin(headAngle);
   const cosP = -sinH, sinP = cosH;   // right-perpendicular
@@ -160,8 +170,8 @@ export function buildCenterline(spline, motion, { headAngle, steeringBend, swimP
     }
     const dl = Math.sqrt(dx*dx + dy*dy) || 1;
     const nx = -dy/dl, ny = dx/dl;
-    if (wagBase !== 0 && t < pivotT && pivotT > 1e-6) {
-      const d   = (pivotT - t) / pivotT;            // 0 at pivot → 1 at tail tip
+    if (wagBase !== 0 && t < wagPivotT && wagPivotT > 1e-6) {
+      const d   = (wagPivotT - t) / wagPivotT;      // 0 at wag origin → 1 at tail tip
       const env = Math.pow(d, wagCurve);            // 0 at pivot → C¹ continuity there
       const wag = wagBase * env * Math.sin(swimPhase - wagK * d);
       bx += nx * wag; by += ny * wag;
@@ -360,12 +370,54 @@ export function upgradeCreature(raw) {
     c.motion.wagFreqMul = c.motion.wagFreqMul ?? 1;
     c.schemaVersion = 5;
   }
+  // v5 → v6 (E14-10): the turn-look consolidation.
+  //   • maxBend (0..2.5 clamp)      → bendDepth (0..1 fraction of BEND_DEPTH_SCALE)
+  //   • bendWaist + bendBody (pair) → flexSpread (one shape knob; see flexAmounts)
+  //   • wag origin splits off the bend hinge → motion.wagPivotT (defaults equal)
+  //   • turnStyle names HOW a turn is shown at all ('none' = rigid creatures)
+  if ((c.schemaVersion ?? 1) < 6) {
+    const maxBend = Number.isFinite(c.spline.maxBend) ? c.spline.maxBend : 1.2;
+    c.spline.bendDepth = Math.max(0, Math.min(1, maxBend / BEND_DEPTH_SCALE));
+    if (!Number.isFinite(c.spline.flexSpread)) {
+      c.spline.flexSpread = inverseFlexSpread(c.spline.bendWaist, c.spline.bendBody);
+    }
+    delete c.spline.maxBend; delete c.spline.bendWaist; delete c.spline.bendBody;
+    c.motion ??= {};
+    c.motion.wagPivotT = c.motion.wagPivotT ?? c.spline.pivotT ?? 0.173;
+    c.turnStyle = (c.turnStyle === 'none' || c.turnStyle === 'bend') ? c.turnStyle : 'bend';
+    c.schemaVersion = 6;
+  }
   // Normalize (all versions): backfill optional blocks so no consumer — renderer,
   // editors, registry — ever meets a hand-edited/ancient blob missing them.
   if (!Array.isArray(c.appendages)) c.appendages = [];
   if (!c.patterns) c.patterns = { spawnMode: 'mix', active: null, variations: [] };
-  c.motion = { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1, wagFreqMul: 1, ...c.motion };
+  c.motion = { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1, wagFreqMul: 1, wagPivotT: c.spline.pivotT ?? 0.173, ...c.motion };
+  if (c.turnStyle !== 'none' && c.turnStyle !== 'bend') c.turnStyle = 'bend';
+  if (!Number.isFinite(c.spline.bendDepth))  c.spline.bendDepth = 0.48;
+  if (!Number.isFinite(c.spline.flexSpread)) c.spline.flexSpread = 0.5;
   return c;
+}
+
+/** bendDepth 0..1 → the legacy front-bend clamp magnitude (old maxBend units). */
+export const BEND_DEPTH_SCALE = 2.5;
+
+/** Flex spread (0..1) → the two bend control-point gains. Constant TOTAL, so this
+ *  is a pure SHAPE knob (WHERE the bow sits) and stays orthogonal to bendDepth
+ *  (HOW MUCH bow). 0.5 reproduces koi's historical (0.097, 0.297) exactly. */
+export function flexAmounts(spread) {
+  const s = Math.max(0, Math.min(1, Number.isFinite(spread) ? spread : 0.5));
+  const TOTAL = 0.394;                         // koi's historical bendWaist + bendBody
+  const wFrac = 0.246 + (s - 0.5) * 0.49;      // s=0 → bow all mid-body; s=1 → shared
+  return { waist: TOTAL * wFrac, body: TOTAL * (1 - wFrac) };
+}
+
+/** Inverse of flexAmounts, for migrating a stored (bendWaist, bendBody) pair. */
+export function inverseFlexSpread(waist, body) {
+  const w = Number.isFinite(waist) ? waist : 0.097;
+  const b = Number.isFinite(body) ? body : 0.297;
+  const total = w + b;
+  if (total <= 1e-6) return 0.5;
+  return Math.max(0, Math.min(1, (w / total - 0.246) / 0.49 + 0.5));
 }
 
 // Fallback wag floors when a style omits them (frequency/amplitude ride throttle).
@@ -390,8 +442,7 @@ function _angleLerp(a, b, t) { return a + _angleDiff(b, a) * t; }
 // Omni low-speed maneuvering (E14-4) ─────────────────────────────────────────
 // Fallback block for records predating E14-4 (species-registry backfills the real
 // one; this only guards a hand-built record with no omni field).
-const DEFAULT_OMNI = { lo: 0.05, hi: 0.18, finTurnRate: 6.0,
-  finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 } };
+const DEFAULT_OMNI = { hoverThreshold: 0.32, pivotSec: 0.524, scoot: 0.5 };
 // Omni fin-channel gains (deg): how far body-frame thrust deflects fins while
 // maneuvering. Backpaddle sweeps fins forward; a sidestep spreads them asymmetrically.
 const FIN_REV_DEG = 34, FIN_LAT_DEG = 40;
@@ -406,11 +457,6 @@ const EAT_COOLDOWN_MS = 5000;
 // fresh each frame, so menu edits to the shared record apply to living fish
 // instantly — the same live-read semantics the class statics had.
 export class FishBase {
-  /** When true, the creature's maxBend drives maxTurnRate (the visible bend and the
-   *  real turn radius agree); when false, turn rate stays the size-interpolated cap
-   *  and only the rendered bend is gated/clamped. Compare toggle (Movement menu). */
-  static BEND_DRIVES_TURN = false;
-
   /** When true, draw() fills the fish body solid rather than outline-only.
    *  Toggled globally from the Fish menu section. */
   static FILLED = false;
@@ -508,14 +554,11 @@ export class FishBase {
     return this.species.tuning.forceMax;
   }
 
-  /** Hard turn-rate ceiling (rad/s) for this fish, interpolated by size.
-   *  Small fish turn faster; large fish sweep wider arcs. Live getter. */
+  /** Hard turn-rate ceiling (rad/s) — the ONE physics turn knob (E14-10). Authored
+   *  as Agility: seconds per 180° U-turn, converted here. A ceiling, not a drive:
+   *  fish only turn this fast when steering actually demands it. Live getter. */
   get maxTurnRate() {
-    const t = this.species.tuning;
-    // Coupled mode: the turn-rate cap is whatever exactly saturates the creature's
-    // maxBend (targetBend = turnRate × 0.8), so the body bend == the real turn.
-    if (FishBase.BEND_DRIVES_TURN) return (this.species.body.spline.maxBend ?? 1.2) / 0.8;
-    return t.turnRateMax - this._sizeFrac * (t.turnRateMax - t.turnRateMin);
+    return Math.PI / Math.max(0.05, this.species.tuning.agilitySec);
   }
 
   /** Max speed for this fish (logical px/ms), species tuning × per-fish jitter. Live. */
@@ -690,9 +733,12 @@ export class FishBase {
     const omni = this.species.omni ?? DEFAULT_OMNI;
     const prevHeading = this.heading;
     const preSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    // w = 1 fast (cruise like a boat), 0 slow (maneuver like an RCS). Generalizes
-    // the old gTurn low-speed gate into a full two-actuator blend band.
-    const w = _smoothstep(omni.lo, omni.hi, preSpeed / maxSpeed);
+    // w = 1 swimming (steer like a boat), 0 hovering (maneuver like an RCS).
+    // Derived from the single Hover threshold knob (E14-10): it is the band TOP,
+    // the bottom trails at 0.28× it. threshold 0 ⇒ w pinned to 1 ⇒ this creature
+    // never hovers (how a species opts out of the second regime entirely).
+    const hoverHi = omni.hoverThreshold ?? 0.26;
+    const w = hoverHi <= 0 ? 1 : _smoothstep(hoverHi * 0.28, hoverHi, preSpeed / maxSpeed);
 
     // Desired facing: explicit intent (styles / scenarios) wins; else the steering
     // direction; else keep travelling forward.
@@ -723,14 +769,19 @@ export class FishBase {
     // ── Maneuver branch: RCS — heading rotates toward faceDir at finTurnRate; the
     //    desired force is decomposed into the BODY frame and clamped per axis, so
     //    sideways/backward translation is possible but weaker than forward. ──────
-    const maxYaw   = omni.finTurnRate / 1000 * deltaMs;
+    // Pivot speed is authored in the same felt unit as Agility (seconds per 180°).
+    const maxYaw   = (Math.PI / Math.max(0.05, omni.pivotSec ?? 0.524)) / 1000 * deltaMs;
     const mHeading = this.heading + Math.max(-maxYaw, Math.min(maxYaw, _angleDiff(faceDir, this.heading)));
     const ch = Math.cos(this.heading), sh = Math.sin(this.heading);
     const F  = this.maxForce;
+    // Scoot (0..1) is the single back-up/sidestep authority knob; forward is always
+    // full. 0.5 reproduces the pre-E14-10 reverse 0.35 / lateral 0.55 pair.
+    const scoot  = omni.scoot ?? 0.5;
+    const revCap = 0.7 * scoot * F, latCap = 1.1 * scoot * F;
     let fFwd = faceOnly ? 0 : ax * ch + ay * sh;      // component along facing
     let fLat = faceOnly ? 0 : -ax * sh + ay * ch;     // component to the right
-    fFwd = Math.max(-omni.finThrust.reverse * F, Math.min(omni.finThrust.forward * F, fFwd));
-    fLat = Math.max(-omni.finThrust.lateral * F, Math.min(omni.finThrust.lateral * F, fLat));
+    fFwd = Math.max(-revCap, Math.min(F, fFwd));
+    fLat = Math.max(-latCap, Math.min(latCap, fLat));
     const mfx = fFwd * ch - fLat * sh;                // recompose body frame → world
     const mfy = fFwd * sh + fLat * ch;
     let mvx = (this.vx + mfx * deltaMs) * drag;
@@ -758,11 +809,20 @@ export class FishBase {
     //       (low-speed) fish keeps its body STRAIGHT while it yaws in place. The w
     //       factor + gTurn both vanish in the maneuver regime, so only cruise turns
     //       curve the body; the fins (not the spine) do the low-speed work. ───────
+    //       SELF-NORMALIZING (E14-10): the shown bend is the creature's authored
+    //       depth scaled by how hard it is turning AS A FRACTION OF ITS OWN MAX —
+    //       so any Agility setting saturates its full curve at its hardest turn.
+    //       (Replaced the `× 0.8` glue constant, which left slow-turning creatures
+    //       permanently unable to reach their own authored bend.)
     const curSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-    const maxBend  = body.spline.maxBend ?? 1.2;
     const turnRate = _angleDiff(this.heading, prevHeading) / deltaMs * 1000;   // rad/s
     const gTurn    = _smoothstep(0, 0.15, curSpeed / maxSpeed);
-    const targetBend = Math.max(-maxBend, Math.min(maxBend, turnRate * 0.8)) * gTurn * w;
+    let targetBend = 0;
+    if (body.turnStyle !== 'none') {
+      const maxBend = (body.spline.bendDepth ?? 0.48) * BEND_DEPTH_SCALE;
+      const frac    = Math.min(1, Math.abs(turnRate) / this.maxTurnRate);
+      targetBend = maxBend * frac * Math.sign(turnRate) * gTurn * w;
+    }
     this.steeringBend += (targetBend - this.steeringBend) * 0.005 * deltaMs;
 
     // ── 5. Wag drive — cadence + amplitude scale with the propulsion throttle, but

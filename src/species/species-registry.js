@@ -18,6 +18,7 @@
 // (P3+); records without them stay valid.
 
 import { upgradeCreature } from '../entities/fish-base.js';
+import { migrateTuning } from '../movement/tuning.js';
 
 // ─── Builtin koi ──────────────────────────────────────────────────────────────
 // Assembled from the retired `Koi` class statics + `FishBase` defaults +
@@ -26,14 +27,18 @@ import { upgradeCreature } from '../entities/fish-base.js';
 // Authored in the in-app Shape editor (Copy values → baked here). Body + a centered
 // caudal fan, a mirrored pectoral pair, and a mirrored head pair.
 const KOI_BODY = {
-  schemaVersion: 5,
+  schemaVersion: 6,
+  // How this creature SHOWS a turn (E14-10). 'bend' = the body curves into it
+  // (fish, dragons); 'none' = rigid body, turns are pure rotation (snails, ball
+  // fairies). Purely cosmetic — the turn itself is Agility (tuning.agilitySec).
+  turnStyle: 'bend',
   spline: {
     headFrac:  0.7,
     tailFrac:  0.624,
-    pivotT:    0.173,   // normalized tail-tip(0)→nose(1); ≈ old 0.229 length-units
-    maxBend:   1.2,     // max front steering-bend magnitude (was the global ±1.2 clamp)
-    bendWaist: 0.097,
-    bendBody:  0.297,
+    pivotT:    0.173,   // BEND HINGE ("Flex point"): normalized tail-tip(0)→nose(1)
+    bendDepth: 0.48,    // 0..1 how deep the turn curve gets (× BEND_DEPTH_SCALE internally)
+    flexSpread: 0.5,    // 0..1 WHERE the bow sits: 0 = mid-body only, 1 = reaches the waist
+    // (bendDepth/flexSpread replaced maxBend 1.2 + bendWaist 0.097 + bendBody 0.297)
     points: [   // [t, halfWidth] breakpoints (monotone-cubic interpolated)
       [0.00, 0.44],
       [0.16, 1.83],
@@ -43,7 +48,9 @@ const KOI_BODY = {
       [1.00, 0.10],
     ],
   },
-  motion: { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1, wagFreqMul: 1 },
+  // wagPivotT (E14-10) is the WAG origin, deliberately SEPARATE from spline.pivotT
+  // (the bend hinge) — they default equal, so nothing changes until one is moved.
+  motion: { wagAmp: 0.16, wagRate: 1, wagCurve: 1.4, wagPeaks: 1, wagFreqMul: 1, wagPivotT: 0.173 },
   appendages: [
     { kind: 'fin', anchor: 0.08, side: 0, mirror: false, angle: 0, length: 4,
       swayOnTurn: 0.05, flapOnAccel: { amp: 39 },
@@ -61,8 +68,11 @@ const KOI_BODY = {
 const KOI_TUNING = {
   // ── Speed / turning ──
   speedMax:    0.051,     // logical px/ms — top swimming speed cap
-  turnRateMax: 2.4,       // rad/s — fastest turn (smallest fish)
-  turnRateMin: 0.8,       // rad/s — slowest turn (largest fish)
+  // Agility (E14-10): seconds to complete a 180° U-turn — THE felt unit, and the
+  // perceptually honest lerp space for future age snapshots. Internally rad/s via
+  // π/agilitySec. 1.309 s == the old turnRateMax 2.4 rad/s, so feel is unchanged.
+  // (Replaced turnRateMax + the hidden size-interpolated turnRateMin.)
+  agilitySec:  1.309,
   forceMax:    0.00003,   // logical px/ms² — max steering force (fixed; low → smooth arcs)
 
   // ── Perception / spacing ──
@@ -110,15 +120,25 @@ const KOI_STYLES = [
 // koi's default list — it's a showcase style a pond can add without destabilizing
 // the calm default. Add { styleId:'inspect', trigger:'slowEntityNearby' } to enable.
 
-// Omni low-speed maneuvering regime (E14-4, architecture §3.1/§4.2). Below the
-// speed band [lo, hi] (fraction of speedMax) the fish decouples heading from
-// velocity and thrusts in its body frame like an RCS — rotate in place, sidestep,
-// back up — instead of steering like a boat. finTurnRate is the in-place yaw rate;
-// finThrust caps body-frame authority (reverse/lateral weaker than forward).
+// HOVERING — the low-speed maneuvering regime (E14-4, architecture §3.1/§4.2),
+// surfaced as a first-class tunable set in E14-10 (Decision 3A). Below the speed
+// threshold the creature decouples heading from velocity and thrusts in its body
+// frame like an RCS — rotate in place, sidestep, back up — instead of steering
+// like a boat.
+//   hoverThreshold — speed fraction below which hovering takes over (band bottom
+//                    is derived at 0.28× it). 0 = this creature NEVER hovers.
+//                    0.32 (was hi 0.18) — chosen from a measured sweep of the
+//                    real speed distribution: the old 0.18 left mean hover blend
+//                    at 0.02 (invisible, E14-10 Finding #3); 0.32 gives 0.18 with
+//                    ~26% of frames meaningfully hovering, while 3/4 of the time
+//                    is still ordinary swimming. See the plan doc §7 table.
+//   pivotSec       — seconds for an in-place 180° turn (was finTurnRate 6 rad/s).
+//   scoot          — 0..1 back-up/sidestep authority (was finThrust reverse 0.35 /
+//                    lateral 0.55; forward stays 1.0). What nibble feeding rides on.
 const KOI_OMNI = {
-  lo: 0.05, hi: 0.18,
-  finTurnRate: 6.0,
-  finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 },
+  hoverThreshold: 0.32,
+  pivotSec: 0.524,
+  scoot: 0.5,
 };
 
 const BUILTIN_SPECIES = [
@@ -208,7 +228,10 @@ export function upgradeSpecies(raw) {
     name: typeof c.name === 'string' ? c.name : base.name,
     builtin: isBuiltinSpecies(c.id),
     body: body ?? base.body,
-    tuning: { ...base.tuning, ...(typeof c.tuning === 'object' && c.tuning !== null ? _numericOnly(c.tuning) : {}) },
+    // Tuning: migrate the stored blob (turnRateMax rad/s → agilitySec) BEFORE
+    // merging, so a pre-E14-10 record keeps its authored turn feel.
+    tuning: { ...base.tuning, ...(typeof c.tuning === 'object' && c.tuning !== null
+      ? _numericOnly(migrateTuning({ ...c.tuning })) : {}) },
     // Omni maneuvering block (E14-4): deep-merge numeric fields over the builtin
     // defaults so blobs predating omni (or with partial blocks) load intact.
     omni: _mergeOmni(base.omni, c.omni),
@@ -239,22 +262,29 @@ function _numericOnly(obj) {
   return out;
 }
 
-/** Deep-merge a persisted omni block over the builtin defaults (numeric-only). */
+/** Merge a persisted hovering block over the builtin defaults, converting the
+ *  pre-E14-10 shape (lo/hi + finTurnRate + finThrust) on the way through. */
 function _mergeOmni(base, raw) {
-  const b = base ?? { lo: 0.05, hi: 0.18, finTurnRate: 6.0, finThrust: { forward: 1.0, reverse: 0.35, lateral: 0.55 } };
-  const o = _clone(b);
+  const o = _clone(base ?? { hoverThreshold: 0.26, pivotSec: 0.524, scoot: 0.5 });
   if (raw && typeof raw === 'object') {
-    if (Number.isFinite(raw.lo)) o.lo = raw.lo;
-    if (Number.isFinite(raw.hi)) o.hi = raw.hi;
-    if (Number.isFinite(raw.finTurnRate)) o.finTurnRate = raw.finTurnRate;
-    if (raw.finThrust && typeof raw.finThrust === 'object') {
-      for (const k of ['forward', 'reverse', 'lateral']) {
-        if (Number.isFinite(raw.finThrust[k])) o.finThrust[k] = raw.finThrust[k];
-      }
+    // Current shape.
+    if (Number.isFinite(raw.hoverThreshold)) o.hoverThreshold = clamp01(raw.hoverThreshold);
+    if (Number.isFinite(raw.pivotSec))       o.pivotSec = Math.max(0.05, raw.pivotSec);
+    if (Number.isFinite(raw.scoot))          o.scoot = clamp01(raw.scoot);
+    // Legacy shape (E14-4 → E14-10). Keep the user's own tuning rather than
+    // forcing the new default, so an existing pond's feel is preserved.
+    if (!Number.isFinite(raw.hoverThreshold) && Number.isFinite(raw.hi)) o.hoverThreshold = clamp01(raw.hi);
+    if (!Number.isFinite(raw.pivotSec) && Number.isFinite(raw.finTurnRate) && raw.finTurnRate > 0) {
+      o.pivotSec = Math.PI / raw.finTurnRate;
+    }
+    if (!Number.isFinite(raw.scoot) && Number.isFinite(raw.finThrust?.lateral)) {
+      o.scoot = clamp01(raw.finThrust.lateral / 1.1);
     }
   }
   return o;
 }
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 /** Replace the live record's contents for `upgraded.id` in place (same object
  *  identity, so fish/menu references stay valid), or REGISTER it if the id is

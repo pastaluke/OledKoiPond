@@ -29,7 +29,7 @@ import {
 import { WATER_DEFAULTS } from '../fluid/ripple-field.js';
 import { RAIN_DEFAULTS } from '../fluid/rain.js';
 import { CAUSTICS_DEFAULTS, CAUSTIC_PATTERNS } from '../fluid/caustics.js';
-import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature } from '../entities/fish-base.js';
+import { buildBodyOutline, buildCenterline, buildAppendageOutlines, finSpineFrame, upgradeCreature, BEND_DEPTH_SCALE } from '../entities/fish-base.js';
 
 const FISH_MIN = 0, FISH_MAX = 150;   // cap raised 40 → 150 by the E14-2 perf work
 const KOI_ID = 'koi';   // the selected species (single-species v1 — E13-5 adds a browser)
@@ -72,26 +72,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       <button class="menu-row menu-action" id="btn-fullscreen">Fullscreen</button>
     </div>
     <details>
-      <summary>Movement</summary>
-      <div class="menu-rows">
-        <div class="menu-scroll" id="movement-sliders"></div>
-        <div class="menu-row" style="display:block">
-          <span style="font-size:11px;opacity:0.7">Move-style preview</span>
-          <canvas id="style-preview" class="shape-preview"></canvas>
-          <div id="style-preview-label" style="font:11px monospace;opacity:0.75;text-align:center;margin-top:-2px"></div>
-        </div>
-        <label class="menu-row">
-          <span>Bend drives turn</span>
-          <input type="checkbox" id="toggle-bend-turn">
-        </label>
-        <div class="menu-btn-row">
-          <button class="menu-action" id="btn-copy-tuning">Copy values</button>
-          <button class="menu-action" id="btn-reset-tuning">Reset</button>
-        </div>
-      </div>
-    </details>
-    <details>
-      <summary>Fish</summary>
+      <summary>Pets</summary>
       <div class="menu-rows">
         <label class="menu-row">
           <span>Creature</span>
@@ -135,10 +116,9 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
         </div>
         <button class="menu-action" id="pal-new-btn">+ New palette</button>
         <div id="fish-sliders"></div>
-      </div>
-    </details>
-    <details>
-      <summary>Shape</summary>
+
+    <details class="menu-sub">
+      <summary>Body</summary>
       <div class="menu-rows">
         <!-- Editor pane: accurate resting silhouette with draggable points -->
         <canvas id="shape-preview" class="shape-preview shape-edit"></canvas>
@@ -182,6 +162,56 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
           <button class="menu-action" id="btn-paste-shape">Paste values</button>
           <button class="menu-action" id="btn-reset-shape">Reset</button>
         </div>
+      </div>
+    </details>
+
+    <details class="menu-sub">
+      <summary>Motion</summary>
+      <div class="menu-rows">
+        <details class="menu-sub">
+          <summary>Speed &amp; gait</summary>
+          <div class="menu-rows">
+            <div class="menu-scroll" id="gait-sliders"></div>
+            <div class="menu-row" style="display:block">
+              <span style="font-size:11px;opacity:0.7">Move-style preview</span>
+              <canvas id="style-preview" class="shape-preview"></canvas>
+              <div id="style-preview-label" style="font:11px monospace;opacity:0.75;text-align:center;margin-top:-2px"></div>
+            </div>
+          </div>
+        </details>
+        <details class="menu-sub">
+          <summary>Turning</summary>
+          <div class="menu-rows">
+            <div class="menu-hint">While swimming — turns are arcs.</div>
+            <div id="turning-sliders"></div>
+            <label class="menu-row">
+              <span>Turn style</span>
+              <select id="turn-style-select" class="menu-select"></select>
+            </label>
+            <div id="turn-look-sliders"></div>
+          </div>
+        </details>
+        <details class="menu-sub">
+          <summary>Hovering</summary>
+          <div class="menu-rows">
+            <div class="menu-hint">Stopped or slow — pivots in place, sidesteps, backs up.</div>
+            <div id="hover-sliders"></div>
+          </div>
+        </details>
+        <div class="menu-btn-row">
+          <button class="menu-action" id="btn-copy-tuning" title="Copy this creature's movement tuning as JSON (Motion + Social)">Copy values</button>
+          <button class="menu-action" id="btn-reset-tuning" title="Reset this creature's movement tuning to its defaults (Motion + Social)">Reset</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="menu-sub">
+      <summary>Social</summary>
+      <div class="menu-rows">
+        <div class="menu-hint">How this creature reacts to its neighbours and the pond walls.</div>
+        <div class="menu-scroll" id="social-sliders"></div>
+      </div>
+    </details>
       </div>
     </details>
     <details>
@@ -468,7 +498,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     species: JSON.parse(JSON.stringify(getAllSpecies())),
     roster: rosterSnapshot(),
     ranges,
-    fish:    { filled: FishBase.FILLED, bendDrivesTurn: FishBase.BEND_DRIVES_TURN, paletteId: getActivePaletteId(), foodEnabled: sim.foodEnabled },
+    fish:    { filled: FishBase.FILLED, paletteId: getActivePaletteId(), foodEnabled: sim.foodEnabled },
     display: { density: grid.density, worldShortEdge: grid.worldShortEdge },
     border:  { ...grid.border, hardBorder: FishBase.HARD_BORDER, glassEdge: compositor.glassEdge,
                borderChromatic: compositor.borderChromatic, borderRefr: compositor.borderRefr,
@@ -568,7 +598,15 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     }
     if (persisted.fish) {
       if (typeof persisted.fish.filled   === 'boolean') FishBase.FILLED = persisted.fish.filled;
-      if (typeof persisted.fish.bendDrivesTurn === 'boolean') FishBase.BEND_DRIVES_TURN = persisted.fish.bendDrivesTurn;
+      // E14-10 migration: the retired global "Bend drives turn" toggle made a
+      // creature's bend set its real turn rate. Fold that into per-species Agility
+      // so anyone who had it on keeps the turn radius they were actually feeling.
+      if (persisted.fish.bendDrivesTurn === true) {
+        for (const sp of getAllSpecies()) {
+          const maxBend = (sp.body?.spline?.bendDepth ?? 0.48) * BEND_DEPTH_SCALE;
+          if (maxBend > 0) sp.tuning.agilitySec = 0.8 * Math.PI / maxBend;
+        }
+      }
       if (typeof persisted.fish.paletteId === 'string') setActivePalette(persisted.fish.paletteId);
       if (typeof persisted.fish.foodEnabled === 'boolean') sim.foodEnabled = persisted.fish.foodEnabled;
     }
@@ -683,12 +721,17 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     return { row, sync };
   }
 
-  // ── Build movement sliders ────────────────────────────────────────────────────
-  const sliderHost = panel.querySelector('#movement-sliders');
+  // ── Build movement sliders, split by group into their Motion/Social homes ─────
+  const groupHosts = {
+    gait:    panel.querySelector('#gait-sliders'),
+    turning: panel.querySelector('#turning-sliders'),
+    social:  panel.querySelector('#social-sliders'),
+  };
   const rowSyncs = {};
 
   for (const p of MOVEMENT_PARAMS) {
     const rng = ranges[p.key];
+    const sliderHost = groupHosts[p.group] ?? groupHosts.social;
     const { row, sync } = makeRow({
       label: p.label,
       infoText: `${p.label}: ${p.desc}`,
@@ -713,9 +756,83 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     sliderHost.appendChild(row);
   }
 
-  const bendTurnToggle = panel.querySelector('#toggle-bend-turn');
-  bendTurnToggle.checked = FishBase.BEND_DRIVES_TURN;
-  bendTurnToggle.addEventListener('change', (e) => { FishBase.BEND_DRIVES_TURN = e.target.checked; save(); });
+  // ── Turn look + Hovering (E14-10) ────────────────────────────────────────────
+  // These live on the creature record (body / omni), not the tuning block, so they
+  // get direct get/set closures rather than riding MOVEMENT_PARAMS.
+  const turnLookHost = panel.querySelector('#turn-look-sliders');
+  const hoverHost    = panel.querySelector('#hover-sliders');
+  const extraSyncs   = [];
+
+  const mkLive = (host, cfg) => {
+    const { row, sync } = makeRow({ hasBounds: false, ...cfg });
+    host.appendChild(row);
+    extraSyncs.push(sync);
+    return row;
+  };
+
+  // Turn style — HOW a creature shows a turn. 'none' (snails, ball fairies) hides
+  // every bend row, so a rigid creature is never left staring at dead sliders.
+  const turnStyleSel = panel.querySelector('#turn-style-select');
+  for (const [id, label] of [['bend', 'Bend (body curves)'], ['none', 'None (rigid)']]) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = label;
+    turnStyleSel.appendChild(opt);
+  }
+  turnStyleSel.title = 'How this creature SHOWS a turn. Purely cosmetic — Agility is what actually turns it.';
+  const applyTurnStyleVisibility = () => {
+    turnLookHost.style.display = (species.body.turnStyle === 'none') ? 'none' : '';
+  };
+  turnStyleSel.addEventListener('change', (e) => {
+    species.body.turnStyle = e.target.value;
+    applyTurnStyleVisibility();
+    save();
+  });
+
+  mkLive(turnLookHost, {
+    label: 'Bend depth', decimals: 2, valueStep: 0.02,
+    infoText: 'How deeply the body curves at this creature’s HARDEST turn. 0 = stays rigid like a plank; 1 = folds into a deep C. Purely a look — it never changes how fast the creature actually turns.',
+    getVal: () => species.body.spline.bendDepth, getMin: () => 0, getMax: () => 1,
+    setVal: (v) => { species.body.spline.bendDepth = clamp(v, 0, 1); save(); },
+  });
+  mkLive(turnLookHost, {
+    label: 'Flex point', decimals: 3, valueStep: 0.01,
+    infoText: 'WHERE the body hinges when it turns, from tail tip (0) to snout (1). Low = only the front pivots over a long stiff tail; high = the hinge sits forward for whole-body, snake-like turns. (The tail wag has its own separate origin — Wag point, under Body.)',
+    getVal: () => species.body.spline.pivotT, getMin: () => 0.10, getMax: () => 0.999,
+    setVal: (v) => { species.body.spline.pivotT = clamp(v, 0.10, 0.999); save(); },
+  });
+  mkLive(turnLookHost, {
+    label: 'Flex spread', decimals: 2, valueStep: 0.02,
+    infoText: 'WHERE the curve sits along the body. 0 = the bow is all mid-body and the waist stays straight (the C starts further back); 1 = waist and body share it evenly for a rounder, whole-body C. Total curvature stays constant — this is shape, not amount (that’s Bend depth).',
+    getVal: () => species.body.spline.flexSpread, getMin: () => 0, getMax: () => 1,
+    setVal: (v) => { species.body.spline.flexSpread = clamp(v, 0, 1); save(); },
+  });
+
+  mkLive(hoverHost, {
+    label: 'Hover threshold', decimals: 2, valueStep: 0.02,
+    infoText: 'Below this fraction of top speed the creature stops steering like a boat and starts hovering — rotating in place and thrusting sideways. 0 = it NEVER hovers (always swims in arcs). Higher = it drops into hovering more often, even while coasting.',
+    getVal: () => species.omni.hoverThreshold, getMin: () => 0, getMax: () => 0.6,
+    setVal: (v) => { species.omni.hoverThreshold = clamp(v, 0, 0.6); save(); },
+  });
+  mkLive(hoverHost, {
+    label: 'Pivot speed', decimals: 2, valueStep: 0.05,
+    infoText: 'Seconds to spin 180° on the spot while hovering (same unit as Agility). Lower = snaps around to face things almost instantly; higher = turns slowly even at a standstill.',
+    getVal: () => species.omni.pivotSec, getMin: () => 0.1, getMax: () => 4,
+    setVal: (v) => { species.omni.pivotSec = clamp(v, 0.1, 4); save(); },
+  });
+  mkLive(hoverHost, {
+    label: 'Scoot', decimals: 2, valueStep: 0.05,
+    infoText: 'How freely it can back up and sidestep while hovering. 0 = it must swim forward in an arc to reposition (fish-like); 1 = it slides sideways and reverses at will (crab / hummingbird).',
+    getVal: () => species.omni.scoot, getMin: () => 0, getMax: () => 1,
+    setVal: (v) => { species.omni.scoot = clamp(v, 0, 1); save(); },
+  });
+
+  /** Re-read every non-tuning creature row (called on species switch / reset). */
+  const syncCreatureRows = () => {
+    turnStyleSel.value = species.body.turnStyle ?? 'bend';
+    applyTurnStyleVisibility();
+    extraSyncs.forEach((s) => s());
+  };
+  syncCreatureRows();
 
   // ── Fish section ─────────────────────────────────────────────────────────────
   const fishHost    = panel.querySelector('#fish-sliders');
@@ -1063,7 +1180,8 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     const opts = {
       headAngle: 0,
       // Weave amplitude tracks the creature's Turn bend so the editor reflects it.
-      steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND * (cre.spline.maxBend ?? 1.2),
+      steeringBend: Math.sin(livePhase * 0.55) * WEAVE_BEND
+                    * ((cre.turnStyle === 'none') ? 0 : (cre.spline.bendDepth ?? 0.48) * BEND_DEPTH_SCALE),
       swimOsc: Math.sin(livePhase),
       swimPhase: livePhase,
       length: PREVIEW_LEN, swimAmp: 1,
@@ -1131,8 +1249,8 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     if (on && !styleRAF) { stylePrevTs = 0; styleRAF = requestAnimationFrame(drawStylePreview); }
     else if (!on && styleRAF) { cancelAnimationFrame(styleRAF); styleRAF = 0; }
   }
-  // Run the preview only while the Movement section is open.
-  panel.querySelector('#movement-sliders').closest('details')
+  // Run the preview only while its own Speed & gait section is open.
+  panel.querySelector('#gait-sliders').closest('details')
     .addEventListener('toggle', (e) => setStylePreview(e.target.open));
 
   function buildShapeSliders(idx) {
@@ -1512,8 +1630,6 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       info: 'How far the snout reaches ahead of center, as a fraction of length. Larger = longer front half.' },
     { obj: 'spline', key: 'tailFrac',  label: 'Tail offset', min: 0.10, max: 0.90,
       info: 'How far the tail tip reaches behind center. Larger = longer back half. (Head + Tail ≈ total nose-to-tail length.)' },
-    { obj: 'spline', key: 'pivotT',    label: 'Pivot',       min: 0.10, max: 0.999,
-      info: 'The waist/flex point: splits the steering front (head side) from the flexing back (tail side). Larger = pivot further forward (more whole-body undulation).' },
   ].forEach((sp) => mkSpine(shapePropHost, sp));
   // Motion — only visible in the live pane (wiggle while swimming; bends while turning).
   [
@@ -1521,12 +1637,10 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
       info: 'How far the back half flexes side-to-side while swimming (the propulsion wag). Only shows in the live pane. 0 = stiff tail.' },
     { obj: 'motion', key: 'wagFreqMul', label: 'Wag speed',  min: 0.25, max: 4.00,
       info: 'Tail-beat frequency multiplier — how fast the tail wags, independent of how hard the fish is propelling. 1 = default cadence; higher = faster beats at the same effort. (Amplitude is Tail wag.)' },
-    { obj: 'spline', key: 'bendWaist', label: 'Waist bend',  min: 0.00, max: 0.50,
-      info: 'How much the waist bows sideways when the fish turns. Shown by the live pane’s weave. 0 = stays straight.' },
-    { obj: 'spline', key: 'bendBody',  label: 'Body bend',   min: 0.00, max: 0.50,
-      info: 'How much the mid-body bows when turning — with Waist bend it shapes the turning C-curve. Shown in the live pane.' },
-    { obj: 'spline', key: 'maxBend',   label: 'Turn bend',   min: 0.10, max: 2.50,
-      info: 'How hard the front can curve to steer (the turn-arc shape attribute). Higher = sharper turns. With "Bend drives turn" on (Movement tab), this also sets the real turn radius.' },
+    { obj: 'motion', key: 'wagPivotT', label: 'Wag point',   min: 0.05, max: 0.999,
+      info: 'Where the tail wag starts, from tail tip (0) to snout (1) — the wag grows from nothing here to full at the tail tip. Separate from the turning Flex point (Motion ▸ Turning), so a creature can wag from a different place than it bends. They start equal; move this to give the wag a longer or shorter tail.' },
+    // Bend depth / Flex point / Flex spread moved to Motion ▸ Turning (E14-10) —
+    // they describe how a turn LOOKS, so they live beside the turn itself.
   ].forEach((sp) => mkSpine(shapeMotionHost, sp));
 
   // Copy values — emit the live CreatureDef as JSON (paste into a class override).
@@ -1563,6 +1677,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     editSel = 'body';
     buildTargetSel();
     selectTarget('body');
+    syncCreatureRows();   // turn look rows read off species.body — re-read after swap
     save();
     flash('Pasted!');
   });
@@ -1574,6 +1689,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     editSel = 'body';
     buildTargetSel();
     selectTarget('body');
+    syncCreatureRows();   // turn look rows read off species.body — re-read after swap
     save();
   });
 
@@ -2589,6 +2705,7 @@ export function initMenu({ overlay, sim, grid, compositor, glassShapes, keyNav, 
     liveCreature = species.body;
     defaultCreature = (getSpeciesDefaults(species.id) ?? getSpeciesDefaults(KOI_ID)).body;
     for (const p of MOVEMENT_PARAMS) rowSyncs[p.key]?.();   // movement sliders re-read
+    syncCreatureRows();                                     // turn look + hovering re-read
     editSel = 'body';                                       // shape editor retargets
     buildTargetSel();
     selectTarget('body');

@@ -127,6 +127,25 @@
     }
     #menu-panel details[open] > summary::before { content: '▼ '; }
 
+    /* nested sections (Pets ▸ Body / Motion ▸ Turning …): indent + a hairline rail
+       so depth reads at a glance without stealing width on a phone */
+    #menu-panel details.menu-sub {
+      margin: 2px 0 2px 4px;
+      padding-left: 6px;
+      border-left: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    #menu-panel details.menu-sub > summary {
+      color: rgba(255, 255, 255, 0.5);
+      letter-spacing: 0.06em;
+    }
+    /* one-line explainer under a subsection header */
+    .menu-hint {
+      font-size: 9.5px;
+      line-height: 1.35;
+      opacity: 0.45;
+      padding: 0 0 4px;
+    }
+
     /* rows inside a section */
     .menu-rows {
       padding: 2px 0 2px 2px;
